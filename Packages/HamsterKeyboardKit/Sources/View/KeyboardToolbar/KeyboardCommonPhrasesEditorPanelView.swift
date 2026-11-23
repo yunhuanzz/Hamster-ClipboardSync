@@ -104,6 +104,8 @@ class KeyboardCommonPhrasesEditorPanelView: NibLessView {
     tableView.delegate = self
     tableView.rowHeight = UITableView.automaticDimension
     tableView.estimatedRowHeight = 44
+    // 透明: 默认是不透明的系统背景, 深色模式会盖出一块黑斑; 透出面板后的键盘底色。
+    tableView.backgroundColor = .clear
     tableView.register(UITableViewCell.self, forCellReuseIdentifier: "CommonPhraseCell")
     return tableView
   }()
@@ -190,7 +192,10 @@ class KeyboardCommonPhrasesEditorPanelView: NibLessView {
   }
 
   override func setupAppearance() {
-    backgroundColor = .systemBackground
+    // 透明: 面板是盖在键盘根视图上的全屏覆盖层, 透出根视图的背景,
+    // 即与键盘本体同一块底色 (浅色/深色模式都一致)。
+    // 之前用 .systemBackground, 深色模式是纯黑, 与深灰键盘底色割裂成黑斑。
+    backgroundColor = .clear
   }
 
   /// 刷新列表内容 (从共享 UserDefaults 读)。

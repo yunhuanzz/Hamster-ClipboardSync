@@ -346,6 +346,39 @@ public extension UserDefaults {
     set { set(newValue, forKey: Self.clipboardSyncLastStatusTextKey) }
   }
 
+  // MARK: - 粘贴提示已忽略内容 (点 X / 粘贴 / 隐藏键盘)
+
+  /// 点 X / 粘贴 / 隐藏键盘时忽略过的粘贴提示内容 SHA-256 (完整剪贴板文本的哈希)。
+  /// 之前只存在内存里, 键盘重建 (隐藏再打开) 就丢了, 同一条内容永远重推。
+  /// 改为持久化在共享 UserDefaults 里, 最多保留 20 条。
+  var clipboardChipDismissedHashes: [String] {
+    get { array(forKey: Self.clipboardChipDismissedHashesKey) as? [String] ?? [] }
+    set { set(Array(newValue.prefix(Self.clipboardChipDismissedMaxCount)), forKey: Self.clipboardChipDismissedHashesKey) }
+  }
+
+  /// 记录忽略时的 UIPasteboard.changeCount。忽略只在剪贴板未变化时生效:
+  /// 剪贴板一换内容 (changeCount 移动) 忽略记录即失效, 新内容仍会正常提示;
+  /// 重新复制同一内容 (changeCount 也移动) 同样会再次提示。
+  var clipboardChipDismissedChangeCount: Int {
+    get { integer(forKey: Self.clipboardChipDismissedChangeCountKey) }
+    set { set(newValue, forKey: Self.clipboardChipDismissedChangeCountKey) }
+  }
+
+  /// 忽略一条粘贴提示内容 (hash 为完整剪贴板文本的 SHA-256)。
+  func markClipboardChipDismissed(hash: String, changeCount: Int) {
+    guard !hash.isEmpty else { return }
+    var hashes = clipboardChipDismissedHashes.filter { $0 != hash }
+    hashes.append(hash)
+    clipboardChipDismissedHashes = hashes
+    clipboardChipDismissedChangeCount = changeCount
+  }
+
+  /// 该内容当前是否处于忽略状态: 哈希在忽略列表里, 且剪贴板自忽略后没换过内容。
+  func isClipboardChipDismissed(hash: String, changeCount: Int) -> Bool {
+    guard !hash.isEmpty, changeCount == clipboardChipDismissedChangeCount else { return false }
+    return clipboardChipDismissedHashes.contains(hash)
+  }
+
   // MARK: - 中文主键盘布局 (九宫格 / 26键)
 
   /// 用户通过键盘内菜单切换过的中文主键盘布局: true=九宫格, false=26键。
@@ -551,6 +584,9 @@ extension UserDefaults {
   private static let clipboardSyncPasswordKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncPassword"
   private static let clipboardSyncLastHashKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastHash"
   private static let clipboardSyncLastStatusTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastStatusText"
+  private static let clipboardChipDismissedHashesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedHashes"
+  private static let clipboardChipDismissedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedChangeCount"
+  private static let clipboardChipDismissedMaxCount = 20
   private static let chinesePrimaryKeyboardIsNineGridKey = "com.ihsiao.apps.Hamster.UserDefault.keys.chinesePrimaryKeyboardIsNineGrid"
   private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"
   private static let toolbarToolsOrderKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolsOrder"

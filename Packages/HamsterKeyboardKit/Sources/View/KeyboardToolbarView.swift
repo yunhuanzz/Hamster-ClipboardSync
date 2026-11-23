@@ -93,7 +93,7 @@ class KeyboardToolbarView: NibLessView {
     return button
   }()
 
-  /// 微信式粘贴提示行: 收起键盘图标 + 剪贴板文字 (点按粘贴) + X (关闭)。
+  /// 微信式粘贴提示行: 剪贴板文字在左 (点按粘贴), 右侧 ⌄ 收起键盘 + X 关闭并排。
   /// 展示时工具栏其他按钮暂时隐藏。只在未输入时显示。
   private lazy var pasteRowView: UIView = {
     let view = UIView()
@@ -105,12 +105,12 @@ class KeyboardToolbarView: NibLessView {
     return view
   }()
 
-  /// 粘贴提示行左侧: 收起键盘图标 (点按收起键盘)。
+  /// 粘贴提示行右侧: 向下箭头 (微信式 ⌄, 点按收起键盘)。
   private lazy var pasteRowDismissButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setImage(UIImage(systemName: "keyboard.chevron.compact.down"), for: .normal)
-    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.setImage(UIImage(systemName: "chevron.down"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 16, weight: .semibold), scale: .default), forImageIn: .normal)
     button.tintColor = .secondaryLabel
     button.addTarget(self, action: #selector(pasteRowDismissTapped), for: .touchUpInside)
     return button
@@ -142,8 +142,15 @@ class KeyboardToolbarView: NibLessView {
 
   /// 粘贴提示行当前展示的剪贴板文本 (nil 表示未展示)
   private var clipboardChipText: String?
-  /// 已粘贴/忽略过的剪贴板文本的 SHA-256: 相同内容不再重复提示, 直到剪贴板换成新内容
-  private var clipboardChipDismissedHash: String?
+  /// 当前剪贴板 changeCount (整数, 读它不弹"粘贴自xxx"横幅)。
+  /// 忽略记录以它为准: 剪贴板一换内容它就移动, 忽略即失效。
+  private var currentPasteboardChangeCount: Int {
+    #if canImport(UIKit)
+      return UIPasteboard.general.changeCount
+    #else
+      return -1
+    #endif
+  }
   /// 上次读取剪贴板内容时的 changeCount。只在 changeCount 变化时才重读剪贴板
   /// (读剪贴板会弹"粘贴自xxx"横幅), 其余时候只用缓存展示, 绝不重复读。
   /// -1 表示从未读过。
@@ -236,6 +243,14 @@ class KeyboardToolbarView: NibLessView {
       startSyncTimer()
     } else {
       stopSyncTimer()
+      // 隐藏键盘等同于忽略当前正在展示的粘贴提示: 持久化记录,
+      // 下次打开不再重推同一内容, 除非剪贴板换了新内容。
+      if let text = clipboardChipText, !text.isEmpty {
+        UserDefaults.hamster.markClipboardChipDismissed(
+          hash: ClipboardSyncService.sha256(text),
+          changeCount: currentPasteboardChangeCount)
+      }
+      hideClipboardChip()
       dismissAllPanels()
     }
   }
@@ -283,6 +298,7 @@ class KeyboardToolbarView: NibLessView {
   }
 
   /// 粘贴提示行: 加入工具栏并定好内部布局 (默认隐藏)。
+  /// 微信式布局: 文字在左占满剩余宽度, ⌄ 收起键盘与 X 关闭并排在右。
   private func setupPasteRow() {
     commonFunctionBar.addSubview(pasteRowView)
     pasteRowView.addSubview(pasteRowDismissButton)
@@ -294,15 +310,15 @@ class KeyboardToolbarView: NibLessView {
       pasteRowView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
       pasteRowView.heightAnchor.constraint(equalToConstant: 30),
 
-      pasteRowDismissButton.leadingAnchor.constraint(equalTo: pasteRowView.leadingAnchor),
+      pasteRowTextButton.leadingAnchor.constraint(equalTo: pasteRowView.leadingAnchor),
+      pasteRowTextButton.trailingAnchor.constraint(equalTo: pasteRowDismissButton.leadingAnchor),
+      pasteRowTextButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
+      pasteRowTextButton.bottomAnchor.constraint(equalTo: pasteRowView.bottomAnchor),
+
+      pasteRowDismissButton.trailingAnchor.constraint(equalTo: pasteRowCloseButton.leadingAnchor),
       pasteRowDismissButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
       pasteRowDismissButton.bottomAnchor.constraint(equalTo: pasteRowView.bottomAnchor),
       pasteRowDismissButton.widthAnchor.constraint(equalToConstant: 30),
-
-      pasteRowTextButton.leadingAnchor.constraint(equalTo: pasteRowDismissButton.trailingAnchor),
-      pasteRowTextButton.trailingAnchor.constraint(equalTo: pasteRowCloseButton.leadingAnchor),
-      pasteRowTextButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
-      pasteRowTextButton.bottomAnchor.constraint(equalTo: pasteRowView.bottomAnchor),
 
       pasteRowCloseButton.trailingAnchor.constraint(equalTo: pasteRowView.trailingAnchor),
       pasteRowCloseButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
@@ -321,9 +337,13 @@ class KeyboardToolbarView: NibLessView {
   }
 
   override func setupAppearance() {
-    // 微信风格: 工具栏/候选栏区域用干净的浅色 (浅色模式白色、深色模式黑色),
-    // 与下方浅灰键盘背景区分开。
-    backgroundColor = .systemBackground
+    // 与键盘本体同一块背景: KeyboardRootView 用的就是
+    // appearance.backgroundStyle.backgroundColor (无配色方案时接近透明,
+    // 透出系统键盘底色; 有配色方案时用该方案的 backColor)。
+    // 之前这里用 .systemBackground, 深色模式是纯黑, 与下方深灰键盘底色
+    // 割裂成一块黑斑; 改成同一颜色后浅色/深色模式都与按键区一致。
+    // 深浅切换时 layoutSubviews 会重新跑这里。
+    backgroundColor = appearance.backgroundStyle.backgroundColor
     self.style = appearance.candidateBarStyle
     if keyboardContext.displayAppIconButton {
       iconButton.tintColor = style.toolbarButtonFrontColor
@@ -660,7 +680,7 @@ class KeyboardToolbarView: NibLessView {
     customizePanel = nil
   }
 
-  // MARK: - 粘贴提示行 (微信式: 收起键盘图标 + 文字 + X)
+  // MARK: - 粘贴提示行 (微信式: 文字在左, ⌄ 收起键盘 + X 并排在右)
 
   /// 刷新粘贴提示: 仅在未输入 (工具栏显示) 时, 若剪贴板有未提示过的新内容则显示。
   /// iPhone 上复制的和 PC 同步过来的内容都会出现 (同步完成后会收到通知再刷新一次)。
@@ -702,11 +722,17 @@ class KeyboardToolbarView: NibLessView {
       hideClipboardChip()
       return
     }
-    // 已粘贴/忽略过的内容不再重复提示, 直到剪贴板换成新内容
-    if ClipboardSyncService.sha256(text) == clipboardChipDismissedHash {
-      hideClipboardChip()
-      return
-    }
+    // 已粘贴/忽略过的内容不再重复提示, 直到剪贴板换成新内容。
+    // 忽略记录持久化在共享 UserDefaults 里, 键盘重建 (隐藏再打开) 也不会丢。
+    #if canImport(UIKit)
+      if UserDefaults.hamster.isClipboardChipDismissed(
+        hash: ClipboardSyncService.sha256(text),
+        changeCount: UIPasteboard.general.changeCount)
+      {
+        hideClipboardChip()
+        return
+      }
+    #endif
     // 已在展示同一内容时不重复布局
     if text == clipboardChipText, isPasteRowVisible {
       return
@@ -733,7 +759,7 @@ class KeyboardToolbarView: NibLessView {
     [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = false }
   }
 
-  /// 点粘贴提示行左侧收起键盘图标: 收起键盘。
+  /// 点粘贴提示行右侧 ⌄: 收起键盘。
   @objc private func pasteRowDismissTapped() {
     actionHandler.handle(.release, on: .dismissKeyboard)
   }
@@ -741,7 +767,9 @@ class KeyboardToolbarView: NibLessView {
   /// 点粘贴提示行文字: 把剪贴板内容输入到当前输入框, 之后不再重复提示同一内容。
   @objc private func pasteRowTextTapped() {
     guard let text = clipboardChipText, !text.isEmpty else { return }
-    clipboardChipDismissedHash = ClipboardSyncService.sha256(text)
+    UserDefaults.hamster.markClipboardChipDismissed(
+      hash: ClipboardSyncService.sha256(text),
+      changeCount: currentPasteboardChangeCount)
     hideClipboardChip()
     insertPanelText(text)
     UserDefaults.hamster.recordClipboardHistory(text)
@@ -750,7 +778,9 @@ class KeyboardToolbarView: NibLessView {
   /// 点粘贴提示行右侧 X: 关闭提示, 相同内容不再重复提示 (直到剪贴板换成新内容)。
   @objc private func pasteRowCloseTapped() {
     if let text = clipboardChipText, !text.isEmpty {
-      clipboardChipDismissedHash = ClipboardSyncService.sha256(text)
+      UserDefaults.hamster.markClipboardChipDismissed(
+        hash: ClipboardSyncService.sha256(text),
+        changeCount: currentPasteboardChangeCount)
     }
     hideClipboardChip()
   }

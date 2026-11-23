@@ -143,8 +143,17 @@ public final class ClipboardSyncService {
     // 真实 SyncClipboard 服务器要求请求 /SyncClipboard.json, 不能直接请求根路径
     // (根路径 PUT 返回 405, GET 只返回 "Server is running.")。
     let endpointURL = Self.syncEndpointURL(for: serverURL)
-    let username = defaults.clipboardSyncUsername
-    let password = defaults.clipboardSyncPassword
+    // 用户名/密码去首尾空白: 设置页粘贴时带入的尾随空格会被服务器逐字比对,
+    // 导致 401 (实测: 用户名尾部多一个空格就全程 401, 服务端却正常)。
+    let username = defaults.clipboardSyncUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+    let password = defaults.clipboardSyncPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+    // 没配凭据就不发请求: 服务器配了 Basic Auth 时无头请求只会得到 401,
+    // 直接报"凭据未设置"比 401 更明确。
+    guard !username.isEmpty, !password.isEmpty else {
+      recordStatus("凭据未设置")
+      notifyFinished()
+      return
+    }
     let lastHash = defaults.clipboardSyncLastHash
 
     // 1. 上传本机剪贴板 (若与上次同步内容不同)
@@ -162,7 +171,7 @@ public final class ClipboardSyncService {
           if result.success {
             defaults.clipboardSyncLastHash = Self.sha256(localText)
           } else {
-            failureReason = "上传失败(\(result.shortReason))"
+            failureReason = failureReasonText(operation: "上传", result: result, passwordLength: password.count)
           }
         }
       }
@@ -171,7 +180,7 @@ public final class ClipboardSyncService {
     // 2. 下载服务器最新内容 (若与本机不同则写回)
     let downloadResult = download(from: endpointURL, username: username, password: password)
     if failureReason == nil, !downloadResult.success {
-      failureReason = "下载失败(\(downloadResult.shortReason))"
+      failureReason = failureReasonText(operation: "下载", result: downloadResult, passwordLength: password.count)
     }
     if let remoteText = downloadResult.text, !remoteText.isEmpty {
       let remoteHash = Self.sha256(remoteText)
@@ -200,6 +209,17 @@ public final class ClipboardSyncService {
   private func recordStatus(_ result: String) {
     let time = Self.statusTimeFormatter.string(from: Date())
     UserDefaults.hamster.clipboardSyncLastStatusText = "\(time) \(result)"
+  }
+
+  /// 同步失败原因文字。401 时附上密码长度 (仅整数, 绝不含凭据的任何内容):
+  /// 服务器对"请求头缺失/格式错"和"用户名或密码错"都返回同一个 401,
+  /// 只看 401 无法区分; 密码长度能帮用户判断是不是凭据本身的问题
+  /// (例如设置页粘贴时多带了空格, 去空格后长度就对上了)。
+  private func failureReasonText(operation: String, result: NetworkResult, passwordLength: Int) -> String {
+    if result.statusCode == 401 {
+      return "\(operation)失败(HTTP 401, 密码长度 \(passwordLength))"
+    }
+    return "\(operation)失败(\(result.shortReason))"
   }
 
   /// 同步结束 (无论成功失败) 后在主线程发通知, 供界面刷新状态行与粘贴提示。

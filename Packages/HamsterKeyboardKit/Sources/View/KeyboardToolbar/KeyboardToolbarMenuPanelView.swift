@@ -77,7 +77,10 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   override func setupAppearance() {
-    backgroundColor = .systemBackground
+    // 透明: 面板是盖在键盘根视图上的全屏覆盖层, 透出根视图的背景,
+    // 即与键盘本体同一块底色 (浅色/深色模式都一致, 配色方案的渐变/图片也一样透出)。
+    // 之前用 .systemBackground, 深色模式是纯黑, 与深灰键盘底色割裂成黑斑。
+    backgroundColor = .clear
   }
 
   /// 刷新格子 (按 4 列分行)。
@@ -161,6 +164,10 @@ private class MenuTileButton: UIControl {
     stack.axis = .vertical
     stack.spacing = 6
     stack.alignment = .center
+    // 关键: UIStackView 默认可交互, 会盖住整个按钮并在 hit-test 时抢走触摸,
+    // 导致按钮永远收不到 touchUpInside (格子点按无反应)。图标/文字本身不可交互,
+    // 这里也必须关掉, 触摸才能落到按钮自己身上。
+    stack.isUserInteractionEnabled = false
     stack.translatesAutoresizingMaskIntoConstraints = false
     addSubview(stack)
     NSLayoutConstraint.activate([

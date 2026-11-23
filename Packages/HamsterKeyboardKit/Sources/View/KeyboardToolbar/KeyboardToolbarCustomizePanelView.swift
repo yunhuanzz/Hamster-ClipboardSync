@@ -60,6 +60,8 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     tableView.dataSource = self
     tableView.delegate = self
     tableView.rowHeight = 52
+    // 透明: 默认是不透明的系统背景, 深色模式会盖出一块黑斑; 透出面板后的键盘底色。
+    tableView.backgroundColor = .clear
     tableView.register(UITableViewCell.self, forCellReuseIdentifier: "ToolbarToolCell")
     // 常驻编辑模式: 显示右侧拖拽手柄 (排序用), 左侧不显示删除控件。
     // 开关仍可用 (未设置 editingAccessoryView 时 accessoryView 会继续显示)。
@@ -111,7 +113,10 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   }
 
   override func setupAppearance() {
-    backgroundColor = .systemBackground
+    // 透明: 面板是盖在键盘根视图上的全屏覆盖层, 透出根视图的背景,
+    // 即与键盘本体同一块底色 (浅色/深色模式都一致)。
+    // 之前用 .systemBackground, 深色模式是纯黑, 与深灰键盘底色割裂成黑斑。
+    backgroundColor = .clear
   }
 
   /// 刷新工具列表
