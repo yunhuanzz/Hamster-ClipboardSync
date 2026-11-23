@@ -244,6 +244,17 @@ class KeyboardToolbarView: NibLessView {
   /// 粘贴提示行是否正在展示 (展示时工具栏其他按钮暂时隐藏)。
   private var isPasteRowVisible = false
 
+  /// 工具栏长按拖动/删除 (第 8 轮): 长按任一工具图标可横向拖动换位,
+  /// 松手即保存顺序; 长按不动松手则在该图标右上角出一个红 ⊖,
+  /// 点 ⊖ 把工具拿下工具栏 (回工具池, 与定制面板的 ⊖ 同一效果)。
+  /// 菜单格子图标与 ⌄ 收起键盘不挂长按, 不参与拖动/删除。
+  private var toolbarDraggedToolID: String?
+  private var toolbarDragStartX: CGFloat = 0
+  private var toolbarDragMoved = false
+  private var toolbarDeleteBadge: UIButton?
+  private var toolbarDeleteBadgeToolID: String?
+  private var toolbarDeleteBadgeTimer: Timer?
+
   /// 当前展示的文本列表面板 (剪贴板 / 常用语), 覆盖在键盘根视图上
   private var textListPanel: KeyboardTextListPanelView?
 
@@ -828,6 +839,8 @@ class KeyboardToolbarView: NibLessView {
     UserDefaults.hamster.migrateToolbarToolsOrderFromZonesIfNeeded()
     setupToolsStackLayoutIfNeeded()
     toolsStackView.arrangedSubviews.forEach { toolsStackView.removeArrangedSubview($0); $0.removeFromSuperview() }
+    // 重建时清掉长按出的红 ⊖ (它挂在某个按钮上, 重建后位置/归属可能已变)。
+    hideToolbarDeleteBadge()
 
     // 工具 id -> 按钮 (6 个, 与 toolbarToolDefinitions() 一一对应)。
     func buttonForTool(_ toolID: String) -> UIButton? {
@@ -846,12 +859,139 @@ class KeyboardToolbarView: NibLessView {
     for toolID in UserDefaults.hamster.toolbarToolsOrder where UserDefaults.hamster.isToolbarToolVisible(toolID) {
       guard let button = buttonForTool(toolID) else { continue }
       button.isHidden = isPasteRowVisible
+      attachToolbarToolLongPress(to: button)
       toolsStackView.addArrangedSubview(button)
     }
 
     // 收起键盘固定在最右, 粘贴行出现时同样隐藏。
     dismissKeyboardButton.isHidden = isPasteRowVisible
     iconButton.isHidden = !keyboardContext.displayAppIconButton || isPasteRowVisible
+  }
+
+  /// 给工具按钮挂一次长按手势 (rebuild 会反复调, 只挂一次)。
+  /// 菜单格子图标与 ⌄ 收起键盘不在这里, 不挂长按。
+  /// 哪个工具由回调里的 toolID(for:) 按按钮实例反查。
+  private func attachToolbarToolLongPress(to button: UIButton) {
+    if button.gestureRecognizers?.contains(where: { $0 is UILongPressGestureRecognizer }) == true { return }
+    let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(toolbarToolLongPressed(_:)))
+    recognizer.minimumPressDuration = 0.5
+    // 长按一旦识别就取消按钮的触摸, 松手后不会再触发点按动作
+    // (拖完/删完不会顺手打开该工具的面板)。
+    recognizer.cancelsTouchesInView = true
+    button.addGestureRecognizer(recognizer)
+  }
+
+  /// 工具按钮实例 -> toolID (6 个按钮与 toolID 一一对应)。
+  private func toolID(for button: UIButton) -> String? {
+    if button === clipboardButton { return "clipboard" }
+    if button === phrasesButton { return "phrases" }
+    if button === switchLayoutButton { return "switchLayout" }
+    if button === syncNowButton { return "syncNow" }
+    if button === settingsButton { return "settings" }
+    if button === managePhrasesButton { return "managePhrases" }
+    return nil
+  }
+
+  /// 工具栏长按: 拖动换位, 或原地长按松手出红 ⊖ 删除。
+  /// 拖动时按手指 x 实时换位并写盘 (toolbarToolsOrder), 松手即保存;
+  /// 位置按“去掉被拖按钮后的其余按钮中点”为界, 不会错一位。
+  @objc private func toolbarToolLongPressed(_ recognizer: UILongPressGestureRecognizer) {
+    guard let button = recognizer.view as? UIButton,
+          let toolID = toolID(for: button) else { return }
+    switch recognizer.state {
+    case .began:
+      // 开始拖动: 震动一下 + 图标微微放大表示“拎起来了”;
+      // touchDown 留下的按压底色要清掉, 否则松手后按钮一直亮着。
+      hideToolbarDeleteBadge()
+      toolbarDraggedToolID = toolID
+      toolbarDragStartX = recognizer.location(in: toolsStackView).x
+      toolbarDragMoved = false
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+      button.backgroundColor = style.toolbarButtonBackgroundColor
+      UIView.animate(withDuration: 0.15) {
+        button.transform = CGAffineTransform(scaleX: 1.15, y: 1.15)
+        button.alpha = 0.85
+      }
+    case .changed:
+      guard toolbarDraggedToolID == toolID else { return }
+      let x = recognizer.location(in: toolsStackView).x
+      if abs(x - toolbarDragStartX) > 12 { toolbarDragMoved = true }
+      guard toolbarDragMoved else { return }
+      let others = toolsStackView.arrangedSubviews.compactMap { $0 as? UIButton }.filter { $0 !== button }
+      var targetIndex = others.count
+      for (index, other) in others.enumerated() {
+        if x < other.center.x {
+          targetIndex = index
+          break
+        }
+      }
+      guard let currentIndex = toolsStackView.arrangedSubviews.firstIndex(of: button),
+            currentIndex != targetIndex else { return }
+      var order = UserDefaults.hamster.toolbarToolsOrder
+      order.removeAll { $0 == toolID }
+      order.insert(toolID, at: min(targetIndex, order.count))
+      UserDefaults.hamster.toolbarToolsOrder = order
+      toolsStackView.removeArrangedSubview(button)
+      toolsStackView.insertArrangedSubview(button, at: min(targetIndex, toolsStackView.arrangedSubviews.count))
+    case .ended, .cancelled:
+      guard toolbarDraggedToolID == toolID else { return }
+      toolbarDraggedToolID = nil
+      UIView.animate(withDuration: 0.15) {
+        button.transform = .identity
+        button.alpha = 1.0
+      }
+      // 没拖动过 (原地长按松手): 在图标右上角出一个红 ⊖, 点它删除;
+      // 2.5s 后自动消失, 不用专门找地方关。取消手势不留 ⊖。
+      if recognizer.state == .ended, !toolbarDragMoved {
+        showToolbarDeleteBadge(on: button, toolID: toolID)
+      }
+    default:
+      break
+    }
+  }
+
+  /// 长按不动松手后, 在该工具图标右上角出一个红 ⊖ (点它删除)。
+  /// 2.5s 后自动消失; 工具栏重建时也一并清掉。
+  private func showToolbarDeleteBadge(on button: UIButton, toolID: String) {
+    hideToolbarDeleteBadge()
+    let badge = UIButton(type: .custom)
+    badge.translatesAutoresizingMaskIntoConstraints = false
+    badge.setImage(UIImage(systemName: "minus.circle.fill"), for: .normal)
+    badge.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 20), scale: .default), forImageIn: .normal)
+    badge.tintColor = .systemRed
+    badge.backgroundColor = .clear
+    badge.addTarget(self, action: #selector(toolbarDeleteBadgeTapped(_:)), for: .touchUpInside)
+    button.addSubview(badge)
+    NSLayoutConstraint.activate([
+      badge.widthAnchor.constraint(equalToConstant: 22),
+      badge.heightAnchor.constraint(equalToConstant: 22),
+      badge.topAnchor.constraint(equalTo: button.topAnchor, constant: -6),
+      badge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: 6),
+    ])
+    toolbarDeleteBadge = badge
+    toolbarDeleteBadgeToolID = toolID
+    toolbarDeleteBadgeTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
+      self?.hideToolbarDeleteBadge()
+    }
+  }
+
+  private func hideToolbarDeleteBadge() {
+    toolbarDeleteBadgeTimer?.invalidate()
+    toolbarDeleteBadgeTimer = nil
+    toolbarDeleteBadge?.removeFromSuperview()
+    toolbarDeleteBadge = nil
+    toolbarDeleteBadgeToolID = nil
+  }
+
+  @objc private func toolbarDeleteBadgeTapped(_ sender: UIButton) {
+    guard let toolID = toolbarDeleteBadgeToolID else { return }
+    hideToolbarDeleteBadge()
+    // 与定制面板的 ⊖ 同一效果: 从顺序里拿掉 + 隐藏, 回工具池。
+    var order = UserDefaults.hamster.toolbarToolsOrder
+    order.removeAll { $0 == toolID }
+    UserDefaults.hamster.toolbarToolsOrder = order
+    UserDefaults.hamster.setToolbarToolVisible(toolID, visible: false)
+    rebuildToolbarButtons()
   }
 
   /// 统一工具注册表: 全部 6 个可上工具栏的工具 (id, 标题, 图标),

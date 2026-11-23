@@ -92,6 +92,26 @@ public class RimeContext {
   @MainActor @Published
   public var suggestions: [CandidateSuggestion] = []
 
+  /// 前缀候选模式: 引擎对完整九宫格输入给不出候选时, 展示最长合法前缀的候选。
+  /// (用户乱按的长串常常整体切不全, 但前半段是合法音节; 微信会给前缀候选,
+  /// 我们之前只显示一串字母。) 引擎输入始终保持完整串, 只有候选列表来自前缀;
+  /// 选词时先把引擎换回前缀再选, 选完把尾巴数字重新敲回去。
+  /// 为 true 时, suggestions 属于 prefixCandidateInput, 不是完整输入。
+  @MainActor
+  var isShowingPrefixCandidates = false
+
+  /// 前缀候选对应的输入 (最长合法前缀, 全数字串)。
+  @MainActor
+  private var prefixCandidateInput = ""
+
+  /// 前缀之后的尾巴数字 (选词后要重新敲回引擎的新输入)。
+  @MainActor
+  private var prefixCandidateTail = ""
+
+  /// 展示前缀候选时引擎里实际的完整输入 (全数字串)。
+  @MainActor
+  private var prefixCandidateFullInput = ""
+
   @MainActor @Published
   public var rimeContext: IRimeContext? = nil
 
@@ -136,6 +156,10 @@ public extension RimeContext {
     self.userInputKey = ""
     self.selectCandidatePinyin = nil
     self.suggestions.removeAll(keepingCapacity: false)
+    self.isShowingPrefixCandidates = false
+    self.prefixCandidateInput = ""
+    self.prefixCandidateTail = ""
+    self.prefixCandidateFullInput = ""
     Rime.shared.cleanComposition()
   }
 
@@ -595,6 +619,32 @@ public extension RimeContext {
   /// 根据索引选择候选字
   @MainActor
   func selectCandidate(index: Int) {
+    // 前缀候选模式: 屏幕上显示的是最长合法前缀的候选, 引擎里却是完整输入
+    // (菜单为空)。先把引擎换回前缀, 选词上屏, 再把尾巴数字重新敲回去当新输入
+    // (微信行为: 选了前缀词, 剩下的数字继续拼)。
+    if isShowingPrefixCandidates {
+      let prefix = prefixCandidateInput
+      let tail = prefixCandidateTail
+      let fullLength = prefixCandidateFullInput.count
+      isShowingPrefixCandidates = false
+      prefixCandidateInput = ""
+      prefixCandidateTail = ""
+      prefixCandidateFullInput = ""
+      guard Rime.shared.replaceInputKeys(prefix, startPos: 0, count: fullLength) else {
+        // 换不回去就照常同步一次: syncContext 会重新算前缀候选并恢复状态,
+        // 显示不变, 只是这次选词没生效。
+        syncContext()
+        return
+      }
+      syncContext()
+      _ = Rime.shared.selectCandidate(index: index)
+      syncContext()
+      for digit in tail {
+        _ = Rime.shared.inputKey(String(digit))
+      }
+      syncContext()
+      return
+    }
     _ = Rime.shared.selectCandidate(index: index)
     syncContext()
   }
@@ -772,6 +822,20 @@ public extension RimeContext {
     // 注意赋值顺序
     self.userInputKey = userInputText
     self.commitText = commitText
+    // 九宫格前缀候选 (第 8 轮): 引擎对完整输入一个候选都不给时,
+    // 试试最长合法前缀 (见 prefixCandidatesForUnsegmentableT9Input)。
+    // 正常有候选时不走这条路; 任何没拿到前缀候选的情况都清掉旧的前缀状态。
+    // useContextPaging 模式下候选栏不走 suggestions, 这里也不跑。
+    if !useContextPaging, candidates.isEmpty {
+      if let prefixCandidates = self.prefixCandidatesForUnsegmentableT9Input(preedit: userInputText) {
+        self.suggestions = prefixCandidates
+        return
+      }
+    }
+    self.isShowingPrefixCandidates = false
+    self.prefixCandidateInput = ""
+    self.prefixCandidateTail = ""
+    self.prefixCandidateFullInput = ""
     self.suggestions = candidates
   }
 
@@ -1041,6 +1105,87 @@ public extension RimeContext {
 // MARK: - T9 拼音处理
 
 public extension RimeContext {
+  /// 九宫格 t9 输入的最长合法拼音前缀长度 (动态规划)。
+  /// 一段数字是合法音节, 当且仅当它在 t9ToPinyinMapping 里对应至少一个
+  /// 真实拼音音节: 长度 >= 2 的字母串, 或单字母 a/e/o (o/e/a 是合法单音节;
+  /// j/w/p/m 等单个字母不是拼音音节, 不能算, 否则任意数字串都能“切全”)。
+  /// 返回 0 表示没有任何合法前缀。已用 Python 在同一张映射表上验证:
+  /// 664646468686868353558686866868646497979 -> 18,
+  /// 44476766383835295 -> 0, 64426/9264/42/66 -> 全串。
+  @MainActor
+  func longestValidT9PrefixLength(_ digits: String) -> Int {
+    let chars = Array(digits)
+    let count = chars.count
+    guard count > 0 else { return 0 }
+    var reachable = [Bool](repeating: false, count: count + 1)
+    reachable[0] = true
+    for end in 1 ... count {
+      for start in 0 ..< end where reachable[start] {
+        let span = String(chars[start ..< end])
+        guard let values = t9ToPinyinMapping[span] else { continue }
+        let isSyllable = values.contains { value in
+          value == "a" || value == "e" || value == "o"
+            || (value.count >= 2 && value.allSatisfy { $0.isLetter })
+        }
+        if isSyllable {
+          reachable[end] = true
+          break
+        }
+      }
+    }
+    return (0 ... count).reversed().first { reachable[$0] } ?? 0
+  }
+
+  /// 九宫格前缀候选: 完整 t9 输入在引擎里一个候选都没有时, 用最长合法前缀
+  /// 影子查一次引擎, 有候选就拿来展示 (微信行为), 没有则说明 t9 翻译已死。
+  /// 返回 nil 时不展示任何候选 (调用方照常显示空列表)。
+  /// 注意: 只在 preedit 全是数字时触发; 26 键的 preedit 是字母, 不会进这里。
+  /// 影子查询全程不发 sync, 引擎输入在查完后立刻恢复成完整串, 显示的
+  /// userInputKey / 边栏音节仍是完整输入; 只有 suggestions 来自前缀。
+  @MainActor
+  func prefixCandidatesForUnsegmentableT9Input(preedit: String) -> [CandidateSuggestion]? {
+    // 全数字、至少 2 位才有前缀可言 (1 位数字的候选就是它自己, 没意义)。
+    guard preedit.count >= 2, preedit.allSatisfy({ $0.isNumber }) else { return nil }
+    let prefixLength = longestValidT9PrefixLength(preedit)
+    // 整串本身就能切全却零候选: 不是“切不全”, 是 t9 翻译根本没返回
+    // (词库/棱镜没加载或方案不对)。影子查同一串也一样是空, 直接记日志,
+    // 让调用方知道这是部署问题、不是输入问题。
+    guard prefixLength >= 2, prefixLength < preedit.count else {
+      if prefixLength == preedit.count {
+        Logger.statistics.error("t9 translation dead: fully segmentable input \"\(preedit)\" yields zero candidates; redeploy RIME in the app.")
+      }
+      return nil
+    }
+    let prefix = String(preedit.prefix(prefixLength))
+    let tail = String(preedit.dropFirst(prefixLength))
+    // 影子查前缀: 把引擎输入换成前缀 (不 sync, 不动显示), 取它的候选。
+    guard Rime.shared.replaceInputKeys(prefix, startPos: 0, count: preedit.count) else { return nil }
+    let shadowContext = Rime.shared.context()
+    var shadowHighlightIndex = 0
+    if let menu = shadowContext.menu {
+      shadowHighlightIndex = Int(menu.pageSize * menu.pageNo + menu.highlightedCandidateIndex)
+    }
+    let shadowCandidates = candidateListLimit(index: 0, highlightIndex: shadowHighlightIndex, count: maximumNumberOfCandidateWords)
+    // 再把完整串敲回去 (同样不 sync)。恢复失败时记日志并返回 nil,
+    // 显示会在下次 syncContext 时按引擎实际输入自我纠正。
+    guard Rime.shared.replaceInputKeys(preedit, startPos: 0, count: prefix.count) else {
+      Logger.statistics.error("t9 prefix candidates: failed to restore full input \"\(preedit)\" after shadow query for prefix \"\(prefix)\".")
+      return nil
+    }
+    // 恢复完整串后, 缓存的 context 也要是完整串的 (边栏/拼音条读它)。
+    self.rimeContext = Rime.shared.context()
+    guard !shadowCandidates.isEmpty else {
+      Logger.statistics.error("t9 translation dead: longest valid prefix \"\(prefix)\" of \"\(preedit)\" yields zero candidates; redeploy RIME in the app.")
+      return nil
+    }
+    isShowingPrefixCandidates = true
+    prefixCandidateInput = prefix
+    prefixCandidateTail = tail
+    prefixCandidateFullInput = preedit
+    Logger.statistics.info("t9 prefix candidates: input \"\(preedit)\" has no candidates, showing \(shadowCandidates.count) candidates for prefix \"\(prefix)\", tail \"\(tail)\" kept.")
+    return shadowCandidates
+  }
+
   /// 获取拼音候选列表
   @MainActor
   func getPinyinCandidates() -> [String] {

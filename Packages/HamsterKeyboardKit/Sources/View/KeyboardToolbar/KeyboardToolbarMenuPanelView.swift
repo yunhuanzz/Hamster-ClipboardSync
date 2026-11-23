@@ -143,17 +143,24 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   /// 刷新格子 (按 4 列分行, 每 8 个一页)。
   func reload(with tiles: [(id: String, title: String, systemImage: String)]) {
     self.tiles = tiles
-    pagesStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    // 旧页必须先从 arrangedSubviews 里摘掉再移出层级: 只调
+    // removeFromSuperview 不会把它从 arrangedSubviews 摘掉, 旧页的约束
+    // (页宽 == 滚动容器宽) 会残留, 下次 reload 再加一页就多一套,
+    // pageControl 的页数也会数上已删的旧页。
+    pagesStackView.arrangedSubviews.forEach {
+      pagesStackView.removeArrangedSubview($0)
+      $0.removeFromSuperview()
+    }
     var pageTiles: [(id: String, title: String, systemImage: String)] = []
     for tile in tiles {
       pageTiles.append(tile)
       if pageTiles.count == Self.tilesPerPage {
-        pagesStackView.addArrangedSubview(makePage(with: pageTiles))
+        addPage(with: pageTiles)
         pageTiles = []
       }
     }
     if !pageTiles.isEmpty {
-      pagesStackView.addArrangedSubview(makePage(with: pageTiles))
+      addPage(with: pageTiles)
     }
     let pageCount = max(pagesStackView.arrangedSubviews.count, 1)
     pageControl.numberOfPages = pageCount
@@ -163,11 +170,26 @@ class KeyboardToolbarMenuPanelView: NibLessView {
     pagingScrollView.setContentOffset(.zero, animated: false)
   }
 
+  /// 建一页并挂进横向内容栈。页宽约束必须在 addArrangedSubview 之后
+  /// 再激活: 之前 makePage 里在页还没进层级时就激活
+  /// page.width == pagingScrollView.frameLayoutGuide.width,
+  /// 两边没有共同祖先, UIKit 在激活时直接抛 NSException
+  /// (-[NSLayoutConstraint _setActive:mutuallyExclusiveConstraints:]),
+  /// 点菜单格子图标就闪退 (第 8 轮崩溃日志根因, 连续崩 4 次)。
+  /// 挂进栈之后页的祖先链是 page -> pagesStackView -> pagingScrollView,
+  /// 与 frameLayoutGuide 有共同祖先 pagingScrollView, 可以正常安装。
+  private func addPage(with tiles: [(id: String, title: String, systemImage: String)]) {
+    let page = makePage(with: tiles)
+    pagesStackView.addArrangedSubview(page)
+    page.widthAnchor.constraint(equalTo: pagingScrollView.frameLayoutGuide.widthAnchor).isActive = true
+  }
+
   /// 一页宫格 (2 行 x 4 列): 宽 = 滚动容器宽, 高与容器同高。
   private func makePage(with tiles: [(id: String, title: String, systemImage: String)]) -> UIView {
     let page = UIView()
     page.translatesAutoresizingMaskIntoConstraints = false
-    page.widthAnchor.constraint(equalTo: pagingScrollView.frameLayoutGuide.widthAnchor).isActive = true
+    // 注意: 页宽约束不在这里激活 (见 addPage 注释): 页还没进层级时激活
+    // 会因没有共同祖先而抛异常导致闪退。
     let stack = UIStackView()
     stack.axis = .vertical
     stack.spacing = 16
@@ -287,8 +309,14 @@ private class MenuTileButton: UIControl {
     stack.isUserInteractionEnabled = false
     stack.translatesAutoresizingMaskIntoConstraints = false
     addSubview(stack)
+    // 格子高 68pt 是期望值, 不是硬性: 面板矮时 (小屏/横屏) 两行 68pt +
+    // 16pt 间距会超过滚动容器高; 约束用 defaultHigh 让格子可压缩,
+    // 避免“无法同时满足约束”的警告, 内容 (26pt 图标 + 13pt 文字) 最低约 53pt,
+    // 压不到裁切。
+    let tileHeightConstraint = heightAnchor.constraint(equalToConstant: 68)
+    tileHeightConstraint.priority = .defaultHigh
     NSLayoutConstraint.activate([
-      heightAnchor.constraint(equalToConstant: 68),
+      tileHeightConstraint,
       stack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
       stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
       stack.leadingAnchor.constraint(equalTo: leadingAnchor),

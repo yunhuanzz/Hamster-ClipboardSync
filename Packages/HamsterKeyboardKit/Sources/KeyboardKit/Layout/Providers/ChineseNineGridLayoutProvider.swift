@@ -107,10 +107,10 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
   }
 
   open func itemSwipes(for action: KeyboardAction, row: Int, index: Int, context: KeyboardContext) -> [KeySwipe] {
-    if let swipe = context.keyboardSwipe[context.keyboardType]?[action] {
-      return KeySwipe.withDefaultBackspaceUpSwipe(swipe, for: action)
-    }
-    return KeySwipe.withDefaultBackspaceUpSwipe([], for: action)
+    let configured = context.keyboardSwipe[context.keyboardType]?[action] ?? []
+    let swipes = KeySwipe.withDefaultBackspaceUpSwipe(configured, for: action)
+    // 空格默认上滑 0 (第 8 轮, 微信空格键有 0 上标)。
+    return KeySwipe.withDefaultSpaceUpSwipe(swipes, for: action)
   }
 
   open func keyboardReturnAction(for context: KeyboardContext) -> KeyboardAction {
@@ -144,10 +144,17 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
     .percentage(context.interfaceOrientation.isPortrait ? 0.18 : 0.15)
   }
 
-  /// 底行内侧系统键 (123 / 中/英 / 前往) 的宽度。
-  /// 第 7 轮按微信实测改 13% -> 11.5% (微信键面约 11.2%)。
+  /// 底行内侧系统键 (123 / 中/英 / 前往) 的宽度: 15% (第 8 轮)。
+  /// 第 7 轮的 11.5% 算错了账: 底行 5 个键里空格没有定宽、吃剩下的,
+  /// 18% + 11.5% x 3 = 52.5%, 只剩 47.5% 给空格——第 7 轮说的“空格约 40%”
+  /// 从来没对上, 截图实测空格 46.1%、中/英与换行各 10.2% (1320x2868 图,
+  /// y=2540~2600 行: 符号 220px / 123 133px / 空格 609px / 中英 134px / 换行 134px)。
+  /// 微信空格约 36%: 18% + 15% x 3 = 63%, 剩下 37% 给空格, 与微信一致;
+  /// 中/英与换行键面从 10.2% 涨到约 13.6% (按钮 15%)。
+  /// (第 7 轮引的微信数 240/148/475 加起来只有 1159px 键面, 对不上 1320 宽,
+  /// 三个数不可能同时成立; 这里优先保证空格约 36% 这个用户点名的目标。)
   /// 只影响九宫格 (见 smallBottomWidth 注释)。
   open func lowerSystemButtonWidth(for context: KeyboardContext) -> KeyboardLayoutItemWidth {
-    return .percentage(0.115)
+    return .percentage(0.15)
   }
 }

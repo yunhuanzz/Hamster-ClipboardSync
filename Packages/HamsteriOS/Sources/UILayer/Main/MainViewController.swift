@@ -289,9 +289,18 @@ extension MainViewController {
   }
 
   private func presentViewController(_ vc: UIViewController) {
-    primaryNavigationViewController.popToRootViewController(animated: false)
     if isCollapsed {
-      primaryNavigationViewController.pushViewController(vc, animated: true)
+      // iPhone (单列): 把目标页压到当前页上面, 不要先 popToRoot。
+      // 之前每次导航都先 popToRoot 再 push, 从“更多”点进子设置时,
+      // 更多页先被弹出 (闪回主设置页), 子设置压在主设置上面,
+      // 返回就直接回主设置、跳过了更多 (第 8 轮)。
+      // 各子页都是懒加载单例: 同一个实例已在栈里时不能再 push
+      // (UIKit 会抛异常), 这种情况才 pop 回它; 不在栈里就直接 push。
+      if primaryNavigationViewController.viewControllers.contains(vc) {
+        primaryNavigationViewController.popToViewController(vc, animated: true)
+      } else {
+        primaryNavigationViewController.pushViewController(vc, animated: true)
+      }
       return
     }
     secondaryNavigationViewController.viewControllers = [vc]

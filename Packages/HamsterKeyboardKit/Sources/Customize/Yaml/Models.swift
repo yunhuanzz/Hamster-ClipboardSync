@@ -348,6 +348,17 @@ public struct KeySwipe: Codable, Hashable {
     return swipes + [KeySwipe(direction: .up, action: .backspace, processByRIME: false, display: false, label: .empty)]
   }
 
+  /// 空格键默认上滑: 上滑输入数字 0 (仿微信, 空格键右上角有 0 上标)。
+  /// 若已有上滑配置, 则以已有配置为准, 不追加。0 直接上屏
+  /// (processByRIME: false), 不经过 RIME 拼音引擎。
+  /// 注意: 中文 26 键 YAML 里空格的上滑是“次选上屏”, 但 26 键的上滑归一化
+  /// (SystemKeyboardLayoutProvider) 会先丢掉配置里的上滑, 所以它实际
+  /// 上并不生效; 这里给 26 键空格也补 0, 与微信一致。
+  public static func withDefaultSpaceUpSwipe(_ swipes: [KeySwipe], for action: KeyboardAction) -> [KeySwipe] {
+    guard action == .space, !swipes.contains(where: { $0.direction == .up }) else { return swipes }
+    return swipes + [KeySwipe(direction: .up, action: .character("0"), processByRIME: false, display: true, label: .empty)]
+  }
+
   /// 英文 26 键默认上滑: 顶行字母上滑输入数字 1~0, 其余行上滑输入常用符号
   /// (与九宫格每键右上角小数字同一模式, display: true 会在键右上角显示小字)。
   /// 仅当用户配置中没有该键的上滑时生效 (与 withDefaultBackspaceUpSwipe 同模式),

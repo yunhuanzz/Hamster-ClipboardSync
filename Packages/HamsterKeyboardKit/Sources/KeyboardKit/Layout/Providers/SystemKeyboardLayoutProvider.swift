@@ -246,17 +246,19 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
       } else {
         displaySwipes = swipes
       }
-      return KeySwipe.withDefaultBackspaceUpSwipe(displaySwipes, for: action)
+      // 空格默认上滑 0 (第 8 轮, 与九宫格一致; 中文 26 键 YAML 里空格的
+      // “次选上屏”上滑在上面已被归一化丢掉, 这里不会把它顶回来)。
+      return KeySwipe.withDefaultSpaceUpSwipe(KeySwipe.withDefaultBackspaceUpSwipe(displaySwipes, for: action), for: action)
     }
     // 无配置时: 英文/中文 26 键同样补默认上滑 (顶行字母 -> 数字 1~0, 其余行 -> 常用符号);
-    // 其他类型无上滑。
+    // 其他类型无上滑。空格同样补默认上滑 0 (第 8 轮)。
     let swipes: [KeySwipe]
     if keyboardTypeKey == .chinese(.lowercased) || keyboardTypeKey.isAlphabetic {
       swipes = KeySwipe.withDefaultAlphabeticUpSwipe([], for: action)
     } else {
       swipes = []
     }
-    return KeySwipe.withDefaultBackspaceUpSwipe(swipes, for: action)
+    return KeySwipe.withDefaultSpaceUpSwipe(KeySwipe.withDefaultBackspaceUpSwipe(swipes, for: action), for: action)
   }
 
   /**
