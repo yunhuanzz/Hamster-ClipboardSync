@@ -16,7 +16,7 @@ public enum HamsterConstants {
   public static let iCloudID = "iCloud.dev.fuxiao.app.hamsterapp"
 
   /// keyboard Bundle ID
-  public static let keyboardBundleID = "dev.fuxiao.app.Hamster.HamsterKeyboard"
+  public static let keyboardBundleID = "com.keys.LiveContainer.HamsterKeyboard"
 
   /// 跳转至系统添加键盘URL
   public static let addKeyboardPath = "app-settings:root=General&path=Keyboard/KEYBOARDS"

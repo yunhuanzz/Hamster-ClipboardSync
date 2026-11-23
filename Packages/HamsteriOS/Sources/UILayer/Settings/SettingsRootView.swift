@@ -21,6 +21,8 @@ public class SettingsRootView: NibLessView {
     let tableView = UITableView(frame: .zero, style: .insetGrouped)
     tableView.register(SettingTableViewCell.self, forCellReuseIdentifier: SettingTableViewCell.identifier)
     tableView.register(ButtonTableViewCell.self, forCellReuseIdentifier: ButtonTableViewCell.identifier)
+    tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
+    tableView.register(TextFieldTableViewCell.self, forCellReuseIdentifier: TextFieldTableViewCell.identifier)
     tableView.contentInsetAdjustmentBehavior = .automatic
     tableView.dataSource = self
     tableView.delegate = self
@@ -141,6 +143,13 @@ extension SettingsRootView: UITableViewDataSource {
   public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let settings = settingsViewModel.sections[indexPath.section].items[indexPath.row]
 
+    if settings.type == .textField {
+      let cell = tableView.dequeueReusableCell(withIdentifier: TextFieldTableViewCell.identifier, for: indexPath)
+      guard let cell = cell as? TextFieldTableViewCell else { return cell }
+      cell.updateWithSettingItem(settings)
+      return cell
+    }
+
     if settings.type == .button {
       let cell = tableView.dequeueReusableCell(withIdentifier: ButtonTableViewCell.identifier, for: indexPath)
       guard let cell = cell as? ButtonTableViewCell else { return cell }
@@ -148,8 +157,16 @@ extension SettingsRootView: UITableViewDataSource {
       return cell
     }
 
-    let cell = tableView.dequeueReusableCell(withIdentifier: SettingTableViewCell.identifier, for: indexPath)
-    guard let cell = cell as? SettingTableViewCell else { return cell }
+    if settings.type == .navigation {
+      let cell = tableView.dequeueReusableCell(withIdentifier: SettingTableViewCell.identifier, for: indexPath)
+      guard let cell = cell as? SettingTableViewCell else { return cell }
+      cell.updateWithSettingItem(settings)
+      return cell
+    }
+
+    // .toggle 及其他默认使用开关单元格
+    let cell = tableView.dequeueReusableCell(withIdentifier: ToggleTableViewCell.identifier, for: indexPath)
+    guard let cell = cell as? ToggleTableViewCell else { return cell }
     cell.updateWithSettingItem(settings)
     return cell
   }
