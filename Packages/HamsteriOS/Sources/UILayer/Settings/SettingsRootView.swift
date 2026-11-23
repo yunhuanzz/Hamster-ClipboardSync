@@ -2,10 +2,14 @@
 //  SettingsRootView.swift
 //
 //  设置首页 (仿微信输入法): 浅绿底 + 两列卡片宫格, 每卡图标 + 标题 + 一行小字说明。
-//  卡片只进真实存在的子页 (没有的功能不做假卡片):
-//  布局和显示 / 按键效果 / 键盘管理 / 定制工具栏 / 跨设备粘贴传送 /
-//  常用语 / 我的词组 / 输入方案设置 / Wi-Fi上传方案 / 文件管理 /
-//  键盘设置 / 键盘配色 / iCloud同步 / 软件备份 / RIME / 关于。
+//  首页只留最常用的 7 张卡 + 1 张"更多":
+//  键盘管理 / 布局和显示 / 按键效果 / 定制工具栏 / 跨设备粘贴传送 /
+//  常用语 / 我的词组 / 更多。
+//  "剪贴板"与"跨设备粘贴传送"同指剪贴板同步设置 (同一子页 .clipboardSync),
+//  已合并为一张"跨设备粘贴传送"卡 (副标题点明是剪贴板同步)。
+//  其余设置 (输入方案设置 / Wi-Fi上传方案 / 文件管理 / 键盘设置 /
+//  键盘配色 / iCloud同步 / 软件备份 / RIME / 关于) 都在"更多"页
+//  (SettingsViewModel.moreSections, 原有列表, 不删功能)。
 //  顶部是收藏的快捷操作 (重新部署 / RIME同步 / 应用备份, 点按执行, 长按移除),
 //  添加入口在 RIME/备份子页的按钮长按菜单里 (ButtonTableViewCell, 未动)。
 //  旧的 inline 表格 (含剪贴板同步一节) 已拆走: 同步设置在"跨设备粘贴传送"子页。
@@ -93,24 +97,17 @@ public class SettingsRootView: NibLessView {
     }
 
     var result: [(icon: UIImage?, tint: UIColor, title: String, subtitle: String, action: () -> Void)] = []
-    // 新卡片 (子页是本轮新增/新接线的)。
-    result.append((icon: UIImage(systemName: "textformat.size"), tint: .systemBlue, title: "布局和显示", subtitle: "候选字大小、拼音显示等", action: { [unowned self] in settingsViewModel.navigate(to: .layoutDisplay) }))
-    result.append((icon: UIImage(systemName: "slider.horizontal.3"), tint: .systemPurple, title: "定制工具栏", subtitle: "工具显示、排序、菜单格子", action: { [unowned self] in settingsViewModel.navigate(to: .toolbarSettings) }))
+    // 首页卡片 (只留最常用的 7 张 + 更多; 其余在"更多"页)。
     result.append((icon: UIImage(systemName: "keyboard"), tint: .systemGreen, title: "键盘管理", subtitle: "九宫格、全键盘", action: { [unowned self] in settingsViewModel.navigate(to: .keyboardManagement) }))
-    result.append((icon: UIImage(systemName: "doc.on.clipboard"), tint: .systemTeal, title: "跨设备粘贴传送", subtitle: "剪贴板同步到电脑", action: { [unowned self] in settingsViewModel.navigate(to: .clipboardSync) }))
+    result.append((icon: UIImage(systemName: "textformat.size"), tint: .systemBlue, title: "布局和显示", subtitle: "候选字大小、拼音显示等", action: { [unowned self] in settingsViewModel.navigate(to: .layoutDisplay) }))
     // 已有入口的卡片 (图标与跳转复用 sections)。
-    if let c = card("按键音与震动", tint: .systemOrange, subtitle: "按键音、触感、按键气泡") { result.append(c) }
+    if let c = card("按键效果", tint: .systemOrange, subtitle: "按键音、触感、按键气泡") { result.append(c) }
+    result.append((icon: UIImage(systemName: "slider.horizontal.3"), tint: .systemPurple, title: "定制工具栏", subtitle: "工具显示、排序、菜单格子", action: { [unowned self] in settingsViewModel.navigate(to: .toolbarSettings) }))
+    result.append((icon: UIImage(systemName: "doc.on.clipboard"), tint: .systemTeal, title: "跨设备粘贴传送", subtitle: "剪贴板同步到电脑", action: { [unowned self] in settingsViewModel.navigate(to: .clipboardSync) }))
     if let c = card("常用语", tint: .systemPink, subtitle: "管理常用语") { result.append(c) }
     if let c = card("我的词组", tint: .systemIndigo, subtitle: "自定义词组") { result.append(c) }
-    if let c = card("输入方案设置", tint: .systemYellow, subtitle: "雾凇拼音、方案管理") { result.append(c) }
-    if let c = card("Wi-Fi上传方案", tint: .systemBlue, subtitle: "上传输入方案") { result.append(c) }
-    if let c = card("文件管理", tint: .systemOrange, subtitle: "浏览方案文件") { result.append(c) }
-    if let c = card("键盘设置", tint: .systemGray, subtitle: "按键、划动、候选栏等") { result.append(c) }
-    if let c = card("键盘配色", tint: .systemPink, subtitle: "键盘颜色方案") { result.append(c) }
-    if let c = card("iCloud同步", tint: .systemBlue, subtitle: "用 iCloud 同步配置") { result.append(c) }
-    if let c = card("软件备份", tint: .systemPurple, subtitle: "备份与恢复") { result.append(c) }
-    if let c = card("RIME", tint: .systemRed, subtitle: "部署、同步、词库") { result.append(c) }
-    if let c = card("关于", tint: .systemGray, subtitle: "版本与开源") { result.append(c) }
+    // 更多: 其余设置都在这里 (原有列表, 不删功能)。
+    result.append((icon: UIImage(systemName: "ellipsis.circle"), tint: .systemGray, title: "更多", subtitle: "输入方案、键盘设置等", action: { [unowned self] in settingsViewModel.navigate(to: .more) }))
     return result
   }
 

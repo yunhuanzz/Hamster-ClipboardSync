@@ -470,8 +470,11 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
     if action == .returnLastKeyboard || action == .cleanSpellingArea {
       return 16
     }
+    // 九宫格字母 (ABC/DEF…): 20pt, 仿微信九宫格。
+    if case .chineseNineGrid = action { return 20 }
     let text = buttonText(for: action) ?? ""
-    if action.isInputAction && text.isLowercased { return 26 }
+    // 26 键小写字母: 22pt, 仿微信/系统键盘 (原来 26pt 偏大偏重)。
+    if action.isInputAction && text.isLowercased { return 22 }
     if action.isSystemAction || action.isPrimaryAction { return 16 }
     return 23
   }
@@ -493,9 +496,12 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
     if action == .returnLastKeyboard || action == .cleanSpellingArea {
       return 16
     }
+    // 九宫格字母 (ABC/DEF…): 20pt, 仿微信九宫格。
+    if case .chineseNineGrid = action { return 20 }
     let text = key.labelText
     if action.isInputAction && text.isLowercased {
-      return 26
+      // 26 键小写字母: 22pt, 仿微信/系统键盘 (原来 26pt 偏大偏重)。
+      return 22
     }
     if action.isSystemAction || action.isPrimaryAction { return 16 }
     return 23
@@ -543,8 +549,8 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
   open func buttonFontWeight(for action: KeyboardAction) -> UIFont.Weight? {
     switch action {
     case .backspace: return .regular
-    case .character(let char): return char.isLowercased ? .light : nil
-    case .symbol(let symbol): return symbol.char.isLowercased ? .light : nil
+    case .character(let char): return char.isLowercased ? .regular : nil
+    case .symbol(let symbol): return symbol.char.isLowercased ? .regular : nil
     // default: return buttonImage(for: action) != nil ? .light : nil
     default: return nil
     }
@@ -554,8 +560,8 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
     let action = key.action
     switch action {
     case .backspace: return .regular
-    case .character(let char): return char.isLowercased ? .light : nil
-    case .symbol(let symbol): return symbol.char.isLowercased ? .light : nil
+    case .character(let char): return char.isLowercased ? .regular : nil
+    case .symbol(let symbol): return symbol.char.isLowercased ? .regular : nil
     // default: return buttonImage(for: action) != nil ? .light : nil
     default: return nil
     }
@@ -626,10 +632,6 @@ extension KeyboardAction {
 
   /// 按键空闲状态的背景颜色
   func buttonBackgroundColorForIdleState(for context: KeyboardContext) -> UIColor {
-    // 数字九宫格分类符号按键颜色调整
-    if isClassifySymbolicOfLight {
-      return HamsterUIColor.shared.standardButtonBackground(for: context)
-    }
     if isUppercasedShiftAction { return buttonBackgroundColorForPressedState(for: context) }
     if isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
       return HamsterUIColor.shared.standardDarkButtonBackground(for: context)
@@ -641,11 +643,6 @@ extension KeyboardAction {
 
   /// 按键按下状态的背景颜色
   func buttonBackgroundColorForPressedState(for context: KeyboardContext) -> UIColor {
-    // 数字九宫格分类符号按键颜色调整
-    if isClassifySymbolicOfLight {
-      return context.hasDarkColorScheme ? HamsterUIColor.shared.standardButtonBackground(for: context) : .white
-    }
-
     if isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
       return context.hasDarkColorScheme ? HamsterUIColor.shared.standardButtonBackground(for: context) : .white
     }

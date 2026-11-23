@@ -2,13 +2,13 @@
 //  KeyboardToolbarCustomizePanelView.swift
 //
 //  键盘内"定制工具栏"面板 (仿微信输入法):
-//  第 1 节: 工具栏上的工具, 逐个开关显示/隐藏, 可拖拽排序,
-//    每行还有左移/右移按钮 (拖拽在键盘覆盖层里不好用时的可靠替代,
-//    任意排列都能做到, 顺序里最后一个工具固定在工具栏最右端)。
+//  第 1 节: 工具栏上的工具, 逐个开关显示/隐藏, 每行可改分区 (左/中/右,
+//    分段选择器) 与组内上下移动, 也可拖拽排序 (拖拽改的是全部顺序,
+//    组内相对顺序以它为准)。
 //  第 2 节: 菜单宫格里的格子, 逐个开关显示/隐藏。
-//  开关状态存在 App Group 共享 UserDefaults (toolbarVisibleTools /
-//  menuVisibleTiles) 里, 顺序存在 toolbarToolsOrder 里; 工具栏渲染时
-//  只显示开关打开的工具, 按保存的顺序从左到右排列, 最后一个固定在最右侧。
+//  开关/分区/顺序存在 App Group 共享 UserDefaults (toolbarVisibleTools /
+//  toolbarToolZones / toolbarToolsOrder) 里; 工具栏渲染时只显示开关打开的
+//  工具, 按分区 (左/中/右) 分组、组内按顺序紧凑排列。
 //  左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口), 所以不在列表里。
 //  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上。
 //
@@ -22,7 +22,9 @@ import UIKit
 class KeyboardToolbarCustomizePanelView: NibLessView {
   /// 某一工具开关变化时的回调 (toolID, 是否显示), 由调用方写 UserDefaults 并重建工具栏。
   var onToggle: ((String, Bool) -> Void)?
-  /// 拖拽/左右移排序后的回调 (新的全部工具 id 顺序), 由调用方保存顺序并重建工具栏。
+  /// 某一工具分区变化时的回调 (toolID, 新分区), 由调用方保存分区、重建工具栏并刷新本面板。
+  var onZoneChange: ((String, UserDefaults.ToolbarToolZone) -> Void)?
+  /// 拖拽/上下移排序后的回调 (新的全部工具 id 顺序), 由调用方保存顺序并重建工具栏。
   /// 面板内已自行调整顺序并刷新, 调用方不需要再 reload。
   var onReorder: (([String]) -> Void)?
   /// 某一菜单格子开关变化时的回调 (tileID, 是否显示), 由调用方写 UserDefaults。
@@ -40,12 +42,13 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     "dismiss": "chevron.down",
   ]
 
-  /// 工具列表: (id, 显示名, 是否显示)。由调用方传入 (收起键盘永远在列,
+  /// 工具列表: (id, 显示名, 是否显示, 分区)。由调用方传入 (收起键盘永远在列,
   /// 不再受 YAML 的 displayKeyboardDismissButton 开关影响——那个开关
   /// 在老用户已保存的配置里是关的, 之前导致收起键盘在工具栏和本面板里
   /// 根本不出现, 排序也只能在剪贴板/常用语之间换一下)。
-  /// 顺序即工具栏上的顺序 (可见工具在前、隐藏工具在后, 拖拽/左右移可调整)。
-  private var tools: [(id: String, title: String, visible: Bool)] = []
+  /// 顺序即工具栏上的全局顺序 (toolbarToolsOrder); 同区内的相对顺序就是
+  /// 组内顺序, 上下移只在同区内换位。
+  private var tools: [(id: String, title: String, visible: Bool, zone: UserDefaults.ToolbarToolZone)] = []
 
   /// 菜单格子列表: (id, 显示名, 是否显示)。由调用方传入 menuTiles()。
   private var tiles: [(id: String, title: String, visible: Bool)] = []
@@ -146,7 +149,7 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   }
 
   /// 刷新工具 + 菜单格子列表
-  func reload(with tools: [(id: String, title: String, visible: Bool)], tiles: [(id: String, title: String, visible: Bool)]) {
+  func reload(with tools: [(id: String, title: String, visible: Bool, zone: UserDefaults.ToolbarToolZone)], tiles: [(id: String, title: String, visible: Bool)]) {
     self.tools = tools
     self.tiles = tiles
     tableView.reloadData()
@@ -180,29 +183,67 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     }
   }
 
-  /// 左移按钮: 工具往左挪一位 (顺序里的位置)。
-  @objc private func moveLeftTapped(_ sender: UIButton) {
+  /// 上移按钮: 工具在同区内往上挪一位 (组内顺序)。
+  @objc private func moveUpTapped(_ sender: UIButton) {
     guard let indexPath = indexPath(for: sender), indexPath.section == 0 else { return }
-    moveTool(at: indexPath.row, by: -1)
+    moveToolWithinZone(at: indexPath.row, by: -1)
   }
 
-  /// 右移按钮: 工具往右挪一位 (顺序里的位置)。
-  @objc private func moveRightTapped(_ sender: UIButton) {
+  /// 下移按钮: 工具在同区内往下挪一位 (组内顺序)。
+  @objc private func moveDownTapped(_ sender: UIButton) {
     guard let indexPath = indexPath(for: sender), indexPath.section == 0 else { return }
-    moveTool(at: indexPath.row, by: 1)
+    moveToolWithinZone(at: indexPath.row, by: 1)
   }
 
-  /// 显式移动工具顺序 (拖拽的可靠替代): 调整本地顺序并通知调用方保存。
-  private func moveTool(at index: Int, by offset: Int) {
-    let destination = index + offset
-    guard tools.indices.contains(index), tools.indices.contains(destination) else { return }
-    let tool = tools.remove(at: index)
-    tools.insert(tool, at: destination)
+  /// 组内移动: 与同区最近的邻位换位 (flat 顺序里找同区邻居, 换位后组内
+  /// 相对顺序即变, 跨区不动); 同区没有邻位时不动 (按钮置灰, 点不到)。
+  private func moveToolWithinZone(at index: Int, by offset: Int) {
+    guard tools.indices.contains(index) else { return }
+    let zone = tools[index].zone
+    let neighbor: Int?
+    if offset < 0 {
+      neighbor = (0..<index).reversed().first { tools[$0].zone == zone }
+    } else {
+      neighbor = ((index + 1)..<tools.count).first { tools[$0].zone == zone }
+    }
+    guard let neighbor else { return }
+    tools.swapAt(index, neighbor)
     tableView.reloadData()
     onReorder?(tools.map { $0.id })
   }
 
-  /// 左移/右移小按钮 (16pt 细线箭头)。到头时置灰不可点。
+  /// 同区内是否有上/下邻位 (决定上下移按钮是否可用)。
+  private func hasZoneNeighbor(at index: Int, offset: Int) -> Bool {
+    guard tools.indices.contains(index) else { return false }
+    let zone = tools[index].zone
+    if offset < 0 {
+      return (0..<index).reversed().contains { tools[$0].zone == zone }
+    }
+    return ((index + 1)..<tools.count).contains { tools[$0].zone == zone }
+  }
+
+  /// 分区选择器 (左/中/右三段)。改分区后行会留在原位 (flat 顺序不变),
+  /// 只换组, 工具栏上立刻进新组; 上下移可用性随之刷新。
+  private func zoneSegmentedControl(for tool: (id: String, title: String, visible: Bool, zone: UserDefaults.ToolbarToolZone)) -> UISegmentedControl {
+    let control = UISegmentedControl(items: UserDefaults.ToolbarToolZone.allCases.map { $0.title })
+    control.selectedSegmentIndex = UserDefaults.ToolbarToolZone.allCases.firstIndex(of: tool.zone) ?? 0
+    control.addTarget(self, action: #selector(zoneChanged(_:)), for: .valueChanged)
+    return control
+  }
+
+  @objc private func zoneChanged(_ sender: UISegmentedControl) {
+    guard let indexPath = indexPath(for: sender), indexPath.section == 0,
+          sender.selectedSegmentIndex >= 0,
+          sender.selectedSegmentIndex < UserDefaults.ToolbarToolZone.allCases.count else { return }
+    let zone = UserDefaults.ToolbarToolZone.allCases[sender.selectedSegmentIndex]
+    let tool = tools[indexPath.row]
+    guard tool.zone != zone else { return }
+    tools[indexPath.row].zone = zone
+    tableView.reloadData()
+    onZoneChange?(tool.id, zone)
+  }
+
+  /// 上移/下移小按钮 (16pt 细线箭头)。到头时置灰不可点。
   private func moveButton(systemImage: String, enabled: Bool, action: Selector) -> UIButton {
     let button = UIButton(type: .system)
     button.setImage(UIImage(systemName: systemImage), for: .normal)
@@ -263,12 +304,14 @@ extension KeyboardToolbarCustomizePanelView: UITableViewDataSource {
     toggle.addTarget(self, action: #selector(switchChanged(_:)), for: .valueChanged)
 
     if isToolSection {
-      // 左移/右移按钮 + 开关 (拖拽之外的显式排序操作)。
-      let left = moveButton(systemImage: "chevron.left", enabled: indexPath.row > 0, action: #selector(moveLeftTapped(_:)))
-      let right = moveButton(systemImage: "chevron.right", enabled: indexPath.row < tools.count - 1, action: #selector(moveRightTapped(_:)))
-      let stack = UIStackView(arrangedSubviews: [left, right, toggle])
+      // 分区选择器 (左/中/右) + 同区内上下移按钮 + 开关
+      // (拖拽之外的显式排序操作; 拖拽改全局顺序, 上下移只在同区内换位)。
+      let zoneControl = zoneSegmentedControl(for: tools[indexPath.row])
+      let up = moveButton(systemImage: "chevron.up", enabled: hasZoneNeighbor(at: indexPath.row, offset: -1), action: #selector(moveUpTapped(_:)))
+      let down = moveButton(systemImage: "chevron.down", enabled: hasZoneNeighbor(at: indexPath.row, offset: 1), action: #selector(moveDownTapped(_:)))
+      let stack = UIStackView(arrangedSubviews: [zoneControl, up, down, toggle])
       stack.axis = .horizontal
-      stack.spacing = 2
+      stack.spacing = 6
       stack.alignment = .center
       cell.accessoryView = stack
     } else {

@@ -218,6 +218,22 @@ public extension UserDefaults {
     }
   }
 
+  /// 模糊音开关 (默认开): 开启后, 拼音输入时 zh/z、ch/c、sh/s、n/l、
+  /// h/f、an/ang、en/eng、in/ing 可互相混输 (福建用户常见混淆)。
+  /// 未设置过 (老用户首次升级) 视为开, 与默认值一致。
+  var fuzzyPinyinEnabled: Bool {
+    get {
+      if object(forKey: Self.fuzzyPinyinEnabledKey) != nil {
+        return bool(forKey: Self.fuzzyPinyinEnabledKey)
+      }
+      return true
+    }
+    set {
+      set(newValue, forKey: Self.fuzzyPinyinEnabledKey)
+      Logger.statistics.debug("save fuzzyPinyinEnabled: \(newValue)")
+    }
+  }
+
   /// RIME: 输入方案列表
   var schemas: [RimeSchema] {
     get {
@@ -473,6 +489,73 @@ public extension UserDefaults {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
     toolbarVisibleTools = Set(Self.toolbarToolAllIDs)
     menuVisibleTiles = Set(Self.menuTileAllIDs)
+    // 分区也恢复默认 (剪贴板左、常用语左、收起键盘右)。
+    removeObject(forKey: Self.toolbarToolZonesKey)
+  }
+
+  // MARK: - 工具栏工具位置分区 (左/中/右)
+
+  /// 工具栏工具所在分区。工具栏分左、中、右三组排布, 每组内按
+  /// toolbarToolsOrder 的相对顺序紧凑排列 (组内间距 12pt, 不均分);
+  /// 左侧菜单按钮 (格子图标) 不参与分区, 永远在最左。
+  enum ToolbarToolZone: String, Codable, CaseIterable {
+    case left, center, right
+
+    var title: String {
+      switch self {
+      case .left: return "左"
+      case .center: return "中"
+      case .right: return "右"
+      }
+    }
+  }
+
+  /// 工具默认分区: 剪贴板左、常用语左、收起键盘右
+  /// (与第 4 轮用户已习惯的布局一致: 收起键盘钉在最右)。
+  static let toolbarToolDefaultZone: [String: ToolbarToolZone] = [
+    "clipboard": .left, "phrases": .left, "dismiss": .right,
+  ]
+
+  /// 各工具的分区 (toolID -> 分区)。未设置过时按当前生效布局推导,
+  /// 不写盘: 顺序里最后一个工具 (当前钉在最右的那个) 归右区, 其余归左区,
+  /// 这样老用户现有的布局原样保留, 不会被重置; 全新安装默认顺序
+  /// [clipboard, phrases, dismiss] 推导结果正好是左、左、右。
+  /// 一旦用户在定制面板里改过任一工具的分区, 即写盘, 此后以保存值为准。
+  var toolbarToolZones: [String: ToolbarToolZone] {
+    get {
+      if let dict = dictionary(forKey: Self.toolbarToolZonesKey) as? [String: String] {
+        var zones: [String: ToolbarToolZone] = [:]
+        for id in Self.toolbarToolAllIDs {
+          zones[id] = dict[id].flatMap(ToolbarToolZone.init(rawValue:))
+            ?? Self.toolbarToolDefaultZone[id] ?? .left
+        }
+        return zones
+      }
+      var zones: [String: ToolbarToolZone] = [:]
+      let order = toolbarToolsOrder
+      for (index, id) in order.enumerated() {
+        zones[id] = (index == order.count - 1) ? .right : .left
+      }
+      for id in Self.toolbarToolAllIDs where zones[id] == nil {
+        zones[id] = Self.toolbarToolDefaultZone[id] ?? .left
+      }
+      return zones
+    }
+    set {
+      set(newValue.mapValues { $0.rawValue }, forKey: Self.toolbarToolZonesKey)
+    }
+  }
+
+  /// 某个工具的分区 (未设置过按上面规则推导)。
+  func toolbarToolZone(for toolID: String) -> ToolbarToolZone {
+    toolbarToolZones[toolID] ?? Self.toolbarToolDefaultZone[toolID] ?? .left
+  }
+
+  /// 设置某个工具的分区 (写盘, 此后以保存值为准)。
+  func setToolbarToolZone(_ toolID: String, zone: ToolbarToolZone) {
+    var zones = toolbarToolZones
+    zones[toolID] = zone
+    toolbarToolZones = zones
   }
 
   // MARK: - 菜单宫格格子显隐 (工具面板)
@@ -607,6 +690,7 @@ extension UserDefaults {
 
   public static let isFirstRunningOfKey = "com.ihsiao.apps.Hamster.UserDefaults.isFirstRunning"
   private static let overrideRimeDirectoryOfKey = "com.ihsiao.apps.Hamster.UserDefaults.overrideRimeDirectory"
+  private static let fuzzyPinyinEnabledKey = "com.ihsiao.apps.Hamster.UserDefault.keys.fuzzyPinyinEnabled"
   private static let schemasForKey = "com.ihsiao.apps.Hamster.UserDefault.keys.schemas"
   private static let selectSchemasForKey = "com.ihsiao.apps.Hamster.UserDefault.keys.selectSchemas"
   private static let currentSchemaForKey = "com.ihsiao.apps.Hamster.UserDefault.keys.currentSchema"
@@ -627,6 +711,7 @@ extension UserDefaults {
   private static let chinesePrimaryKeyboardIsNineGridKey = "com.ihsiao.apps.Hamster.UserDefault.keys.chinesePrimaryKeyboardIsNineGrid"
   private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"
   private static let toolbarToolsOrderKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolsOrder"
+  private static let toolbarToolZonesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolZones"
   private static let menuVisibleTilesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.menuVisibleTiles"
 
   // MARK: - 剪贴板历史 / 常用语

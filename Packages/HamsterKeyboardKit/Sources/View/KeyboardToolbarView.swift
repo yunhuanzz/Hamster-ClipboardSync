@@ -20,8 +20,8 @@ import UIKit
  工具栏左侧菜单 (点左上角图标打开, 仿微信输入法):
  4 列宫格面板, 含剪贴板 / 常用语 / 收起键盘 / 切换26键·九宫格 /
  定制工具栏 / 立即同步 / 设置 / 常用语管理。
- 工具栏按钮可通过"定制工具栏"逐个隐藏/显示并拖拽排序
- (顺序存在共享 UserDefaults, 收起键盘默认在最右)。
+ 工具栏按钮可通过"定制工具栏"逐个隐藏/显示、分区 (左/中/右) 并排序
+ (顺序与分区存在共享 UserDefaults, 收起键盘默认在右区)。
  */
 class KeyboardToolbarView: NibLessView {
   private let appearance: KeyboardAppearance
@@ -105,6 +105,20 @@ class KeyboardToolbarView: NibLessView {
     return view
   }()
 
+  /// 粘贴提示行左侧标识图标: 小剪贴板 (list.clipboard, 灰色), 一眼看出
+  /// 这行是剪贴板来的内容, 不是 RIME 候选词。纯展示, 不接收触摸。
+  private lazy var pasteRowIconView: UIImageView = {
+    let imageView = UIImageView()
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.image = UIImage(
+      systemName: "list.clipboard",
+      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 15, weight: .medium)))
+    imageView.tintColor = .secondaryLabel
+    imageView.contentMode = .scaleAspectFit
+    imageView.isUserInteractionEnabled = false
+    return imageView
+  }()
+
   /// 粘贴提示行右侧: 向下箭头 ⌄ (微信式, 点按展开复制内容、分段粘贴)。
   /// 注意: 微信里的这个 ⌄ 是展开复制内容、智能分段、选一段粘贴, 不是隐藏键盘
   /// (第 3 轮把它做成隐藏键盘是理解错了); 隐藏键盘只作为工具栏工具。
@@ -119,14 +133,16 @@ class KeyboardToolbarView: NibLessView {
   }()
 
   /// 粘贴提示行中间: 剪贴板文字 (单行截断, 点按粘贴)。
+  /// 字号与候选栏正常候选字同级 (style.candidateTextFont, 配置 18pt),
+  /// 之前 14pt 太小 (用户反馈)。
   private lazy var pasteRowTextButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.titleLabel?.font = .systemFont(ofSize: 14)
+    button.titleLabel?.font = style.candidateTextFont
     button.titleLabel?.lineBreakMode = .byTruncatingTail
     button.setTitleColor(.label, for: .normal)
     button.contentHorizontalAlignment = .left
-    button.titleEdgeInsets = UIEdgeInsets(top: 0, left: 6, bottom: 0, right: 6)
+    button.titleEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 6)
     button.addTarget(self, action: #selector(pasteRowTextTapped), for: .touchUpInside)
     return button
   }()
@@ -176,9 +192,6 @@ class KeyboardToolbarView: NibLessView {
 
   /// 当前展示的粘贴内容分段展开面板, 覆盖在键盘根视图上
   private var segmentsPanel: KeyboardPasteSegmentsPanelView?
-
-  /// 工具栏按钮约束 (重建工具栏按钮时先停用旧约束)
-  private var toolbarButtonConstraints: [NSLayoutConstraint] = []
 
   // TODO: 常用功能栏
   lazy var commonFunctionBar: UIView = {
@@ -307,6 +320,7 @@ class KeyboardToolbarView: NibLessView {
   /// 粘贴行里不再放隐藏键盘——隐藏键盘只作为工具栏工具。
   private func setupPasteRow() {
     commonFunctionBar.addSubview(pasteRowView)
+    pasteRowView.addSubview(pasteRowIconView)
     pasteRowView.addSubview(pasteRowExpandButton)
     pasteRowView.addSubview(pasteRowTextButton)
     pasteRowView.addSubview(pasteRowCloseButton)
@@ -316,7 +330,12 @@ class KeyboardToolbarView: NibLessView {
       pasteRowView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
       pasteRowView.heightAnchor.constraint(equalToConstant: 30),
 
-      pasteRowTextButton.leadingAnchor.constraint(equalTo: pasteRowView.leadingAnchor),
+      pasteRowIconView.leadingAnchor.constraint(equalTo: pasteRowView.leadingAnchor, constant: 2),
+      pasteRowIconView.centerYAnchor.constraint(equalTo: pasteRowView.centerYAnchor),
+      pasteRowIconView.widthAnchor.constraint(equalToConstant: 18),
+      pasteRowIconView.heightAnchor.constraint(equalToConstant: 18),
+
+      pasteRowTextButton.leadingAnchor.constraint(equalTo: pasteRowIconView.trailingAnchor, constant: 6),
       pasteRowTextButton.trailingAnchor.constraint(equalTo: pasteRowExpandButton.leadingAnchor),
       pasteRowTextButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
       pasteRowTextButton.bottomAnchor.constraint(equalTo: pasteRowView.bottomAnchor),
@@ -473,11 +492,13 @@ class KeyboardToolbarView: NibLessView {
 
   /// 打开功能菜单宫格面板 (覆盖在键盘根视图上)。
   /// 只显示定制里开关打开的格子 (menuVisibleTiles)。
+  /// 面板本身透明: 打开前先把下面的工具栏和按键容器隐藏, 露出键盘根视图
+  /// 自身的底色 (与键盘本体同一块系统底色, 不可能有色差); 关闭时恢复。
   private func showMenuPanel() {
     dismissAllPanels()
     guard let container = superview else { return }
+    hideKeyboardContentForOverlayPanel()
     let panel = KeyboardToolbarMenuPanelView()
-    panel.panelBackgroundColor = opaquePanelBackgroundColor
     panel.onSelect = { [weak self] tileID in
       self?.dismissMenuPanel()
       self?.handleMenuSelection(tileID)
@@ -493,6 +514,40 @@ class KeyboardToolbarView: NibLessView {
   private func dismissMenuPanel() {
     menuPanel?.removeFromSuperview()
     menuPanel = nil
+    restoreKeyboardContentForOverlayPanel()
+  }
+
+  /// 覆盖面板打开时隐藏键盘内容: 容器 (键盘根视图) 里除覆盖面板外的视图,
+  /// 即工具栏自身 + 按键容器。面板透明, 露出的就是根视图自身的底色,
+  /// 与键盘本体绝对一致 (深色模式同样成立)。
+  /// 注意: 工具栏也要藏——面板是全屏覆盖, 只藏按键的话工具栏会从面板
+  /// 标题区透出来。恢复时机: 面板关闭 (dismissMenuPanel) 与键盘隐藏
+  /// (didMoveToWindow -> dismissAllPanels), 两处都调恢复, 不会藏住。
+  private var overlayHiddenViews: [UIView] = []
+
+  private func hideKeyboardContentForOverlayPanel() {
+    guard let container = superview, overlayHiddenViews.isEmpty else { return }
+    // show 前已调 dismissAllPanels, 此时容器里没有残留面板;
+    // 只跳过已知的覆盖面板类 (防御性, 正常情况下一个都没有)。
+    var hidden: [UIView] = []
+    for view in container.subviews where !isOverlayPanelView(view) {
+      view.isHidden = true
+      hidden.append(view)
+    }
+    overlayHiddenViews = hidden
+  }
+
+  private func restoreKeyboardContentForOverlayPanel() {
+    overlayHiddenViews.forEach { $0.isHidden = false }
+    overlayHiddenViews.removeAll()
+  }
+
+  private func isOverlayPanelView(_ view: UIView) -> Bool {
+    view is KeyboardToolbarMenuPanelView
+      || view is KeyboardTextListPanelView
+      || view is KeyboardToolbarCustomizePanelView
+      || view is KeyboardCommonPhrasesEditorPanelView
+      || view is KeyboardPasteSegmentsPanelView
   }
 
   /// 点宫格后的动作 (与旧版 UIMenu 的各项一一对应)。
@@ -579,53 +634,69 @@ class KeyboardToolbarView: NibLessView {
     keyboardContext.setKeyboardType(toNineGrid ? .chineseNineGrid : .chinese(.lowercased))
   }
 
-  // MARK: - 工具栏按钮重建 (定制工具栏)
+  // MARK: - 工具栏按钮重建 (定制工具栏, 左/中/右分区)
 
-  /// 按配置 + 用户开关/顺序重建工具栏按钮。左侧菜单按钮常驻 (配置开启时);
-  /// 剪贴板/常用语/收起键盘按共享 UserDefaults 里的顺序 (toolbarToolsOrder,
-  /// 仅显示开关打开的工具) 从左到右排列, 其中顺序里的最后一个工具固定在最右侧
-  /// (默认是收起键盘, 方便拇指点按); 其余工具依次排在菜单按钮之后。
-  /// 左侧菜单按钮不参与排序。
+  /// 三个分区的容器: 组内间距固定 12pt, 不均分、不拉伸 (distribution .fill)。
+  /// 左组贴在菜单按钮后, 中组居中, 右组贴右边缘。
+  /// 注意: 图4 图标横跨全栏、间隔巨大的原因不是 UIStackView 均分
+  /// (这里原来根本没有 stack, 是手写约束), 而是"顺序里最后一个工具钉死
+  /// 右边缘"——中间留出整段空白。分区模型取消了这个钉死规则。
+  private lazy var leftToolsStackView: UIStackView = makeToolsStackView()
+  private lazy var centerToolsStackView: UIStackView = makeToolsStackView()
+  private lazy var rightToolsStackView: UIStackView = makeToolsStackView()
+
+  private func makeToolsStackView() -> UIStackView {
+    let stack = UIStackView()
+    stack.axis = .horizontal
+    stack.spacing = 12
+    stack.alignment = .center
+    stack.distribution = .fill
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }
+
+  /// 工具栏按钮布局 (只建一次): 菜单按钮固定最左, 三个分区容器分别贴左/居中/贴右。
+  private var toolsStacksLayoutSetup = false
+
+  private func setupToolsStacksLayoutIfNeeded() {
+    guard !toolsStacksLayoutSetup else { return }
+    toolsStacksLayoutSetup = true
+    commonFunctionBar.addSubview(iconButton)
+    commonFunctionBar.addSubview(leftToolsStackView)
+    commonFunctionBar.addSubview(centerToolsStackView)
+    commonFunctionBar.addSubview(rightToolsStackView)
+    NSLayoutConstraint.activate([
+      iconButton.leadingAnchor.constraint(equalTo: commonFunctionBar.leadingAnchor),
+      iconButton.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+      iconButton.heightAnchor.constraint(equalTo: iconButton.widthAnchor),
+      iconButton.topAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.topAnchor),
+      commonFunctionBar.bottomAnchor.constraint(greaterThanOrEqualTo: iconButton.bottomAnchor),
+
+      leftToolsStackView.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 12),
+      leftToolsStackView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+
+      centerToolsStackView.centerXAnchor.constraint(equalTo: commonFunctionBar.centerXAnchor),
+      centerToolsStackView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+
+      rightToolsStackView.trailingAnchor.constraint(equalTo: commonFunctionBar.trailingAnchor),
+      rightToolsStackView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+    ])
+  }
+
+  /// 按分区 + 用户开关/顺序重建工具栏按钮。左侧菜单按钮常驻 (配置开启时),
+  /// 永远在最左, 不参与分区; 剪贴板/常用语/收起键盘按共享 UserDefaults 里的
+  /// 分区 (toolbarToolZones) 分左/中/右三组, 每组内按 toolbarToolsOrder 的
+  /// 相对顺序紧凑排列 (组内 12pt), 中组居中、右组靠右; 只显示开关打开的工具。
+  /// (收起键盘永远在工具列表里, 不再受 YAML 的 displayKeyboardDismissButton
+  /// 开关影响——那个开关在老用户已保存的配置里是关的, 之前导致收起键盘
+  /// 在工具栏上根本不出现, 显隐只由定制开关 toolbarVisibleTools 控制, 默认显示。)
   func rebuildToolbarButtons() {
-    NSLayoutConstraint.deactivate(toolbarButtonConstraints)
-    toolbarButtonConstraints.removeAll()
-    [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.removeFromSuperview() }
-
-    var constraints: [NSLayoutConstraint] = []
-    // 左侧依次排列的按钮 (图标、剪贴板、常用语)
-    var previousButton: UIButton?
-
-    func placeButton(_ button: UIButton, after previous: UIButton?) {
-      commonFunctionBar.addSubview(button)
-      if let previous {
-        constraints.append(button.leadingAnchor.constraint(equalTo: previous.trailingAnchor, constant: 8))
-      } else {
-        constraints.append(button.leadingAnchor.constraint(equalTo: commonFunctionBar.leadingAnchor))
-      }
-      constraints.append(contentsOf: [
-        button.heightAnchor.constraint(equalTo: button.widthAnchor),
-        button.topAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.topAnchor),
-        commonFunctionBar.bottomAnchor.constraint(greaterThanOrEqualTo: button.bottomAnchor),
-        button.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
-      ])
+    setupToolsStacksLayoutIfNeeded()
+    for stack in [leftToolsStackView, centerToolsStackView, rightToolsStackView] {
+      stack.arrangedSubviews.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview() }
     }
 
-    /// 固定在工具栏最右侧的按钮 (顺序里的最后一个工具)。
-    func pinButtonToTrailingEdge(_ button: UIButton) {
-      commonFunctionBar.addSubview(button)
-      constraints.append(contentsOf: [
-        button.heightAnchor.constraint(equalTo: button.widthAnchor),
-        button.trailingAnchor.constraint(equalTo: commonFunctionBar.trailingAnchor),
-        button.topAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.topAnchor),
-        commonFunctionBar.bottomAnchor.constraint(greaterThanOrEqualTo: button.bottomAnchor),
-        button.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
-      ])
-    }
-
-    // 工具 id -> 按钮。收起键盘永远在工具列表里 (不再受 YAML 的
-    // displayKeyboardDismissButton 开关影响——那个开关在老用户已保存的
-    // 配置里是关的, 之前导致收起键盘在工具栏上根本不出现, 显隐只由
-    // 定制开关 (toolbarVisibleTools) 控制, 默认显示)。
+    // 工具 id -> 按钮。
     func buttonForTool(_ toolID: String) -> UIButton? {
       switch toolID {
       case "clipboard": return clipboardButton
@@ -635,39 +706,32 @@ class KeyboardToolbarView: NibLessView {
       }
     }
 
-    if keyboardContext.displayAppIconButton {
-      placeButton(iconButton, after: nil)
-      previousButton = iconButton
-    }
-
-    // 可见工具按保存的顺序排列: 除最后一个外依次排在左侧, 最后一个固定在最右侧
-    let orderedButtons = UserDefaults.hamster.toolbarToolsOrder
-      .filter { UserDefaults.hamster.isToolbarToolVisible($0) }
-      .compactMap(buttonForTool)
-    for (index, button) in orderedButtons.enumerated() {
-      if index == orderedButtons.count - 1 {
-        pinButtonToTrailingEdge(button)
-      } else {
-        placeButton(button, after: previousButton)
-        previousButton = button
+    func stackForZone(_ zone: UserDefaults.ToolbarToolZone) -> UIStackView {
+      switch zone {
+      case .left: return leftToolsStackView
+      case .center: return centerToolsStackView
+      case .right: return rightToolsStackView
       }
     }
 
-    toolbarButtonConstraints = constraints
-    NSLayoutConstraint.activate(constraints)
+    // 可见工具按分区进组, 组内保持 toolbarToolsOrder 的相对顺序。
+    for toolID in UserDefaults.hamster.toolbarToolsOrder where UserDefaults.hamster.isToolbarToolVisible(toolID) {
+      guard let button = buttonForTool(toolID) else { continue }
+      button.isHidden = isPasteRowVisible
+      stackForZone(UserDefaults.hamster.toolbarToolZone(for: toolID)).addArrangedSubview(button)
+    }
 
-    // 粘贴提示行展示时, 工具栏其他按钮暂时隐藏 (提示行盖住整个工具栏);
-    // 提示行隐藏时恢复显示。
-    [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = isPasteRowVisible }
+    iconButton.isHidden = !keyboardContext.displayAppIconButton || isPasteRowVisible
   }
 
   /// 定制工具栏面板要列出的工具 (按保存的顺序, 包括已隐藏的工具;
   /// 收起键盘永远在列, 不再受 YAML 的 displayKeyboardDismissButton 开关影响)。
-  private func customizeTools() -> [(id: String, title: String, visible: Bool)] {
+  /// 每项带当前分区, 面板里可改分区 (左/中/右) 与组内顺序。
+  private func customizeTools() -> [(id: String, title: String, visible: Bool, zone: UserDefaults.ToolbarToolZone)] {
     let titles = ["clipboard": "剪贴板", "phrases": "常用语", "dismiss": "收起键盘"]
     return UserDefaults.hamster.toolbarToolsOrder.compactMap { id in
       guard let title = titles[id] else { return nil }
-      return (id: id, title: title, visible: UserDefaults.hamster.isToolbarToolVisible(id))
+      return (id: id, title: title, visible: UserDefaults.hamster.isToolbarToolVisible(id), zone: UserDefaults.hamster.toolbarToolZone(for: id))
     }
   }
 
@@ -689,7 +753,13 @@ class KeyboardToolbarView: NibLessView {
       UserDefaults.hamster.setToolbarToolVisible(toolID, visible: visible)
       self?.rebuildToolbarButtons()
     }
-    // 拖拽/左右移排序: 面板内已调整顺序并刷新, 这里只保存新顺序并重建工具栏
+    // 分区切换: 保存新分区并重建工具栏, 面板刷新 (同组内的上下移可用性会变)。
+    panel.onZoneChange = { [weak self] toolID, zone in
+      UserDefaults.hamster.setToolbarToolZone(toolID, zone: zone)
+      self?.rebuildToolbarButtons()
+      self?.customizePanel?.reload(with: self?.customizeTools() ?? [], tiles: self?.customizeTiles() ?? [])
+    }
+    // 拖拽/上下移排序: 面板内已调整顺序并刷新, 这里只保存新顺序并重建工具栏
     panel.onReorder = { [weak self] orderedIDs in
       UserDefaults.hamster.toolbarToolsOrder = orderedIDs
       self?.rebuildToolbarButtons()

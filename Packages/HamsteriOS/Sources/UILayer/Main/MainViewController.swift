@@ -31,6 +31,8 @@ protocol SubViewControllerFactory {
   func makeClipboardSyncSettingsViewController() -> ClipboardSyncSettingsViewController
   /// 定制工具栏页 (复用候选栏设置页)
   func makeToolbarSettingsViewController() -> ToolbarSettingsViewController
+  /// 更多设置页 (首页卡片之外的其余设置)
+  func makeMoreSettingsViewController() -> MoreSettingsViewController
 }
 
 open class MainViewController: UISplitViewController {
@@ -87,6 +89,10 @@ open class MainViewController: UISplitViewController {
   /// 定制工具栏页 (复用候选栏设置页)
   private lazy var toolbarSettingsViewController: ToolbarSettingsViewController
     = subViewControllerFactory.makeToolbarSettingsViewController()
+
+  /// 更多设置页 (首页卡片之外的其余设置)
+  private lazy var moreSettingsViewController: MoreSettingsViewController
+    = subViewControllerFactory.makeMoreSettingsViewController()
 
   private lazy var primaryNavigationViewController: UINavigationController = {
     let vc = UINavigationController(rootViewController: settingsViewController)
@@ -201,6 +207,8 @@ extension MainViewController {
       presentClipboardSyncSettingsViewController()
     case .toolbarSettings:
       presentToolbarSettingsViewController()
+    case .more:
+      presentMoreSettingsViewController()
     case .main:
       presentMainViewController()
     default:
@@ -274,6 +282,10 @@ extension MainViewController {
 
   func presentToolbarSettingsViewController() {
     presentViewController(toolbarSettingsViewController)
+  }
+
+  func presentMoreSettingsViewController() {
+    presentViewController(moreSettingsViewController)
   }
 
   private func presentViewController(_ vc: UIViewController) {

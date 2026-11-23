@@ -157,6 +157,45 @@ open class HamsterAppDependencyContainer {
         self.configuration = HamsterConfiguration()
       }
     }
+
+    // 一次性迁移 (第 5 轮): 把已装配置里的 rime.overrideDictFiles 强制改成 false
+    // (见 migrateUserDictProtection; 首次运行分支已提前 return, 到不了这里)。
+    migrateUserDictProtection()
+  }
+
+  /// 一次性迁移 (第 5 轮): 已装配置里的 rime.overrideDictFiles 还是旧默认值
+  /// true, 而内置 hamster.yaml 早已改成 false; App 只在首次运行读一次 YAML,
+  /// 之后都从 UserDefaults 加载, 所以 YAML 的修正永远到不了已装的配置,
+  /// 导致每次部署都清空用户词典学习成果。这里强制改成 false 并显式持久化
+  /// (init 内赋值不触发 didSet, 所以必须手动保存)。
+  /// 改完一次后下次启动看到的已是 false, 不再重复写; 用户仍可在 RIME 页
+  /// 开关里自己改回去——部署时 userdb 已无条件保留 (见 RimeContext),
+  /// 那个开关现在只影响用户导入的 .txt 词库文件。
+  private func migrateUserDictProtection() {
+    if configuration.rime?.overrideDictFiles != false {
+      if configuration.rime == nil {
+        configuration.rime = RimeConfiguration(overrideDictFiles: false)
+      } else {
+        configuration.rime?.overrideDictFiles = false
+      }
+      do {
+        try HamsterConfigurationRepositories.shared.saveToUserDefaults(configuration)
+      } catch {
+        Logger.statistics.error("migrateUserDictProtection save configuration error: \(error.localizedDescription)")
+      }
+    }
+    if applicationConfiguration.rime?.overrideDictFiles != false {
+      if applicationConfiguration.rime == nil {
+        applicationConfiguration.rime = RimeConfiguration(overrideDictFiles: false)
+      } else {
+        applicationConfiguration.rime?.overrideDictFiles = false
+      }
+      do {
+        try HamsterConfigurationRepositories.shared.saveAppConfigurationToUserDefaults(applicationConfiguration)
+      } catch {
+        Logger.statistics.error("migrateUserDictProtection save applicationConfiguration error: \(error.localizedDescription)")
+      }
+    }
   }
 
   /// 重置应用配置
@@ -360,5 +399,9 @@ extension HamsterAppDependencyContainer: SubViewControllerFactory {
 
   func makeClipboardSyncSettingsViewController() -> ClipboardSyncSettingsViewController {
     ClipboardSyncSettingsViewController(settingsViewModel: settingsViewModel)
+  }
+
+  func makeMoreSettingsViewController() -> MoreSettingsViewController {
+    MoreSettingsViewController(settingsViewModel: settingsViewModel)
   }
 }

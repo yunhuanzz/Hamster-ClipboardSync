@@ -200,7 +200,15 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
         return .character(char.lowercased())
       }
       if case .symbol(let symbol) = action {
-        return .symbol(Symbol(char: symbol.char.lowercased()))
+        let lowered = symbol.char.lowercased()
+        // 英文 26 键是 .symbol 形式, 但划动配置里字母键一律按 .character 存;
+        // 26 键的单个字母统一归一化为 .character 查配置, 其他符号键保持 .symbol。
+        if keyboardTypeKey == .chinese(.lowercased) || keyboardTypeKey.isAlphabetic,
+           lowered.count == 1,
+           lowered.unicodeScalars.first.map(CharacterSet.letters.contains) == true {
+          return .character(lowered)
+        }
+        return .symbol(Symbol(char: lowered))
       }
       return action
     }()

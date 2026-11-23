@@ -134,12 +134,15 @@ class KeyboardRootView: NibLessView {
     return view
   }
 
-  /// emoji键盘
-  /// 注意：计算属性
-  private var emojisKeyboardView: UIView {
-    // TODO:
-    let view = UIView()
-    view.backgroundColor = .red
+  /// emoji 表情面板 (仿微信): 标题 + 9 列网格 + 底部分类栏。
+  /// 注意：计算属性 (每次切换新建, 与其他临时键盘一致)。
+  private var emojisKeyboardView: EmojisKeyboard {
+    let view = EmojisKeyboard(
+      actionHandler: actionHandler,
+      appearance: appearance,
+      keyboardContext: keyboardContext,
+      rimeContext: rimeContext
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }

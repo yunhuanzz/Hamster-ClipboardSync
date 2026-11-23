@@ -199,9 +199,6 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
     // 暂存中间部分按键，用于平分剩余宽度
     var availableItems = [KeyboardButton]()
 
-    // 回车键
-    var returnButton: KeyboardButton?
-
     // 左侧符号栏约束
     staticConstraints.append(symbolsListContainerView.topAnchor.constraint(equalTo: topAnchor))
     staticConstraints.append(symbolsListContainerView.leadingAnchor.constraint(equalTo: leadingAnchor))
@@ -209,16 +206,14 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
     for row in keyboardRows {
       for button in row {
         // 按键高度约束（高度包含 insets 部分）
+        // 仿微信: 第 3 行右列是表情键 (单行高度), 换行在底行右下角,
+        // 不再有跨两行的回车键, 所以每个键都加普通高度约束。
         let heightConstant = layoutConfig.rowHeight
-        if button.row == 2 && button.column + 1 == row.endIndex { // 第3行的最后一列是回车键，因为跨行，需要加2倍高度, 所以不添加高度约束
-          returnButton = button
-        } else {
-          let buttonHeightConstraint = button.heightAnchor.constraint(equalToConstant: heightConstant)
-          buttonHeightConstraint.identifier = "\(button.row)-\(button.column)-button-height"
-          // 注意：必须设置高度约束的优先级，Autolayout 会根据此约束自动更新根视图的高度，否则会与系统自动添加的约束冲突，会有错误日志输出。
-          buttonHeightConstraint.priority = .defaultHigh
-          dynamicHeightConstraints.append(buttonHeightConstraint)
-        }
+        let buttonHeightConstraint = button.heightAnchor.constraint(equalToConstant: heightConstant)
+        buttonHeightConstraint.identifier = "\(button.row)-\(button.column)-button-height"
+        // 注意：必须设置高度约束的优先级，Autolayout 会根据此约束自动更新根视图的高度，否则会与系统自动添加的约束冲突，会有错误日志输出。
+        buttonHeightConstraint.priority = .defaultHigh
+        dynamicHeightConstraints.append(buttonHeightConstraint)
 
         // 按键宽度约束
         // 注意：最后一行的第一个按钮和每行最后一个按键(除最后一行)的宽度是固定的，其他按键的宽度是平分的
@@ -251,8 +246,7 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
           }
 
           // 最后一行添加按键相对视图的 bottom 约束
-          // 倒数第二行最后一个回车键添加夸行约束
-          if (button.row + 1 == keyboardRows.endIndex) || (button.row + 2 == keyboardRows.endIndex && button.column + 1 == row.endIndex) {
+          if button.row + 1 == keyboardRows.endIndex {
             staticConstraints.append(button.bottomAnchor.constraint(equalTo: bottomAnchor))
           }
         }
@@ -269,12 +263,7 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
 
           // 最后一列按键添加相对行的 trailing 约束
           if button.column + 1 == row.endIndex {
-            // 最后一行最后一个键添加相对回车键的 traliing 约束
-            if button.row + 1 == keyboardRows.endIndex, let returnButton = returnButton {
-              staticConstraints.append(button.trailingAnchor.constraint(equalTo: returnButton.leadingAnchor))
-            } else {
-              staticConstraints.append(button.trailingAnchor.constraint(equalTo: trailingAnchor))
-            }
+            staticConstraints.append(button.trailingAnchor.constraint(equalTo: trailingAnchor))
           }
         }
       }

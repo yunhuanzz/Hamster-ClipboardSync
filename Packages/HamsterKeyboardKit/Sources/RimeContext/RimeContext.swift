@@ -233,17 +233,41 @@ public extension RimeContext {
       }
     }
 
-    // 自定义词组 (custom_phrase.txt) 永远保留: 部署前先从 App Group 拷回沙盒,
-    // 不受 overrideDictFiles 影响, 否则用户在"我的词组"里加的词会被部署覆盖。
+    // 自定义词组 (custom_phrase.txt / custom_phrase_t9.txt) 永远保留:
+    // 部署前先从 App Group 拷回沙盒, 不受 overrideDictFiles 影响,
+    // 否则用户在"我的词组"里加的词会被部署覆盖。
     // 文件不存在时 copyAppGroupUserDict 是空操作, 不会抛错。
     do {
-      try FileManager.copyAppGroupUserDict(["custom_phrase[.]txt$"])
+      try FileManager.copyAppGroupUserDict(["custom_phrase[.]txt$", "custom_phrase_t9[.]txt$"])
+    } catch {
+      Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
+      throw error
+    }
+
+    // 用户词典学习成果 (*.userdb) 永远保留, 不受 overrideDictFiles 影响:
+    // userdb 是运行时学出来的数据 (选词加权、造词), 不是随方案下发的词库文件,
+    // 部署时拿沙盒里的空库把它盖掉, 就是“越用越准”失效的根因。
+    // (之前只在 overrideDictFiles == false 时拷回; 已装配置里的这个值
+    // 是旧默认值 true, 所以学习成果每次部署都被清空。)
+    do {
+      try FileManager.copyAppGroupUserDict(["^.*[.]userdb.*$"])
+    } catch {
+      Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
+      throw error
+    }
+
+    // 模糊音补丁文件 (rime_ice.custom.yaml / t9.custom.yaml) 永远保留,
+    // 不受 overrideDictFiles 影响 (不然开关一开、下次部署就把补丁丢了)。
+    do {
+      try FileManager.copyAppGroupUserDict(["rime_ice[.]custom[.]yaml$", "t9[.]custom[.]yaml$"])
     } catch {
       Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
       throw error
     }
 
     // 判断是否需要覆盖键盘词库文件，如果为否，则先copy键盘词库文件至应用目录
+    // 注意: 这里只管用户导入的 .txt 词库文件, userdb 与“我的词组”
+    // 已在上面无条件拷回, 不再受这个开关影响。
     if let overrideDictFiles = configuration.rime?.overrideDictFiles, overrideDictFiles == false {
       let regex = configuration.rime?.regexOnOverrideDictFiles ?? []
       do {
@@ -257,6 +281,14 @@ public extension RimeContext {
     // 检测文件目录是否存在不存在，新建
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxSharedSupportDirectory)
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxUserDataDirectory)
+
+    // 模糊音: 按开关把补丁打进用户数据目录 (文件丢了也能在这里恢复;
+    // 开关关着时这里会把补丁去掉)。失败不阻断部署, 只记日志, 下次部署再试。
+    do {
+      try FuzzyPinyin.apply(enabled: UserDefaults.hamster.fuzzyPinyinEnabled)
+    } catch {
+      Logger.statistics.error("RIME deploy fuzzy pinyin patch error \(error.localizedDescription)")
+    }
 
     if !isRunning {
       Rime.shared.start(Rime.createTraits(
@@ -357,16 +389,37 @@ public extension RimeContext {
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxSharedSupportDirectory)
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxUserDataDirectory)
 
-    // 自定义词组 (custom_phrase.txt) 永远保留, 不受 overrideDictFiles 影响。
+    // 自定义词组 (custom_phrase.txt / custom_phrase_t9.txt) 永远保留,
+    // 不受 overrideDictFiles 影响。
     // 文件不存在时 copyAppGroupUserDict 是空操作, 不会抛错。
     do {
-      try FileManager.copyAppGroupUserDict(["custom_phrase[.]txt$"])
+      try FileManager.copyAppGroupUserDict(["custom_phrase[.]txt$", "custom_phrase_t9[.]txt$"])
+    } catch {
+      Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
+      throw error
+    }
+
+    // 用户词典学习成果 (*.userdb) 永远保留, 不受 overrideDictFiles 影响
+    // (理由同 deployment: userdb 是学出来的数据, 不是下发的词库文件)。
+    do {
+      try FileManager.copyAppGroupUserDict(["^.*[.]userdb.*$"])
+    } catch {
+      Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
+      throw error
+    }
+
+    // 模糊音补丁文件 (rime_ice.custom.yaml / t9.custom.yaml) 永远保留,
+    // 不受 overrideDictFiles 影响。
+    do {
+      try FileManager.copyAppGroupUserDict(["rime_ice[.]custom[.]yaml$", "t9[.]custom[.]yaml$"])
     } catch {
       Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
       throw error
     }
 
     // 判断是否需要覆盖键盘词库文件，如果为否，则先copy键盘词库文件至应用目录
+    // 注意: 这里只管用户导入的 .txt 词库文件, userdb 与“我的词组”
+    // 已在上面无条件拷回, 不再受这个开关影响。
     if let overrideDictFiles = configuration.rime?.overrideDictFiles, overrideDictFiles == false {
       let regex = configuration.rime?.regexOnOverrideDictFiles ?? []
       do {
@@ -375,6 +428,14 @@ public extension RimeContext {
         Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
         throw error
       }
+    }
+
+    // 模糊音: 按开关把补丁打进用户数据目录 (理由同 deployment)。
+    // 失败不阻断同步, 只记日志, 下次部署再试。
+    do {
+      try FuzzyPinyin.apply(enabled: UserDefaults.hamster.fuzzyPinyinEnabled)
+    } catch {
+      Logger.statistics.error("RIME sync fuzzy pinyin patch error \(error.localizedDescription)")
     }
 
     if !isRunning {
@@ -456,6 +517,15 @@ public extension RimeContext {
 
     // 键盘重新同步文件标志
     UserDefaults.hamster.overrideRimeDirectory = true
+
+    // 模糊音: 重置清空了沙盒用户数据目录, 按开关把补丁打回来,
+    // 否则下面沙盒 -> App Group 的同步会把 App Group 里的补丁也删掉。
+    // (重置本身是有意的: 用户词典学习成果这次会被清空, 从下次部署起重新学习。)
+    do {
+      try FuzzyPinyin.apply(enabled: UserDefaults.hamster.fuzzyPinyinEnabled)
+    } catch {
+      Logger.statistics.error("RIME reset fuzzy pinyin patch error \(error.localizedDescription)")
+    }
 
     // 部署后将方案copy至AppGroup下供keyboard使用
     try FileManager.syncSandboxSharedSupportDirectoryToAppGroup(override: true)

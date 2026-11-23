@@ -21,11 +21,15 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   /// 格子: (id, 标题, SF Symbol 名)。由调用方传入。
   private var tiles: [(id: String, title: String, systemImage: String)] = []
 
-  /// 覆盖式面板底色: 调用方 (KeyboardToolbarView) 传入与键盘本体一致的不透明颜色;
-  /// 默认用系统键盘标准底色 (浅色 #D5D6DD / 深色 #2C2C2C, 不透明)。
-  /// 注意: 不能用 .clear——第 3 轮的透明修法是错的, 面板是全屏覆盖层,
-  /// 透明底会让键盘按键从格子后面透出来, 格子文字叠在 ABC/DEF 键上。
-  var panelBackgroundColor: UIColor = HamsterUIColor.shared.standardKeyboardBackground {
+  /// 覆盖式面板底色: 透明。
+  /// 面板是盖在键盘根视图上的全屏覆盖层; 打开面板时调用方
+  /// (KeyboardToolbarView) 会把下面的工具栏和按键容器都隐藏,
+  /// 露出键盘根视图自身的底色 (appearance.backgroundStyle),
+  /// 与键盘本体绝对是同一块颜色, 不可能再有色差——不要再写死色值
+  /// (第 4 轮的 #D5D6DD/#2C2C2C 在真机上比系统键盘灰深, 用户图2)。
+  /// 注意: 第 3 轮的透明修法之所以错, 是因为当时没藏按键, 格子浮在
+  /// ABC/DEF 键上; 现在按键藏了, 透明才是对的。
+  var panelBackgroundColor: UIColor = .clear {
     didSet { backgroundColor = panelBackgroundColor }
   }
 
@@ -85,11 +89,9 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   override func setupAppearance() {
-    // 不透明: 面板是盖在键盘根视图上的全屏覆盖层, 必须用与键盘本体一致的
-    // 不透明底色, 否则按键会从格子后面透出来。
-    // (第 3 轮改成 .clear 是为了修深色模式黑斑, 但透明对覆盖式面板是错的:
-    //  工具栏那条细条透一下没事, 全屏面板透了就是格子浮在按键上。)
-    // 深色模式下底色是深灰 (#2C2C2C), 不是纯黑, 所以不会再出现黑斑。
+    // 透明: 面板打开时下面的工具栏和按键容器都被隐藏 (见 KeyboardToolbarView
+    // hideKeyboardContentForOverlayPanel), 露出的是键盘根视图自身的底色,
+    // 与键盘本体同一块颜色; 深色模式同样成立 (根视图底色随外观走)。
     backgroundColor = panelBackgroundColor
   }
 

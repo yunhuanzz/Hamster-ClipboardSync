@@ -194,6 +194,24 @@ public class SettingsViewModel: ObservableObject {
     mainViewModel.subViewSubject.send(subView)
   }
 
+  /// "更多"页用的列表: 原有 sections 减去首页卡片已覆盖的项——
+  /// 常用语 / 我的词组 / 按键效果 (首页已有卡片),
+  /// "剪贴板同步"一节 (与首页"跨设备粘贴传送"卡片是同一子页, 合并, 不重复列出),
+  /// 以及收藏的快捷操作 (只在首页快捷行出现, 不重复列出)。
+  /// 其余项原样保留, 不删任何功能: 输入方案设置 / Wi-Fi上传方案 /
+  /// 文件管理 / 键盘设置 / 键盘配色 / iCloud同步 / 软件备份 / RIME / 关于。
+  var moreSections: [SettingSectionModel] {
+    let homeCoveredItemTexts: Set<String> = ["常用语", "我的词组", "按键效果"]
+    return sections.compactMap { section in
+      if section.title == "剪贴板同步" { return nil }
+      // 收藏的快捷操作一节: 无标题、全部是按钮 (reloadFavoriteButton 注入的)。
+      if section.title.isEmpty, section.items.allSatisfy({ $0.type == .button }) { return nil }
+      let items = section.items.filter { !homeCoveredItemTexts.contains($0.text) }
+      guard !items.isEmpty else { return nil }
+      return SettingSectionModel(title: section.title, footer: section.footer, items: items)
+    }
+  }
+
   public lazy var sections: [SettingSectionModel] = {
     let sections = [
       SettingSectionModel(title: "输入相关", items: [
@@ -258,7 +276,7 @@ public class SettingsViewModel: ObservableObject {
         ),
         .init(
           icon: UIImage(systemName: "speaker.wave.3")!,
-          text: "按键音与震动",
+          text: "按键效果",
           accessoryType: .disclosureIndicator,
           navigationAction: { [unowned self] in
             self.mainViewModel.subViewSubject.send(.feedback)

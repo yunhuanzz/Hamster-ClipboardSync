@@ -457,14 +457,6 @@ public extension KeyboardAction {
     }
   }
 
-  /// 显示为白色的分类符号按键
-  var isClassifySymbolicOfLight: Bool {
-    switch self {
-    case .keyboardType(.classifySymbolicOfLight): return true
-    default: return false
-    }
-  }
-
   var isCleanSpellingArea: Bool {
     switch self {
     case .cleanSpellingArea: return true

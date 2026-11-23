@@ -54,6 +54,9 @@ public enum SettingsSubView: String {
   /// 定制工具栏页面 (候选栏设置)
   case toolbarSettings
 
+  /// 更多设置页面 (首页卡片之外的其余设置, 原有列表)
+  case more
+
   /// 关于页面
   case about
 

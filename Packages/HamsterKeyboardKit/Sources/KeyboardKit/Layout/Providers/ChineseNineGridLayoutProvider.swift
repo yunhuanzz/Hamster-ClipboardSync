@@ -7,7 +7,15 @@
 
 import UIKit
 
-/// 中文九宫格布局
+/// 中文九宫格布局 (仿微信输入法九宫格):
+/// 第 1 行: @/. ABC DEF + 删除
+/// 第 2 行: GHI JKL MNO + 清除拼音区
+/// 第 3 行: PQRS TUV WXYZ + 表情键 (右列第三行是 😊, 换行不在这里)
+/// 底行: 符号 123 空格 换行 (换行在右下角; 中/英切换不在九宫格底行,
+/// 经工具栏菜单“切换26键·九宫格”到 26 键后再按中/英)。
+/// 左侧另有一条标点边栏 (， 。 ? ! …, 见 ChineseNineGridKeyboard 的
+/// symbolsListView, 默认符号在 hamster.yaml 的
+/// symbolsOfChineseNineGridKeyboard 里)。
 public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
   static let actionRows: KeyboardActionRows = [
     [.chineseNineGrid(Symbol(char: "@/.")), .chineseNineGrid(Symbol(char: "ABC")), .chineseNineGrid(Symbol(char: "DEF")), .backspace],
@@ -15,7 +23,6 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
 //    [.delimiter, .chineseNineGrid(Symbol(char: "ABC")), .chineseNineGrid(Symbol(char: "DEF")), .backspace],
     [.chineseNineGrid(Symbol(char: "GHI")), .chineseNineGrid(Symbol(char: "JKL")), .chineseNineGrid(Symbol(char: "MNO")), .cleanSpellingArea],
     [.chineseNineGrid(Symbol(char: "PQRS")), .chineseNineGrid(Symbol(char: "TUV")), .chineseNineGrid(Symbol(char: "WXYZ"))],
-    [.keyboardType(.classifySymbolic), .keyboardType(.numericNineGrid), .space, .keyboardType(.alphabetic(.lowercased))],
   ]
 
   static let insets = UIEdgeInsets(top: 3, left: 3, bottom: 3, right: 3)
@@ -41,7 +48,9 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
     result.append(inputActions[0])
     result.append(inputActions[1])
     result.append(inputActions[2] + lowerTrailingActions(for: inputActions, context: context))
-    result.append(inputActions[3])
+    // 底行: 符号 / 123 / 空格 / 换行 (仿微信, 换行在右下角)。
+    // 中/英切换不在九宫格底行: 经工具栏菜单“切换26键·九宫格”到 26 键后再按中/英。
+    result.append([.keyboardType(.classifySymbolic), .keyboardType(.numericNineGrid), .space, keyboardReturnAction(for: context)])
     return result
   }
 
@@ -108,7 +117,9 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
     for actions: KeyboardActionRows,
     context: KeyboardContext
   ) -> KeyboardActions {
-    return [keyboardReturnAction(for: context)]
+    // 第 3 行右列: 表情键 (仿微信, 😊 图标, 点开表情面板;
+    // 换行已移到右下角, 不再跨行占位)。
+    return [.keyboardType(.emojis)]
   }
 
   /// 最后面一行（空格所在行）小的按钮(如 `Return` 键)的宽度。

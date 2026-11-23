@@ -353,12 +353,23 @@ public struct KeySwipe: Codable, Hashable {
   /// 仅当用户配置中没有该键的上滑时生效 (与 withDefaultBackspaceUpSwipe 同模式),
   /// 且只对英文字母键生效; 中文 26 键走 YAML 里的 swipe 配置, 不受影响。
   /// 上滑字符直接上屏 (processByRIME: false), 不经过 RIME 拼音引擎。
+  /// 注意 (build #23 断点): 英文键盘的字母键不是 .character 而是 .symbol
+  /// (iPhoneKeyboardLayoutProvider.actions() 用 KeyboardActionRows(symbols:) 构造),
+  /// 旧实现只匹配 .character, 导致英文键永远挂不上上滑; 两种形式都接受,
+  /// 上滑动作保持与按键相同的形式, 打字/顶字上屏逻辑不受影响。
   public static func withDefaultAlphabeticUpSwipe(_ swipes: [KeySwipe], for action: KeyboardAction) -> [KeySwipe] {
     guard !swipes.contains(where: { $0.direction == .up }) else { return swipes }
-    guard case .character(let char) = action,
-      let swipeChar = Self.alphabeticUpSwipeMap[char.lowercased()]
-    else { return swipes }
-    return swipes + [KeySwipe(direction: .up, action: .character(swipeChar), processByRIME: false, display: true, label: .empty)]
+    let swipeAction: KeyboardAction?
+    switch action {
+    case .character(let char):
+      swipeAction = Self.alphabeticUpSwipeMap[char.lowercased()].map { .character($0) }
+    case .symbol(let symbol):
+      swipeAction = Self.alphabeticUpSwipeMap[symbol.char.lowercased()].map { .symbol(Symbol(char: $0)) }
+    default:
+      swipeAction = nil
+    }
+    guard let swipeAction = swipeAction else { return swipes }
+    return swipes + [KeySwipe(direction: .up, action: swipeAction, processByRIME: false, display: true, label: .empty)]
   }
 
   /// 英文 26 键上滑映射表: 字母 -> 上滑输出字符 (顶行数字, 其余行常用符号)。

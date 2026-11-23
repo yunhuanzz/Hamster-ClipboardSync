@@ -152,12 +152,17 @@ open class NumericNineGridKeyboardLayoutProvider: KeyboardLayoutProvider {
    应用于下一行(相对与 middle 行)的附加 leading 操作。
    符号在左、返回在右: 返回正好落在字母键盘 "123" 键原来的位置,
    点一下就回到字母键盘, 不会误点进符号页。
+   两键都用普通分类符号类型 (.classifySymbolic, 不用 OfLight):
+   底色走系统功能键分支 (standardDarkButtonBackground, 标准灰),
+   与返回键完全一致, 仿微信数字页 (两键都是灰, 没有浅色/绿色强调)。
+   之前 OfLight 变体在 StandardKeyboardAppearance 里有浅色特例,
+   导致符号键是白色、返回键是灰色, 换位置时颜色跟着键走, 两边不一致。
    */
   open func bottomLeadingActions(
     for actions: KeyboardActionRows,
     context: KeyboardContext
   ) -> KeyboardActions {
-    return [.keyboardType(.classifySymbolicOfLight), .returnLastKeyboard]
+    return [.keyboardType(.classifySymbolic), .returnLastKeyboard]
   }
 
   /**

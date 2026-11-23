@@ -61,6 +61,25 @@ public class RimeViewModel {
     }
   }
 
+  // 模糊音开关 (默认开): 开启后 zh/z、ch/c、sh/s、n/l、h/f、
+  // an/ang、en/eng、in/ing 可互相混输 (福建用户常见混淆)。
+  // 开关存在共享 UserDefaults (fuzzyPinyinEnabled), 未设置过视为开。
+  // 改开关会立刻把补丁写进 rime_ice.custom.yaml / t9.custom.yaml
+  // (沙盒 + App Group 两份), 但要重新部署后才生效。
+  public var fuzzyPinyinEnabled: Bool {
+    get {
+      UserDefaults.hamster.fuzzyPinyinEnabled
+    }
+    set {
+      UserDefaults.hamster.fuzzyPinyinEnabled = newValue
+      do {
+        try FuzzyPinyin.apply(enabled: newValue)
+      } catch {
+        Logger.statistics.error("fuzzy pinyin patch error \(error.localizedDescription)")
+      }
+    }
+  }
+
   lazy var settings: [SettingSectionModel] = [
     .init(
       title: "简繁切换",
@@ -86,6 +105,20 @@ public class RimeViewModel {
           toggleValue: { [unowned self] in overrideDictFiles },
           toggleHandled: { [unowned self] in
             overrideDictFiles = $0
+          }
+        ),
+      ]
+    ),
+    .init(
+      title: "模糊音",
+      footer: "开启后 zh/z、ch/c、sh/s、n/l、h/f、an/ang、en/eng、in/ing 可以互相混输 (福建地区常见混淆), 默认开启, 在设置里一键可关。改完后要点下面的「重新部署」才生效; 部署时补丁会自动按开关重打, 不会丢。",
+      items: [
+        .init(
+          text: "模糊音",
+          type: .toggle,
+          toggleValue: { [unowned self] in fuzzyPinyinEnabled },
+          toggleHandled: { [unowned self] in
+            fuzzyPinyinEnabled = $0
           }
         ),
       ]
