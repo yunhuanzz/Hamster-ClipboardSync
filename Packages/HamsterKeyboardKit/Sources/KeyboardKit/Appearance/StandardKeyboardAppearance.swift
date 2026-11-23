@@ -115,7 +115,7 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
     switch keyboardContext.deviceType {
     case .pad: return UIEdgeInsets(top: 0, left: 0, bottom: 4, right: 0)
     case .phone:
-      if keyboardContext.screenSize.isEqual(to: .iPhoneProMaxScreenPortrait, withTolerance: 10) {
+      if keyboardContext.screenSize.isIPhoneProMaxScreen(withTolerance: 10) {
         return UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
       } else {
         return UIEdgeInsets(top: 0, left: 0, bottom: -2, right: 0)

@@ -144,17 +144,25 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
     .percentage(context.interfaceOrientation.isPortrait ? 0.18 : 0.15)
   }
 
-  /// 底行内侧系统键 (123 / 中/英 / 前往) 的宽度: 15% (第 8 轮)。
-  /// 第 7 轮的 11.5% 算错了账: 底行 5 个键里空格没有定宽、吃剩下的,
-  /// 18% + 11.5% x 3 = 52.5%, 只剩 47.5% 给空格——第 7 轮说的“空格约 40%”
-  /// 从来没对上, 截图实测空格 46.1%、中/英与换行各 10.2% (1320x2868 图,
-  /// y=2540~2600 行: 符号 220px / 123 133px / 空格 609px / 中英 134px / 换行 134px)。
-  /// 微信空格约 36%: 18% + 15% x 3 = 63%, 剩下 37% 给空格, 与微信一致;
-  /// 中/英与换行键面从 10.2% 涨到约 13.6% (按钮 15%)。
-  /// (第 7 轮引的微信数 240/148/475 加起来只有 1159px 键面, 对不上 1320 宽,
-  /// 三个数不可能同时成立; 这里优先保证空格约 36% 这个用户点名的目标。)
+  /// 底行内侧系统键 (123 / 中/英) 的宽度: 13% (第 10 轮, 实测 msg2-4
+  /// 对比图底行键面, 1320px 宽: 微信 符号 221 / 123 150 / 空格 477 /
+  /// 中英 150 / 换行 221; 我们 符号 220 / 123 180 / 空格 470 /
+  /// 中英 180 / 换行 180——123 与中/英比微信宽 30px、换行窄 41px)。
+  /// 第 8 轮的 15% 是三键统一值, 换行被迫与 123 同宽; 这轮把换行
+  /// 拆出去 (见 lowerReturnButtonWidth), 123/中/英降到 13%。
   /// 只影响九宫格 (见 smallBottomWidth 注释)。
   open func lowerSystemButtonWidth(for context: KeyboardContext) -> KeyboardLayoutItemWidth {
-    return .percentage(0.15)
+    return .percentage(0.13)
+  }
+
+  /// 底行换行键 (前往, .primary) 的宽度: 18% (第 10 轮, 与微信
+  /// 换行键面 221px ≈ 18.2% 对齐)。与 lowerSystemButtonWidth
+  /// 分开, 否则 123/中/英与换行只能同宽。
+  /// 按钮宽度 = 键面 + 两侧 insets 约 18px, 所以 18% 按钮的键面
+  /// 约 221px、13% 按钮的键面约 150px, 与微信实测一致; 符号仍为
+  /// smallBottomWidth 的 18%, 空格吃剩下的约 37% (微信 36%)。
+  /// 只影响九宫格。
+  open func lowerReturnButtonWidth(for context: KeyboardContext) -> KeyboardLayoutItemWidth {
+    return .percentage(0.18)
   }
 }

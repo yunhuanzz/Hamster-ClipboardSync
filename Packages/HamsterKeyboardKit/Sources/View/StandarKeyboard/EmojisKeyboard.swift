@@ -33,7 +33,8 @@ private enum EmojiPanelCategory: CaseIterable {
   case symbols
   case flags
 
-  /// 底部栏图标 (symbols 分类没有合适的单个 emoji, 用文字“符号”)。
+  /// 底部栏图标 (第 10 轮: symbols 用 🔣 图标, 不再夹文字——
+  /// 第 9 轮的"符号"文字在一排图标里非常突兀, 用户点名要改)。
   var icon: String {
     switch self {
     case .frequent: return "🕐"
@@ -41,7 +42,7 @@ private enum EmojiPanelCategory: CaseIterable {
     case .animals: return "🌸"
     case .foods: return "🎂"
     case .activities: return "⚽"
-    case .symbols: return "符号"
+    case .symbols: return "🔣"
     case .flags: return "🏳"
     }
   }
@@ -196,10 +197,9 @@ class EmojisKeyboard: NibLessView {
     for category in EmojiPanelCategory.allCases {
       let button = UIButton(type: .system)
       button.setTitle(category.icon, for: .normal)
-      // “符号”是两个汉字, 字号小一点; 其余是 emoji, 字号大一点。
-      button.titleLabel?.font = category == .symbols
-        ? .systemFont(ofSize: 12, weight: .bold)
-        : .systemFont(ofSize: 20)
+      // 7 个分类全是 emoji 图标, 字号统一 20pt (第 10 轮: 删掉
+      // symbols 单独 12pt 的分支——图标化之后不再需要)。
+      button.titleLabel?.font = .systemFont(ofSize: 20)
       button.setTitleColor(.label, for: .normal)
       button.translatesAutoresizingMaskIntoConstraints = false
       button.tag = EmojiPanelCategory.allCases.firstIndex(of: category) ?? 0

@@ -234,6 +234,51 @@ public extension UserDefaults {
     }
   }
 
+  /// 每布局词库绑定 (第 10 轮第 7 条): App 设置 -> 键盘布局里给
+  /// 26 键 (rime_ice) / 9 键 (t9) 各选一个词库, 存的是 patch 值
+  /// (用户数据目录下的相对路径去 ".dict.yaml", 如 "rime_ice"、
+  /// "cn_dicts/base"), 不是 dict 文件里的 name: 字段。
+  /// 没设过就是默认 "rime_ice" (雾凇拼音大词库)。
+  var layoutDictionaryRimeIce: String {
+    get {
+      string(forKey: Self.layoutDictionaryRimeIceKey) ?? LayoutDictionary.defaultDictionaryId
+    }
+    set {
+      set(newValue, forKey: Self.layoutDictionaryRimeIceKey)
+      Logger.statistics.debug("save layoutDictionaryRimeIce: \(newValue)")
+    }
+  }
+
+  var layoutDictionaryT9: String {
+    get {
+      string(forKey: Self.layoutDictionaryT9Key) ?? LayoutDictionary.defaultDictionaryId
+    }
+    set {
+      set(newValue, forKey: Self.layoutDictionaryT9Key)
+      Logger.statistics.debug("save layoutDictionaryT9: \(newValue)")
+    }
+  }
+
+  /// 上次部署时生效的词库绑定 (nil = 这功能上线前就部署过,
+  /// 部署时按现状算, 不删 prism)。
+  var deployedLayoutDictionaryRimeIce: String? {
+    get {
+      string(forKey: Self.deployedLayoutDictionaryRimeIceKey)
+    }
+    set {
+      set(newValue, forKey: Self.deployedLayoutDictionaryRimeIceKey)
+    }
+  }
+
+  var deployedLayoutDictionaryT9: String? {
+    get {
+      string(forKey: Self.deployedLayoutDictionaryT9Key)
+    }
+    set {
+      set(newValue, forKey: Self.deployedLayoutDictionaryT9Key)
+    }
+  }
+
   /// RIME: 输入方案列表
   var schemas: [RimeSchema] {
     get {
@@ -490,6 +535,41 @@ public extension UserDefaults {
     "syncNow", "settings", "managePhrases",
   ]
 
+  /// 用户亲手加到工具栏上的工具 id 集合 (第 10 轮)。
+  /// 菜单格子是否上色 (绿) 只看这个集合, 不看 toolbarToolsOrder:
+  /// 旧逻辑把"在栏上"当成了"用户加上去的", 所以默认工具
+  /// (剪贴板/常用语) 从没开过定制也是绿的。默认工具不算亲手加,
+  /// 只有在定制面板点池子加入、或在工具栏长按拖动摆放过, 才记进来。
+  /// 未设置过时为空集: 从没开过定制 → 菜单里一个绿格子都没有。
+  /// 注意: 老用户以前在定制里加过的工具, 升级后不会自动进这个集合
+  /// (旧数据里分不出来); 绿格子会在他下次亲手加工具时重新出现。
+  var toolbarUserAddedToolIDs: Set<String> {
+    get {
+      if let array = array(forKey: Self.toolbarUserAddedToolIDsKey) as? [String] {
+        return Set(array.filter { Self.toolbarToolAllIDs.contains($0) })
+      }
+      return []
+    }
+    set { set(Array(newValue), forKey: Self.toolbarUserAddedToolIDsKey) }
+  }
+
+  /// 把某个工具记为用户亲手加上去的 (定制面板点池子加入 /
+  /// 工具栏长按拖动摆放后调用)。
+  func markToolbarToolUserAdded(_ toolID: String) {
+    guard Self.toolbarToolAllIDs.contains(toolID) else { return }
+    var ids = toolbarUserAddedToolIDs
+    ids.insert(toolID)
+    toolbarUserAddedToolIDs = ids
+  }
+
+  /// 把某个工具从"亲手加上去"里拿掉 (⊖ 从工具栏拿掉时调用,
+  /// 否则删掉的工具再加回来之前一直留在集合里)。
+  func unmarkToolbarToolUserAdded(_ toolID: String) {
+    var ids = toolbarUserAddedToolIDs
+    ids.remove(toolID)
+    toolbarUserAddedToolIDs = ids
+  }
+
   /// 某个工具栏工具是否显示 (未设置过默认显示)
   func isToolbarToolVisible(_ toolID: String) -> Bool {
     toolbarVisibleTools.contains(toolID)
@@ -570,11 +650,13 @@ public extension UserDefaults {
     toolbarToolsOrder = order
   }
 
-  /// 恢复默认顺序并全部显示 (工具栏工具 + 菜单格子都恢复)。
+  /// 恢复默认顺序并全部显示 (工具栏工具恢复默认; 菜单格子开关
+  /// 第 10 轮已删, 7 个格子永远全显, 这里不再管菜单格子)。
+  /// 默认两工具 (剪贴板/常用语) 不是亲手加的, 亲手加的集合也清空。
   func resetToolbarToolsOrder() {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
     toolbarVisibleTools = Set(Self.toolbarToolDefaultOrder)
-    menuVisibleTiles = Set(Self.menuTileAllIDs)
+    toolbarUserAddedToolIDs = []
     // 左右摆放也恢复默认 (全部回左侧)。
     removeObject(forKey: Self.toolbarToolSidesKey)
     // 分区也恢复默认 (剪贴板左、常用语左)。
@@ -668,42 +750,13 @@ public extension UserDefaults {
     toolbarToolZones = zones
   }
 
-  // MARK: - 菜单宫格格子显隐 (工具面板)
-
-  /// 工具面板里全部格子 id (与 KeyboardToolbarView.menuTiles() 的 id 一一对应)。
-  /// 共 7 个; "收起键盘"第 7 轮移出菜单 (只保留在工具栏最右的固定 ⌄ 按钮)。
-  static let menuTileAllIDs: [String] = [
-    "clipboard", "phrases", "switchLayout",
-    "customize", "syncNow", "settings", "managePhrases",
-  ]
-
-  /// 菜单宫格格子可见性: 存放"显示"的格子 id 集合。
-  /// 未设置过时全部显示。
-  var menuVisibleTiles: Set<String> {
-    get {
-      if let array = array(forKey: Self.menuVisibleTilesKey) as? [String] {
-        return Set(array)
-      }
-      return Set(Self.menuTileAllIDs)
-    }
-    set { set(Array(newValue), forKey: Self.menuVisibleTilesKey) }
-  }
-
-  /// 某个菜单格子是否显示 (未设置过默认显示)
-  func isMenuTileVisible(_ tileID: String) -> Bool {
-    menuVisibleTiles.contains(tileID)
-  }
-
-  /// 设置某个菜单格子是否显示
-  func setMenuTileVisible(_ tileID: String, visible: Bool) {
-    var tiles = menuVisibleTiles
-    if visible {
-      tiles.insert(tileID)
-    } else {
-      tiles.remove(tileID)
-    }
-    menuVisibleTiles = tiles
-  }
+  // MARK: - 菜单宫格格子显隐 (工具面板) —— 第 10 轮已删
+  //
+  // "菜单格子"开关整段删掉: 7 个菜单格子永远全部显示, 不再逐个控制显隐。
+  // 旧的访问器 (menuTileAllIDs / menuVisibleTiles / isMenuTileVisible /
+  // setMenuTileVisible) 已删除。已存数据的键
+  // "com.ihsiao.apps.Hamster.UserDefault.keys.menuVisibleTiles" 本身留着,
+  // 不删除用户设备上的旧数据, 只是不再读取。
 
   // MARK: - 剪贴板历史 (键盘内剪贴板按钮)
 
@@ -802,6 +855,10 @@ extension UserDefaults {
   public static let isFirstRunningOfKey = "com.ihsiao.apps.Hamster.UserDefaults.isFirstRunning"
   private static let overrideRimeDirectoryOfKey = "com.ihsiao.apps.Hamster.UserDefaults.overrideRimeDirectory"
   private static let fuzzyPinyinEnabledKey = "com.ihsiao.apps.Hamster.UserDefault.keys.fuzzyPinyinEnabled"
+  private static let layoutDictionaryRimeIceKey = "com.ihsiao.apps.Hamster.UserDefault.keys.layoutDictionaryRimeIce"
+  private static let layoutDictionaryT9Key = "com.ihsiao.apps.Hamster.UserDefault.keys.layoutDictionaryT9"
+  private static let deployedLayoutDictionaryRimeIceKey = "com.ihsiao.apps.Hamster.UserDefault.keys.deployedLayoutDictionaryRimeIce"
+  private static let deployedLayoutDictionaryT9Key = "com.ihsiao.apps.Hamster.UserDefault.keys.deployedLayoutDictionaryT9"
   private static let schemasForKey = "com.ihsiao.apps.Hamster.UserDefault.keys.schemas"
   private static let selectSchemasForKey = "com.ihsiao.apps.Hamster.UserDefault.keys.selectSchemas"
   private static let currentSchemaForKey = "com.ihsiao.apps.Hamster.UserDefault.keys.currentSchema"
@@ -825,7 +882,7 @@ extension UserDefaults {
   private static let toolbarToolZonesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolZones"
   private static let toolbarOrderFreeMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarOrderMigratedToFreeOrder"
   private static let toolbarToolSidesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolSides"
-  private static let menuVisibleTilesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.menuVisibleTiles"
+  private static let toolbarUserAddedToolIDsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarUserAddedToolIDs"
 
   // MARK: - 剪贴板历史 / 常用语
 

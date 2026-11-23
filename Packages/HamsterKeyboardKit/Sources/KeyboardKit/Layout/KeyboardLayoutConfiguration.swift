@@ -125,7 +125,7 @@ public extension KeyboardLayoutConfiguration
     orientation: InterfaceOrientation) -> KeyboardLayoutConfiguration
   {
     let isPortrait = orientation.isPortrait
-    if size.isEqual(to: .iPhoneProMaxScreenPortrait, withTolerance: 10)
+    if size.isIPhoneProMaxScreen(withTolerance: 10)
     {
       return isPortrait ? .standardPhoneProMax : .standardPhoneProMaxLandscape
     }

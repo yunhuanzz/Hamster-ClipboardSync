@@ -314,6 +314,40 @@ public extension RimeContext {
       Logger.statistics.error("RIME deploy fuzzy pinyin patch error \(error.localizedDescription)")
     }
 
+    // 每布局词库 (第 10 轮第 7 条): 按绑定把 translator/dictionary
+    // 补丁打进 rime_ice.custom.yaml / t9.custom.yaml (理由同模糊音)。
+    // 绑定变了就删对应方案的 prism, 强制重建——librime 的
+    // dict_file_checksum 本来也会因词库文件集变化而触发重建,
+    // 这里是双保险, 与下面新补方案删 prism 的做法一致;
+    // 没变时不删, 避免每次部署都重编大词库。
+    // 注意 prism 文件名按方案 id 取 <schemaId>.prism.bin
+    // (t9 的 translator/prism: t9; rime_ice 默认用词库名,
+    // 绑默认 rime_ice 时就是 rime_ice.prism.bin);
+    // 绑到 cn_dicts/* 时新词库的 prism 文件本来就不存在,
+    // checksum 重建路径会编它, 这里删旧文件只是顺手清理。
+    do {
+      try LayoutDictionary.apply()
+      for layout in LayoutDictionary.Layout.allCases {
+        let current = LayoutDictionary.effectiveBinding(for: layout)
+        if let deployed = LayoutDictionary.deployedBinding(for: layout) {
+          if deployed != current {
+            for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
+              let prism = dir.appendingPathComponent("\(layout.rawValue).prism.bin")
+              if FileManager.default.fileExists(atPath: prism.path) {
+                try? FileManager.default.removeItem(at: prism)
+                Logger.statistics.info("rime deploy: 词库绑定变化 (\(layout.rawValue): \(deployed) -> \(current)), 删除残留 prism \(prism.path), 强制重建")
+              }
+            }
+            LayoutDictionary.recordDeployedBinding(current, for: layout)
+          }
+        } else {
+          LayoutDictionary.recordDeployedBinding(current, for: layout)
+        }
+      }
+    } catch {
+      Logger.statistics.error("RIME deploy layout dictionary patch error \(error.localizedDescription)")
+    }
+
     if !isRunning {
       Rime.shared.start(Rime.createTraits(
         sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
@@ -350,23 +384,43 @@ public extension RimeContext {
       }
     }
 
-    // 九宫格修复 (第 9 轮): 部署器 (librime UpdateSchemas) 只给 schema_list
-    // (default.custom.yaml) 里的方案编译词库/prism, 而 App 里的方案勾选
-    // (selectSchemas) 从不写 schema_list; 用户勾了 t9、键盘切到 t9 能拼
-    // 数字, 但 t9.prism.bin 从未编译 → script_translator 找不到词库,
-    // 全输入零候选 (26 键 rime_ice 能出字, 正是因为它在 schema_list 里)。
-    // 这里把"已选且存在"的方案并进 schema_list (只加不减), 缺谁补谁,
-    // 再重启一次维护模式编译; 并把本地 schemas 同步成新列表, 否则下面
-    // 的交集逻辑会把刚补的方案又从 selectSchemas 里踢掉、切回 rime_ice。
+    // 九宫格修复 (第 10 轮, 补第 9 轮的漏洞): 部署器 (librime UpdateSchemas)
+    // 只给 schema_list (default.custom.yaml) 里的方案编译词库/prism,
+    // 而 App 里的方案勾选 (selectSchemas) 从不写 schema_list。
+    // 第 9 轮只把"已选且存在"的方案并进 schema_list, 但 selectSchemas
+    // 默认只有 rime_ice (首次启动写死, SettingsViewModel), 用户只有在
+    // 输入方案页亲手勾了 t9 才会进 selectSchemas; 他若从未勾过, t9
+    // 就进不了 schema_list, t9.prism.bin 仍不编译 → 数字继续零候选
+    // (build #28 现状: 词库"编出来了"只是 rime_ice 的, 手动选边栏
+    // 音节走字母能出字, 数字直输仍为空)。
+    // 改成: 把"全部存在"的方案并进 schema_list (只加不减) —— 键盘
+    // 运行时能切到任一存在方案 (setSchema 不查 schema_list), 所以
+    // 每个存在方案都必须编好 prism; 这也是首次部署本来的行为。
+    // 另外: 新补进来的方案先删掉可能残留的旧 prism (librime 的
+    // checksum 机制会复用"看起来没变"的旧文件, 坏的 prism 会被一直
+    // 沿用), 强制干净重建; 部署后逐个核对 prism 是否存在并记日志
+    // (下次出问题先看这行日志, 不用再猜)。
+    // 注意: prism 文件名按 bundled 方案取 <schemaId>.prism.bin
+    // (t9 的 translator/prism: t9, rime_ice 默认用词库名, 都与
+    // schemaId 一致); 自定义方案若在 translator 里另设 prism 名,
+    // 这里删不到它, 但 checksum 重建路径仍对它生效。
     do {
-      let selectedIDs = Set(self.selectSchemas.map { $0.schemaId })
       let availableIDs = Set(Rime.shared.getAvailableRimeSchemas().map { $0.schemaId })
       let listedIDs = Set(schemas.map { $0.schemaId })
-      let missingIDs = selectedIDs.intersection(availableIDs).subtracting(listedIDs)
+      let missingIDs = availableIDs.subtracting(listedIDs)
       if !missingIDs.isEmpty {
-        let mergedIDs = listedIDs.union(selectedIDs.intersection(availableIDs)).sorted()
+        let mergedIDs = listedIDs.union(availableIDs).sorted()
         if Rime.shared.selectRimeSchemas(mergedIDs) {
-          Logger.statistics.info("rime deploy: scheme_list 缺已选方案 \(missingIDs), 已补齐并重新编译")
+          Logger.statistics.info("rime deploy: scheme_list 缺方案 \(missingIDs), 已补齐并重新编译")
+          for schemaId in missingIDs {
+            for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
+              let prism = dir.appendingPathComponent("\(schemaId).prism.bin")
+              if FileManager.default.fileExists(atPath: prism.path) {
+                try? FileManager.default.removeItem(at: prism)
+                Logger.statistics.info("rime deploy: 删除残留 prism \(prism.path), 强制重建")
+              }
+            }
+          }
           Rime.shared.shutdown()
           Rime.shared.start(Rime.createTraits(
             sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
@@ -376,6 +430,10 @@ public extension RimeContext {
         } else {
           Logger.statistics.warning("rime deploy: scheme_list 补齐失败: \(missingIDs)")
         }
+      }
+      for schema in schemas {
+        let prism = FileManager.sandboxUserDataDirectory.appendingPathComponent("\(schema.schemaId).prism.bin")
+        Logger.statistics.info("rime deploy: prism \(schema.schemaId): \(FileManager.default.fileExists(atPath: prism.path) ? "存在" : "缺失")")
       }
     }
 
@@ -491,6 +549,14 @@ public extension RimeContext {
       Logger.statistics.error("RIME sync fuzzy pinyin patch error \(error.localizedDescription)")
     }
 
+    // 每布局词库 (第 10 轮第 7 条): 按绑定重打补丁 (理由同模糊音)。
+    // 同步本身不编译词库, 换词库仍要点「重新部署」才生效。
+    do {
+      try LayoutDictionary.apply()
+    } catch {
+      Logger.statistics.error("RIME sync layout dictionary patch error \(error.localizedDescription)")
+    }
+
     if !isRunning {
       Rime.shared.start(Rime.createTraits(
         sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
@@ -578,6 +644,15 @@ public extension RimeContext {
       try FuzzyPinyin.apply(enabled: UserDefaults.hamster.fuzzyPinyinEnabled)
     } catch {
       Logger.statistics.error("RIME reset fuzzy pinyin patch error \(error.localizedDescription)")
+    }
+
+    // 每布局词库 (第 10 轮第 7 条): 重置清空了沙盒用户数据目录,
+    // 按绑定把补丁打回来 (绑定存在 UserDefaults, 重置丢不掉),
+    // 否则下面沙盒 -> App Group 的同步会把 App Group 里的补丁也删掉。
+    do {
+      try LayoutDictionary.apply()
+    } catch {
+      Logger.statistics.error("RIME reset layout dictionary patch error \(error.localizedDescription)")
     }
 
     // 部署后将方案copy至AppGroup下供keyboard使用

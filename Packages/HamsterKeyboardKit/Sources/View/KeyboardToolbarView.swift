@@ -633,7 +633,7 @@ class KeyboardToolbarView: NibLessView {
   }
 
   /// 打开功能菜单宫格面板 (覆盖在键盘根视图上, 工具栏下方)。
-  /// 只显示定制里开关打开的格子 (menuVisibleTiles)。
+  /// 7 个格子永远全部显示 (第 10 轮: 菜单格子开关已删, 不再过滤)。
   /// 面板本身透明: 打开前先把下面的按键容器隐藏, 露出键盘根视图
   /// 自身的底色 (与键盘本体同一块系统底色, 不可能有色差); 关闭时恢复。
   /// 面板顶贴工具栏底边、不盖住工具栏 (透明面板盖住工具栏会让标题
@@ -659,10 +659,15 @@ class KeyboardToolbarView: NibLessView {
       panel.bottomAnchor.constraint(equalTo: container.bottomAnchor),
     ])
     panel.reload(
-      with: menuTiles().filter { UserDefaults.hamster.isMenuTileVisible($0.id) },
-      // 已在工具栏上的工具, 菜单格子以彩色显示 (第 9 轮, 用户图1);
-      // 不在栏上的灰色。定制工具栏本身不上栏, 永远灰色。
-      activeIDs: Set(UserDefaults.hamster.toolbarToolsOrder.filter { UserDefaults.hamster.isToolbarToolVisible($0) }))
+      with: menuTiles(),
+      // 绿格子 = 用户亲手加上去的工具 (第 10 轮): 只看
+      // toolbarUserAddedToolIDs, 且当前在栏上; 默认工具 (剪贴板/常用语)
+      // 从没开过定制就不上色, 菜单里一个绿格子都没有。
+      // 定制工具栏本身不上栏, 永远灰色。
+      activeIDs: Set(UserDefaults.hamster.toolbarToolsOrder.filter {
+        UserDefaults.hamster.isToolbarToolVisible($0)
+          && UserDefaults.hamster.toolbarUserAddedToolIDs.contains($0)
+      }))
     menuPanel = panel
     panel.alpha = 0
     panel.transform = CGAffineTransform(translationX: 0, y: 12)
@@ -795,6 +800,23 @@ class KeyboardToolbarView: NibLessView {
     let toNineGrid = !currentChineseLayoutIsNineGrid
     UserDefaults.hamster.chinesePrimaryKeyboardIsNineGrid = toNineGrid
     keyboardContext.setKeyboardType(toNineGrid ? .chineseNineGrid : .chinese(.lowercased))
+    // 布局→方案绑定 (第 10 轮, 保险): 九宫格只能用 t9 (数字字母表 +
+    // t9_processor, rime_ice 收不到数字); 切到九宫格时若当前方案不是
+    // t9, 强制切到 t9 (并记进 selectSchemas, 下次部署的 schema_list
+    // 补齐也能看到它), 否则九宫格打数字只进边栏、不出候选。
+    // 26 键不强制 (rime_ice/t9 都能出字, 不动用户在 RIME 设置里的选择)。
+    // 注意: 设置页里改布局不走这里, 但方案是持久化的, 一旦切到 t9 就
+    // 一直是 t9, 直到用户在 RIME 设置里另选。
+    if toNineGrid, rimeContext.currentSchema?.schemaId != "t9" {
+      let t9 = rimeContext.schemas.first { $0.schemaId == "t9" }
+        ?? RimeSchema(schemaId: "t9", schemaName: "中文九键")
+      if !rimeContext.selectSchemas.contains(t9) {
+        rimeContext.appendSelectSchema(t9)
+      }
+      rimeContext.setCurrentSchema(t9)
+      rimeContext.setupRimeInputSchema()
+      Logger.statistics.info("切换九宫格: 输入方案强制切到 t9")
+    }
   }
 
   // MARK: - 工具栏按钮重建 (定制工具栏, 自由顺序)
@@ -994,6 +1016,9 @@ class KeyboardToolbarView: NibLessView {
       currentStackView?.removeArrangedSubview(button)
       targetStackView.insertArrangedSubview(button, at: min(targetIndex, targetStackView.arrangedSubviews.count))
       saveToolbarLayoutFromStacks()
+      // 亲手拖动摆放过 = 用户自己放上去的, 菜单里该工具上色 (第 10 轮)。
+      // 只在真正换了位置/换了侧时记 (上面 guard 已保证位置变了才到这里)。
+      UserDefaults.hamster.markToolbarToolUserAdded(toolID)
     case .ended, .cancelled:
       guard toolbarDraggedToolID == toolID else { return }
       toolbarDraggedToolID = nil
@@ -1111,6 +1136,7 @@ class KeyboardToolbarView: NibLessView {
     order.removeAll { $0 == toolID }
     UserDefaults.hamster.toolbarToolsOrder = order
     UserDefaults.hamster.setToolbarToolVisible(toolID, visible: false)
+    UserDefaults.hamster.unmarkToolbarToolUserAdded(toolID)
     rebuildToolbarButtons()
     // rebuild 会退出定制态; 若栏上还有工具, 重新进定制态 (继续删)。
     if !toolbarToolButtons.isEmpty {
@@ -1153,13 +1179,6 @@ class KeyboardToolbarView: NibLessView {
     return toolbarToolDefinitions().filter { !onToolbar.contains($0.id) }
   }
 
-  /// 定制工具栏面板要列出的菜单格子 (按菜单顺序, 包括已隐藏的格子)。
-  private func customizeTiles() -> [(id: String, title: String, visible: Bool)] {
-    menuTiles().map { tile in
-      (id: tile.id, title: tile.title, visible: UserDefaults.hamster.isMenuTileVisible(tile.id))
-    }
-  }
-
   /// 打开定制工具栏面板 (覆盖在键盘根视图上)。
   private func showToolbarCustomizePanel() {
     dismissAllPanels()
@@ -1173,12 +1192,12 @@ class KeyboardToolbarView: NibLessView {
       order.removeAll { $0 == toolID }
       UserDefaults.hamster.toolbarToolsOrder = order
       UserDefaults.hamster.setToolbarToolVisible(toolID, visible: false)
+      UserDefaults.hamster.unmarkToolbarToolUserAdded(toolID)
       self?.rebuildToolbarButtons()
       self?.customizePanel?.reload(
         leftTools: self?.customizeLeftTools() ?? [],
         rightTools: self?.customizeRightTools() ?? [],
-        poolTools: self?.customizePoolTools() ?? [],
-        tiles: self?.customizeTiles() ?? [])
+        poolTools: self?.customizePoolTools() ?? [])
     }
     // 点按加入: 从工具池放回工具栏, 追加到左侧末尾 (默认左;
     // 收起键盘是固定按钮, 不在顺序里, 不用再"插在它前面")。
@@ -1194,12 +1213,13 @@ class KeyboardToolbarView: NibLessView {
       // 想要放右侧再拖过去, 侧属性以这次写入为准)。
       UserDefaults.hamster.setToolbarToolSide(toolID, side: .left)
       UserDefaults.hamster.setToolbarToolVisible(toolID, visible: true)
+      // 亲手在定制里加上去的, 菜单里该工具上色 (第 10 轮)。
+      UserDefaults.hamster.markToolbarToolUserAdded(toolID)
       self?.rebuildToolbarButtons()
       self?.customizePanel?.reload(
         leftTools: self?.customizeLeftTools() ?? [],
         rightTools: self?.customizeRightTools() ?? [],
-        poolTools: self?.customizePoolTools() ?? [],
-        tiles: self?.customizeTiles() ?? [])
+        poolTools: self?.customizePoolTools() ?? [])
     }
     // 拖拽排序/换侧: 面板内已调整顺序并刷新, 这里只保存新布局
     // (左组 + 右组: 顺序 + 两侧属性一起写盘) 并重建工具栏。
@@ -1207,22 +1227,18 @@ class KeyboardToolbarView: NibLessView {
       UserDefaults.hamster.saveToolbarLayout(leftIDs: leftIDs, rightIDs: rightIDs)
       self?.rebuildToolbarButtons()
     }
-    panel.onTileToggle = { tileID, visible in
-      UserDefaults.hamster.setMenuTileVisible(tileID, visible: visible)
-    }
     panel.onReset = { [weak self] in
       UserDefaults.hamster.resetToolbarToolsOrder()
       self?.rebuildToolbarButtons()
       self?.customizePanel?.reload(
         leftTools: self?.customizeLeftTools() ?? [],
         rightTools: self?.customizeRightTools() ?? [],
-        poolTools: self?.customizePoolTools() ?? [],
-        tiles: self?.customizeTiles() ?? [])
+        poolTools: self?.customizePoolTools() ?? [])
     }
     panel.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(panel)
     panel.fillSuperview()
-    panel.reload(leftTools: customizeLeftTools(), rightTools: customizeRightTools(), poolTools: customizePoolTools(), tiles: customizeTiles())
+    panel.reload(leftTools: customizeLeftTools(), rightTools: customizeRightTools(), poolTools: customizePoolTools())
     customizePanel = panel
   }
 

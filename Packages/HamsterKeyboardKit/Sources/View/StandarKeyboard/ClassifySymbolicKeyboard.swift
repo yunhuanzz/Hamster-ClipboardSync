@@ -8,15 +8,26 @@
 import HamsterUIKit
 import UIKit
 
-/// 分类符号键盘
+/// 分类符号键盘 (第 10 轮第 5 条: 仿微信符号菜单重排)。
+///
+/// 布局 (自上而下, 与微信输入法符号菜单一致):
+///   顶部快符条 (SymbolQuickStripView) + 符号网格 (SymbolsView, 全宽)
+///   + 底部类别条 (BottomRowView: 绿 ← 返回 + 横向滚动的类别按钮 + 锁定 + ⌫)。
+/// 左侧分类栏 ClassifyView 已删: 它复用 SymbolCell 做分类标签,
+/// "特殊"一栏在列表 cell 里被缩成约 40% 的部首簇 (乱码观感),
+/// 新的底部类别条用 UIButton + 显式 15pt 字体, 不再经过 SymbolCell。
+///
+/// 背景: 整块用 HamsterUIColor.shared.standardKeyboardBackground
+/// (浅色 #D5D6DD / 深色 #2C2C2C, 均不透明), 子视图一律 .clear,
+/// 不再是之前三块深浅不一的 style.backgroundColor
+/// (standardDarkButtonBackground) 与近乎透明的键盘根底色混搭。
 class ClassifySymbolicKeyboard: NibLessView {
   private let keyboardContext: KeyboardContext
   private let actionHandler: KeyboardActionHandler
   private let appearance: KeyboardAppearance
   private let layoutProvider: KeyboardLayoutProvider
-  private var classifyViewHeightConstraint: NSLayoutConstraint?
+  private var symbolsViewHeightConstraint: NSLayoutConstraint?
   private var bottomRowViewHeightConstraint: NSLayoutConstraint?
-  private var classifyViewWidthConstraint: NSLayoutConstraint?
 
   // 屏幕方向
   private var interfaceOrientation: InterfaceOrientation
@@ -32,27 +43,27 @@ class ClassifySymbolicKeyboard: NibLessView {
     return vm
   }()
 
-  /// 左侧分类列表
-  private lazy var classifyView: ClassifyView = {
-    let view = ClassifyView(style: style, keyboardContext: keyboardContext, viewModel: viewModel)
+  /// 顶部快符条: 常用符号横向滚动, 点按直接上屏。
+  private lazy var quickStripView: SymbolQuickStripView = {
+    let view = SymbolQuickStripView(style: style, actionHandler: actionHandler, keyboardContext: keyboardContext)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
-  /// 右侧符号视图
+  /// 符号网格 (全宽, 复用 SymbolsView; 分类切换由 viewModel 驱动)。
   private lazy var symbolsView: SymbolsView = {
     let view = SymbolsView(style: style, keyboardContext: keyboardContext, actionHandler: actionHandler, viewModel: viewModel)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
-  /// 底部按钮
+  /// 底部类别条: 绿 ← 返回 + 横向滚动的类别按钮 + 锁定 + ⌫。
   private lazy var bottomRow: BottomRowView = {
     let view = BottomRowView(
       style: style,
       actionHandler: actionHandler,
-      layoutProvider: layoutProvider,
-      keyboardContext: keyboardContext)
+      keyboardContext: keyboardContext,
+      viewModel: viewModel)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -77,15 +88,23 @@ class ClassifySymbolicKeyboard: NibLessView {
 
     super.init(frame: .zero)
 
+    setupAppearance()
     constructViewHierarchy()
     activateViewConstraints()
+  }
+
+  override func setupAppearance() {
+    // 与定制面板同款的不透明键盘底色 (浅色 #D5D6DD / 深色 #2C2C2C,
+    // asset 自带深浅两套值, 不写死色值); 子视图背景均为 .clear,
+    // 整块底色只有这一处来源, 不透出后面 App 的内容。
+    backgroundColor = HamsterUIColor.shared.standardKeyboardBackground
   }
 
   // MARK: - Layout
 
   /// 构建视图层次
   override func constructViewHierarchy() {
-    addSubview(classifyView)
+    addSubview(quickStripView)
     addSubview(symbolsView)
     addSubview(bottomRow)
   }
@@ -95,27 +114,28 @@ class ClassifySymbolicKeyboard: NibLessView {
     let layoutConfig = layoutConfig
     let symbolViewHeight = layoutConfig.rowHeight * 3
 
-    classifyViewWidthConstraint = createClassifyViewWidthConstraint()
     bottomRowViewHeightConstraint = bottomRow.heightAnchor.constraint(equalToConstant: layoutConfig.rowHeight)
     bottomRowViewHeightConstraint?.priority = .defaultHigh
-    classifyViewHeightConstraint = classifyView.heightAnchor.constraint(equalToConstant: symbolViewHeight)
-    classifyViewHeightConstraint?.priority = .defaultHigh
+    symbolsViewHeightConstraint = symbolsView.heightAnchor.constraint(equalToConstant: symbolViewHeight)
+    symbolsViewHeightConstraint?.priority = .defaultHigh
 
     NSLayoutConstraint.activate([
-      classifyView.topAnchor.constraint(equalTo: topAnchor),
-      classifyView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      symbolsView.topAnchor.constraint(equalTo: topAnchor),
-      symbolsView.leadingAnchor.constraint(equalTo: classifyView.trailingAnchor, constant: 1),
+      quickStripView.topAnchor.constraint(equalTo: topAnchor),
+      quickStripView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      quickStripView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      quickStripView.heightAnchor.constraint(equalToConstant: 40),
+
+      symbolsView.topAnchor.constraint(equalTo: quickStripView.bottomAnchor),
+      symbolsView.leadingAnchor.constraint(equalTo: leadingAnchor),
       symbolsView.trailingAnchor.constraint(equalTo: trailingAnchor),
+
       bottomRow.leadingAnchor.constraint(equalTo: leadingAnchor),
       bottomRow.trailingAnchor.constraint(equalTo: trailingAnchor),
-      bottomRow.topAnchor.constraint(equalTo: classifyView.bottomAnchor),
       bottomRow.topAnchor.constraint(equalTo: symbolsView.bottomAnchor),
       bottomRow.bottomAnchor.constraint(equalTo: bottomAnchor),
-      symbolsView.heightAnchor.constraint(equalTo: classifyView.heightAnchor),
-      classifyViewWidthConstraint!,
+
       bottomRowViewHeightConstraint!,
-      classifyViewHeightConstraint!
+      symbolsViewHeightConstraint!
     ])
   }
 
@@ -125,7 +145,8 @@ class ClassifySymbolicKeyboard: NibLessView {
     if userInterfaceStyle != keyboardContext.colorScheme {
       userInterfaceStyle = keyboardContext.colorScheme
       style = appearance.nonStandardKeyboardStyle
-      classifyView.setStyle(style)
+      setupAppearance()
+      quickStripView.setStyle(style)
       symbolsView.setStyle(style)
       bottomRow.setStyle(style)
     }
@@ -134,17 +155,9 @@ class ClassifySymbolicKeyboard: NibLessView {
     interfaceOrientation = keyboardContext.interfaceOrientation
     isKeyboardFloating = keyboardContext.isKeyboardFloating
 
-    classifyViewWidthConstraint?.isActive = false
-    classifyViewWidthConstraint = createClassifyViewWidthConstraint()
-    classifyViewWidthConstraint?.isActive = true
-
     let layoutConfig = layoutConfig
     let symbolViewHeight = layoutConfig.rowHeight * 3
-    classifyViewHeightConstraint?.constant = symbolViewHeight
+    symbolsViewHeightConstraint?.constant = symbolViewHeight
     bottomRowViewHeightConstraint?.constant = layoutConfig.rowHeight
-  }
-
-  func createClassifyViewWidthConstraint() -> NSLayoutConstraint {
-    classifyView.widthAnchor.constraint(equalTo: widthAnchor, multiplier: keyboardContext.interfaceOrientation.isPortrait ? 0.2 : 0.15)
   }
 }

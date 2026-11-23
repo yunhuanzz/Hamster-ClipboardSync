@@ -80,6 +80,36 @@ public extension CGSize {
   static let iPhoneProMaxScreenLandscape = iPhoneProMaxScreenPortrait.flipped()
 
   /**
+   Whether or not the size is an iPhone 16/17 Pro Max screen
+   size in portrait orientation (6.9" display, 1320x2868px @3x).
+
+   纵向 iPhone 16/17 Pro Max 屏幕尺寸 (440x956pt)。
+   第 10 轮: 旧常量只有 14 Pro Max 的 428x926, 用户的 17 Pro Max
+   是 440x956 (宽差 12 > 容差 10), 一直被当成普通 iPhone,
+   行高 54pt 而不是 Pro Max 的 56pt——键盘比微信矮 8pt 的根因。
+   */
+  static let iPhoneProMax17ScreenPortrait = CGSize(width: 440, height: 956)
+
+  /**
+   Whether or not the size is an iPhone 16/17 Pro Max screen
+   size in landscape orientation.
+
+   横向 iPhone 16/17 Pro Max 屏幕尺寸
+   */
+  static let iPhoneProMax17ScreenLandscape = iPhoneProMax17ScreenPortrait.flipped()
+
+  /**
+   Whether or not the size is any iPhone Pro Max screen size
+   (14 Pro Max 428x926 or 16/17 Pro Max 440x956, any orientation).
+
+   是否为任一代 Pro Max 屏幕尺寸 (任一方向)。
+   */
+  func isIPhoneProMaxScreen(withTolerance points: CGFloat) -> Bool {
+    isScreenSize(.iPhoneProMaxScreenPortrait, withTolerance: points)
+      || isScreenSize(.iPhoneProMax17ScreenPortrait, withTolerance: points)
+  }
+
+  /**
    Flip the size's height and width.
 
    翻转尺寸的高度和宽度。

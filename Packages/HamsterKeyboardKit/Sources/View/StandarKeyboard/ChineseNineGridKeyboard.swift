@@ -196,6 +196,10 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
     // 最后一行小的系统按键宽度
     let lowerSystemButtonWidth = keyboardLayoutProvider.lowerSystemButtonWidth(for: keyboardContext)
 
+    // 最后一行换行键 (前往, .primary) 的宽度 (第 10 轮: 与 123/中/英
+    // 分开, 微信换行比 123 宽 71px, 不能同宽)。
+    let lowerReturnButtonWidth = keyboardLayoutProvider.lowerReturnButtonWidth(for: keyboardContext)
+
     // 暂存中间部分按键，用于平分剩余宽度
     var availableItems = [KeyboardButton]()
 
@@ -222,14 +226,17 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
         } else {
           if button.row + 1 == keyboardRows.endIndex {
             // 底行: 空格键不设宽度约束 (自适应剩余宽度); 其余系统键
-            // (123 / 中/英 / 前往) 统一用 lowerSystemButtonWidth。
+            // 按 action 分宽度 (第 10 轮): 换行 (.primary) 用
+            // lowerReturnButtonWidth (18%), 123/中/英用
+            // lowerSystemButtonWidth (13%)。
             // 第 1 列 (符号) 在上面已拿到 edge 宽度, 不会走到这里。
             // 注意: 第 7 轮底行恢复成 5 键后, 中/英在第 3 列——
             // 旧条件 (column == 1 || 是最后一列) 只覆盖 123 和前往,
             // 中/英会没有任何宽度约束 (只剩 intrinsic 宽度, 布局不稳定),
             // 所以这里按 action 判断, 不按列号。
             if button.item.action != .space {
-              staticConstraints.append(button.widthAnchor.constraint(equalTo: widthAnchor, multiplier: lowerSystemButtonWidth.percentageValue!))
+              let width = button.item.action.isPrimaryAction ? lowerReturnButtonWidth : lowerSystemButtonWidth
+              staticConstraints.append(button.widthAnchor.constraint(equalTo: widthAnchor, multiplier: width.percentageValue!))
             }
           } else {
             availableItems.append(button)

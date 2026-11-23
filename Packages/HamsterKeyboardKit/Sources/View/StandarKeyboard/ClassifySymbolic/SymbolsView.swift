@@ -50,7 +50,10 @@ class SymbolsView: UICollectionView {
   }
 
   func setupAppearance() {
-    self.backgroundColor = style.backgroundColor
+    // 背景透明, 由 ClassifySymbolicKeyboard 提供整块不透明底色
+    // (第 10 轮第 5 条: 旧 style.backgroundColor 与键盘根底色深浅不一,
+    // 侧栏 / 网格 / 底行渲染成三块不同深浅)。
+    self.backgroundColor = .clear
   }
 
   func reloadDiffableData() {

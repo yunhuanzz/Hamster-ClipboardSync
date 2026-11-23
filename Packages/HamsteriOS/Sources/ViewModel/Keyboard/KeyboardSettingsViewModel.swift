@@ -578,6 +578,29 @@ public class KeyboardSettingsViewModel: ObservableObject, Hashable, Identifiable
     return list + (HamsterAppDependencyContainer.shared.configuration.keyboards ?? []).map { $0.type }
   }
 
+  // MARK: - 每布局词库 (第 10 轮第 7 条, 九宫格页用)
+
+  /// 九宫格可选词库: 只列拼音词库 (数字要先拼出拼音音节才能出候选,
+  /// 纯字母词库绑上去也没候选)。
+  public var nineGridDictionaryOptions: [LayoutDictionary.DictionaryOption] {
+    LayoutDictionary.availableDictionaries(pinyinCapableOnly: true)
+  }
+
+  /// 九宫格当前生效的词库 id。
+  public var nineGridDictionaryId: String {
+    LayoutDictionary.effectiveBinding(for: .t9)
+  }
+
+  /// 九宫格当前生效的词库显示名。
+  public var nineGridDictionaryDisplayName: String {
+    LayoutDictionary.displayName(for: nineGridDictionaryId)
+  }
+
+  /// 改九宫格词库: 存绑定 + 立刻写补丁, 仍要点「重新部署」才生效。
+  public func setNineGridDictionary(_ dictionaryId: String) {
+    LayoutDictionary.setBinding(dictionaryId, for: .t9)
+  }
+
   // MARK: - combine
 
   // 中文九宫格符号列表编辑状态
@@ -676,6 +699,13 @@ public class KeyboardSettingsViewModel: ObservableObject, Hashable, Identifiable
   public var chineseStanderSystemKeyboardSwipeListReloadSubject = PassthroughSubject<Bool, Never>()
   public var chineseStanderSystemKeyboardSwipeListReloadPublished: AnyPublisher<Bool, Never> {
     chineseStanderSystemKeyboardSwipeListReloadSubject.eraseToAnyPublisher()
+  }
+
+  /// 中文 26 键设置页重新加载 (换词库后刷新下拉行的显示值;
+  /// PullDownMenuCell 同一个 item 不会自己重读 textValue)。
+  public var reloadChineseStandardKeyboardSettingsSubject = PassthroughSubject<Bool, Never>()
+  public var reloadChineseStandardKeyboardSettingsPublished: AnyPublisher<Bool, Never> {
+    reloadChineseStandardKeyboardSettingsSubject.eraseToAnyPublisher()
   }
 
   // MARK: - init data
@@ -827,6 +857,27 @@ public class KeyboardSettingsViewModel: ObservableObject, Hashable, Identifiable
 
   /// 中文键盘设置
   lazy var chineseStanderSystemKeyboardSettingsItems: [SettingSectionModel] = [
+    .init(
+      title: "词库",
+      footer: "26 键拼音用的词库, 默认是雾凇拼音大词库 (8105 字表 + 基础 + 扩展 + 腾讯词向量 + 杂项合并)。换词库只改 rime_ice.custom.yaml 里的 translator/dictionary, 不动方案本身; 改完要点 RIME 设置里的「重新部署」才生效, 部署时会自动重打补丁并重编词库。以后自己导入的词库文件 (.dict.yaml, 放进 Rime 用户数据目录) 也会出现在这个列表里。",
+      items: [
+        .init(
+          text: "词库",
+          type: .pullDown,
+          textValue: { LayoutDictionary.displayName(for: LayoutDictionary.effectiveBinding(for: .rimeIce)) },
+          pullDownMenuActionsBuilder: { [unowned self] in
+            LayoutDictionary.availableDictionaries(pinyinCapableOnly: false)
+              .map { option in
+                UIAction(
+                  title: option.displayName,
+                  state: LayoutDictionary.effectiveBinding(for: .rimeIce) == option.id ? .on : .off
+                ) { _ in
+                  LayoutDictionary.setBinding(option.id, for: .rimeIce)
+                  self.reloadChineseStandardKeyboardSettingsSubject.send(true)
+                }
+              }
+          })
+      ]),
     .init(
       footer: "“按键位于空格左侧”选项：关闭状态则位于空格右侧，开启状态则位于空格左侧",
       items: [

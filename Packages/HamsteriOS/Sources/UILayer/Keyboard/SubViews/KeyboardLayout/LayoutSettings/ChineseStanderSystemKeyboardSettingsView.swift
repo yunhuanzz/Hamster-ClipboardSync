@@ -99,6 +99,15 @@ class ChineseStanderSystemKeyboardSettingsView: NibLessView {
         }
       }
       .store(in: &subscriptions)
+
+    // 换词库后刷新下拉行的显示值 (PullDownMenuCell 同一个 item
+    // 不会自己重读 textValue, 要整个表重载一次)。
+    keyboardSettingsViewModel.reloadChineseStandardKeyboardSettingsPublished
+      .receive(on: DispatchQueue.main)
+      .sink { [unowned self] _ in
+        tableView.reloadData()
+      }
+      .store(in: &subscriptions)
   }
 
   override func didMoveToWindow() {
