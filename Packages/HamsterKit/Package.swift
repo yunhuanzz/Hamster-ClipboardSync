@@ -8,6 +8,7 @@ let package = Package(
   platforms: [
     .iOS(.v15),
   ],
+  swiftLanguageVersions: [.v5],
   products: [
     .library(
       name: "HamsterKit",
