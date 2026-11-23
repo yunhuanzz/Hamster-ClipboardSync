@@ -4,13 +4,17 @@
 //  键盘内功能菜单面板 (仿微信输入法): 全宽面板 + 4 列图标+文字宫格, 不是系统 UIMenu 列表。
 //  点格子执行对应功能并关闭面板; 点右上角关闭按钮关闭面板。
 //  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上。
+//  第 7 轮: 格子加到 8 个一页、横向分页 (UIPageControl, 多页时才显示圆点;
+//  目前 7 个格子只有 1 页, 圆点隐藏); 格子加高到 68pt、图标 26pt、
+//  文字 13pt, 比原来更接近微信功能面板。打开动画 (0.2s 淡入+上滑)
+//  在调用方 KeyboardToolbarView.showMenuPanel 里做, 不在这里。
 //
 
 import HamsterKit
 import HamsterUIKit
 import UIKit
 
-/// 键盘内功能菜单面板: 标题 + 关闭按钮 + 4 列宫格。
+/// 键盘内功能菜单面板: 标题 + 关闭按钮 + 4 列宫格 (分页)。
 /// 格子 (id, 标题, SF Symbol 名) 由调用方传入, 点格子时通过 onSelect 回传 id。
 class KeyboardToolbarMenuPanelView: NibLessView {
   /// 点某个格子时的回调 (格子 id), 由调用方执行对应功能并关闭面板。
@@ -21,14 +25,19 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   /// 格子: (id, 标题, SF Symbol 名)。由调用方传入。
   private var tiles: [(id: String, title: String, systemImage: String)] = []
 
+  /// 每页格子数: 2 行 x 4 列 = 8。
+  private static let tilesPerPage = 8
+
   /// 覆盖式面板底色: 透明。
-  /// 面板是盖在键盘根视图上的全屏覆盖层; 打开面板时调用方
-  /// (KeyboardToolbarView) 会把下面的工具栏和按键容器都隐藏,
+  /// 面板是盖在键盘根视图按键区上的覆盖层 (顶贴工具栏底边, 不盖工具栏);
+  /// 打开面板时调用方 (KeyboardToolbarView) 会把下面的按键容器隐藏,
   /// 露出键盘根视图自身的底色 (appearance.backgroundStyle),
   /// 与键盘本体绝对是同一块颜色, 不可能再有色差——不要再写死色值
   /// (第 4 轮的 #D5D6DD/#2C2C2C 在真机上比系统键盘灰深, 用户图2)。
   /// 注意: 第 3 轮的透明修法之所以错, 是因为当时没藏按键, 格子浮在
   /// ABC/DEF 键上; 现在按键藏了, 透明才是对的。
+  /// 工具栏不藏 (第 7 轮): 格子图标要能再点一下关闭菜单, ⌄ 要能在
+  /// 菜单开着时收键盘, 工具栏必须保持可见可点。
   var panelBackgroundColor: UIColor = .clear {
     didSet { backgroundColor = panelBackgroundColor }
   }
@@ -51,13 +60,33 @@ class KeyboardToolbarMenuPanelView: NibLessView {
     return button
   }()
 
-  /// 宫格容器 (纵向): 每行 4 个格子。
-  private lazy var gridStackView: UIStackView = {
+  /// 分页滚动容器: 每页一个 4 列宫格, 横向滑动换页。
+  private lazy var pagingScrollView: UIScrollView = {
+    let scrollView = UIScrollView()
+    scrollView.isPagingEnabled = true
+    scrollView.showsHorizontalScrollIndicator = false
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
+    scrollView.delegate = self
+    return scrollView
+  }()
+
+  /// 各页横向排列 (每页宽 = 滚动容器宽)。
+  private lazy var pagesStackView: UIStackView = {
     let stack = UIStackView()
-    stack.axis = .vertical
-    stack.spacing = 16
+    stack.axis = .horizontal
+    stack.spacing = 0
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
+  }()
+
+  /// 页点: 只有多页时显示 (目前 7 个格子 = 1 页, 隐藏)。
+  private lazy var pageControl: UIPageControl = {
+    let control = UIPageControl()
+    control.translatesAutoresizingMaskIntoConstraints = false
+    control.currentPageIndicatorTintColor = .secondaryLabel
+    control.pageIndicatorTintColor = .tertiaryLabel
+    control.addTarget(self, action: #selector(pageControlChanged(_:)), for: .valueChanged)
+    return control
   }()
 
   init() {
@@ -70,7 +99,9 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   override func constructViewHierarchy() {
     addSubview(titleLabel)
     addSubview(closeButton)
-    addSubview(gridStackView)
+    addSubview(pagingScrollView)
+    pagingScrollView.addSubview(pagesStackView)
+    addSubview(pageControl)
   }
 
   override func activateViewConstraints() {
@@ -81,35 +112,85 @@ class KeyboardToolbarMenuPanelView: NibLessView {
       closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 
-      gridStackView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
-      gridStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-      gridStackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-      gridStackView.bottomAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.bottomAnchor, constant: -12),
+      pagingScrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+      pagingScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      pagingScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      pagingScrollView.bottomAnchor.constraint(equalTo: pageControl.topAnchor, constant: -8),
+
+      pageControl.leadingAnchor.constraint(equalTo: leadingAnchor),
+      pageControl.trailingAnchor.constraint(equalTo: trailingAnchor),
+      pageControl.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -8),
+      pageControl.heightAnchor.constraint(equalToConstant: 20),
+
+      // 横向分页的标准约束: 内容栈贴 contentLayoutGuide,
+      // 高度等于 frame 高度 (每页高与容器同高)。
+      pagesStackView.topAnchor.constraint(equalTo: pagingScrollView.contentLayoutGuide.topAnchor),
+      pagesStackView.bottomAnchor.constraint(equalTo: pagingScrollView.contentLayoutGuide.bottomAnchor),
+      pagesStackView.leadingAnchor.constraint(equalTo: pagingScrollView.contentLayoutGuide.leadingAnchor),
+      pagesStackView.trailingAnchor.constraint(equalTo: pagingScrollView.contentLayoutGuide.trailingAnchor),
+      pagesStackView.heightAnchor.constraint(equalTo: pagingScrollView.frameLayoutGuide.heightAnchor),
     ])
   }
 
   override func setupAppearance() {
-    // 透明: 面板打开时下面的工具栏和按键容器都被隐藏 (见 KeyboardToolbarView
+    // 透明: 面板打开时下面的按键容器被隐藏 (见 KeyboardToolbarView
     // hideKeyboardContentForOverlayPanel), 露出的是键盘根视图自身的底色,
     // 与键盘本体同一块颜色; 深色模式同样成立 (根视图底色随外观走)。
+    // 工具栏不藏 (在面板上方保持可见可点), 见 panelBackgroundColor 注释。
     backgroundColor = panelBackgroundColor
   }
 
-  /// 刷新格子 (按 4 列分行)。
+  /// 刷新格子 (按 4 列分行, 每 8 个一页)。
   func reload(with tiles: [(id: String, title: String, systemImage: String)]) {
     self.tiles = tiles
-    gridStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    pagesStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    var pageTiles: [(id: String, title: String, systemImage: String)] = []
+    for tile in tiles {
+      pageTiles.append(tile)
+      if pageTiles.count == Self.tilesPerPage {
+        pagesStackView.addArrangedSubview(makePage(with: pageTiles))
+        pageTiles = []
+      }
+    }
+    if !pageTiles.isEmpty {
+      pagesStackView.addArrangedSubview(makePage(with: pageTiles))
+    }
+    let pageCount = max(pagesStackView.arrangedSubviews.count, 1)
+    pageControl.numberOfPages = pageCount
+    // 只有多页时显示圆点; 单页时留 20pt 空位 (与多页时对齐, 不跳动)。
+    pageControl.isHidden = pageCount <= 1
+    pageControl.currentPage = 0
+    pagingScrollView.setContentOffset(.zero, animated: false)
+  }
+
+  /// 一页宫格 (2 行 x 4 列): 宽 = 滚动容器宽, 高与容器同高。
+  private func makePage(with tiles: [(id: String, title: String, systemImage: String)]) -> UIView {
+    let page = UIView()
+    page.translatesAutoresizingMaskIntoConstraints = false
+    page.widthAnchor.constraint(equalTo: pagingScrollView.frameLayoutGuide.widthAnchor).isActive = true
+    let stack = UIStackView()
+    stack.axis = .vertical
+    stack.spacing = 16
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    page.addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.topAnchor.constraint(equalTo: page.topAnchor),
+      stack.leadingAnchor.constraint(equalTo: page.leadingAnchor),
+      stack.trailingAnchor.constraint(equalTo: page.trailingAnchor),
+      stack.bottomAnchor.constraint(lessThanOrEqualTo: page.bottomAnchor),
+    ])
     var rowTiles: [(id: String, title: String, systemImage: String)] = []
     for tile in tiles {
       rowTiles.append(tile)
       if rowTiles.count == 4 {
-        gridStackView.addArrangedSubview(makeRow(with: rowTiles))
+        stack.addArrangedSubview(makeRow(with: rowTiles))
         rowTiles = []
       }
     }
     if !rowTiles.isEmpty {
-      gridStackView.addArrangedSubview(makeRow(with: rowTiles))
+      stack.addArrangedSubview(makeRow(with: rowTiles))
     }
+    return page
   }
 
   private func makeRow(with tiles: [(id: String, title: String, systemImage: String)]) -> UIStackView {
@@ -145,6 +226,18 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   @objc private func closeTapped() {
     onClose?()
   }
+
+  @objc private func pageControlChanged(_ sender: UIPageControl) {
+    let x = CGFloat(sender.currentPage) * pagingScrollView.bounds.width
+    pagingScrollView.setContentOffset(CGPoint(x: x, y: 0), animated: true)
+  }
+}
+
+extension KeyboardToolbarMenuPanelView: UIScrollViewDelegate {
+  func scrollViewDidScroll(_ scrollView: UIScrollView) {
+    guard scrollView.bounds.width > 0 else { return }
+    pageControl.currentPage = Int(round(scrollView.contentOffset.x / scrollView.bounds.width))
+  }
 }
 
 /// 菜单格子按钮: 图标在上、文字在下的 UIControl, 点按时有轻微高亮。
@@ -173,7 +266,7 @@ private class MenuTileButton: UIControl {
   private let titleLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 12)
+    label.font = .systemFont(ofSize: 13)
     label.textColor = .label
     label.textAlignment = .center
     return label
@@ -195,13 +288,13 @@ private class MenuTileButton: UIControl {
     stack.translatesAutoresizingMaskIntoConstraints = false
     addSubview(stack)
     NSLayoutConstraint.activate([
-      heightAnchor.constraint(equalToConstant: 60),
+      heightAnchor.constraint(equalToConstant: 68),
       stack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
       stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
       stack.leadingAnchor.constraint(equalTo: leadingAnchor),
       stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-      iconImageView.heightAnchor.constraint(equalToConstant: 24),
-      iconImageView.widthAnchor.constraint(equalToConstant: 24),
+      iconImageView.heightAnchor.constraint(equalToConstant: 26),
+      iconImageView.widthAnchor.constraint(equalToConstant: 26),
     ])
   }
 
@@ -213,7 +306,7 @@ private class MenuTileButton: UIControl {
     titleLabel.text = title
     iconImageView.image = UIImage(
       systemName: systemImage,
-      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 22)))
+      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 24)))
   }
 
   override var isHighlighted: Bool {

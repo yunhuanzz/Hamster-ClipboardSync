@@ -11,8 +11,16 @@ import UIKit
 /// 第 1 行: @/. ABC DEF + 删除
 /// 第 2 行: GHI JKL MNO + 清除拼音区
 /// 第 3 行: PQRS TUV WXYZ + 表情键 (右列第三行是 😊, 换行不在这里)
-/// 底行: 符号 123 空格 换行 (换行在右下角; 中/英切换不在九宫格底行,
-/// 经工具栏菜单“切换26键·九宫格”到 26 键后再按中/英)。
+/// 底行: 符号 123 空格 中/英 换行 (与微信一致, 5 键)。
+/// 中/英键是第 5 轮 (95e015e) 误删的: 那轮把底行从
+/// [符号][123][空格][中/英] (第 4 行跨两行的换行键在右列)
+/// 改成 [符号][123][空格][换行], 注释写"中/英切换不在九宫格底行"——
+/// 这是错的: 微信底行有中/英, 且九宫格上没有别的切英文入口
+/// (26 键的中/英键在另一个键盘类型上)。第 7 轮恢复, 用的就是
+/// 第 5 轮之前同一位置的 action (.keyboardType(.alphabetic)),
+/// 与 26 键中文键盘的中/英键完全相同 (同一张 chineseState 图标,
+/// 同一切换机制: 切到英文 26 键, 那边的"中"键按 selectKeyboard
+/// 切回九宫格)。
 /// 左侧另有一条标点边栏 (， 。 ? ! …, 见 ChineseNineGridKeyboard 的
 /// symbolsListView, 默认符号在 hamster.yaml 的
 /// symbolsOfChineseNineGridKeyboard 里)。
@@ -48,9 +56,11 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
     result.append(inputActions[0])
     result.append(inputActions[1])
     result.append(inputActions[2] + lowerTrailingActions(for: inputActions, context: context))
-    // 底行: 符号 / 123 / 空格 / 换行 (仿微信, 换行在右下角)。
-    // 中/英切换不在九宫格底行: 经工具栏菜单“切换26键·九宫格”到 26 键后再按中/英。
-    result.append([.keyboardType(.classifySymbolic), .keyboardType(.numericNineGrid), .space, keyboardReturnAction(for: context)])
+    // 底行: 符号 / 123 / 空格 / 中/英 / 换行 (仿微信, 5 键; 换行在右下角)。
+    // 中/英键 (第 7 轮恢复, 见文件头注释): 与 26 键中文键盘的中/英键
+    // 同一个 action (.keyboardType(.alphabetic(.lowercased))),
+    // 点按切到英文 26 键, 那边的"中"键切回九宫格。
+    result.append([.keyboardType(.classifySymbolic), .keyboardType(.numericNineGrid), .space, .keyboardType(.alphabetic(.lowercased)), keyboardReturnAction(for: context)])
     return result
   }
 
@@ -123,18 +133,21 @@ public class ChineseNineGridLayoutProvider: KeyboardLayoutProvider {
   }
 
   /// 最后面一行（空格所在行）小的按钮(如 `Return` 键)的宽度。
-  /// 注意：当系统为最后一行添加了更多的按键，则会使用此宽度
+  /// 注意：当系统为最后一行添加了更多的按键，则会使用此宽度。
+  /// 第 7 轮量出来的数 (1320px 截图, 微信九宫格底行):
+  /// 边键 (符号/换行) 键面约 240px ≈ 18.2%, 内侧系统键
+  /// (123/中/英) 键面约 148px ≈ 11.2%, 空格约 475px ≈ 36%。
+  /// 之前是 16.5% / 13%, 底行 4 键时空格被撑到 56%。
+  /// 注意这个 override 只影响九宫格 (26 键走
+  /// iPhoneKeyboardLayoutProvider 的同名方法, 不动)。
   open func smallBottomWidth(for context: KeyboardContext) -> KeyboardLayoutItemWidth {
-    .percentage(context.interfaceOrientation.isPortrait ? 0.165 : 0.135)
+    .percentage(context.interfaceOrientation.isPortrait ? 0.18 : 0.15)
   }
 
-  /**
-   The system buttons that are shown to the left and right
-   of the third row's input buttons on a regular keyboard.
-
-   在普通键盘第三行 input 类型按钮的左右两侧，显示的系统按钮（如删除键，Shift键）的布局 item 的宽度
-   */
+  /// 底行内侧系统键 (123 / 中/英 / 前往) 的宽度。
+  /// 第 7 轮按微信实测改 13% -> 11.5% (微信键面约 11.2%)。
+  /// 只影响九宫格 (见 smallBottomWidth 注释)。
   open func lowerSystemButtonWidth(for context: KeyboardContext) -> KeyboardLayoutItemWidth {
-    return .percentage(0.13)
+    return .percentage(0.115)
   }
 }

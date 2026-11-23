@@ -419,10 +419,13 @@ public extension UserDefaults {
   // MARK: - 工具栏自定义 (定制工具栏)
 
   /// 工具栏工具顺序: 在工具栏上的工具 id 按显示顺序排列 (不在顺序里的工具
-  /// 在定制面板的工具池里, 点按加入)。未设置过时默认 ["clipboard", "phrases", "dismiss"]
-  /// (收起键盘在最右, 方便拇指点按)。可见性仍由 toolbarVisibleTools 集合单独控制,
+  /// 在定制面板的工具池里, 点按加入)。未设置过时默认 ["clipboard", "phrases"]。
+  /// 可见性仍由 toolbarVisibleTools 集合单独控制,
   /// 与顺序保持同步 (加入工具栏时置为显示, 从工具栏拿掉时置为隐藏)。
   /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口), 不在列表里。
+  /// 收起键盘 (⌄) 不在列表里: 第 7 轮起它是钉死在工具栏最右的固定按钮,
+  /// 不再是可定制工具 (用户: 放菜单/定制里毫无意义); 已存顺序里的
+  /// "dismiss" 会被下面的 toolbarToolAllIDs 过滤掉, 自动清理。
   var toolbarToolsOrder: [String] {
     get {
       if let array = array(forKey: Self.toolbarToolsOrderKey) as? [String] {
@@ -440,11 +443,11 @@ public extension UserDefaults {
     }
   }
 
-  /// 工具栏默认顺序: 剪贴板、常用语、收起键盘 (收起键盘在最右, 方便拇指点按)。
-  static let toolbarToolDefaultOrder: [String] = ["clipboard", "phrases", "dismiss"]
+  /// 工具栏默认顺序: 剪贴板、常用语 (收起键盘是固定按钮, 不在顺序里)。
+  static let toolbarToolDefaultOrder: [String] = ["clipboard", "phrases"]
 
   /// 工具栏工具可见性: 存放"显示"的工具 id 集合。
-  /// 未设置过时全部显示; 工具 id: "clipboard"(剪贴板)、"phrases"(常用语)、"dismiss"(收起键盘)。
+  /// 未设置过时全部显示; 工具 id: "clipboard"(剪贴板)、"phrases"(常用语)。
   /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口)。
   var toolbarVisibleTools: Set<String> {
     get {
@@ -457,10 +460,12 @@ public extension UserDefaults {
   }
 
   /// 全部工具栏工具 id (与 KeyboardToolbarView.toolbarToolDefinitions() 一一对应):
-  /// 剪贴板、常用语、收起键盘、切换26键/九宫格、立即同步剪贴板、设置、常用语管理。
-  /// "定制工具栏"本身是入口, 不上工具栏。
+  /// 剪贴板、常用语、切换26键/九宫格、立即同步剪贴板、设置、常用语管理 (共 6 个)。
+  /// "定制工具栏"本身是入口, 不上工具栏; "收起键盘"是固定按钮, 不上工具栏
+  /// (第 7 轮移出可定制工具; 已存数据里的 "dismiss" 由读写两端的
+  /// toolbarToolAllIDs 过滤自动清理)。
   static let toolbarToolAllIDs: [String] = [
-    "clipboard", "phrases", "dismiss", "switchLayout",
+    "clipboard", "phrases", "switchLayout",
     "syncNow", "settings", "managePhrases",
   ]
 
@@ -494,7 +499,7 @@ public extension UserDefaults {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
     toolbarVisibleTools = Set(Self.toolbarToolDefaultOrder)
     menuVisibleTiles = Set(Self.menuTileAllIDs)
-    // 分区也恢复默认 (剪贴板左、常用语左、收起键盘右)。
+    // 分区也恢复默认 (剪贴板左、常用语左)。
     removeObject(forKey: Self.toolbarToolZonesKey)
   }
 
@@ -537,10 +542,10 @@ public extension UserDefaults {
     }
   }
 
-  /// 工具默认分区: 剪贴板左、常用语左、收起键盘右
-  /// (与第 4 轮用户已习惯的布局一致: 收起键盘钉在最右)。
+  /// 工具默认分区: 剪贴板左、常用语左
+  /// (与第 4 轮用户已习惯的布局一致)。
   static let toolbarToolDefaultZone: [String: ToolbarToolZone] = [
-    "clipboard": .left, "phrases": .left, "dismiss": .right,
+    "clipboard": .left, "phrases": .left,
   ]
 
   /// 各工具的分区 (toolID -> 分区)。未设置过时按当前生效布局推导,
@@ -588,8 +593,9 @@ public extension UserDefaults {
   // MARK: - 菜单宫格格子显隐 (工具面板)
 
   /// 工具面板里全部格子 id (与 KeyboardToolbarView.menuTiles() 的 id 一一对应)。
+  /// 共 7 个; "收起键盘"第 7 轮移出菜单 (只保留在工具栏最右的固定 ⌄ 按钮)。
   static let menuTileAllIDs: [String] = [
-    "clipboard", "phrases", "dismiss", "switchLayout",
+    "clipboard", "phrases", "switchLayout",
     "customize", "syncNow", "settings", "managePhrases",
   ]
 
