@@ -37,11 +37,8 @@
 		C00C26E72B069D6B00E92F89 /* libmarisa.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C00C26C52B069D6A00E92F89 /* libmarisa.xcframework */; };
 		C00C26E82B069D6B00E92F89 /* librime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C00C26C62B069D6A00E92F89 /* librime.xcframework */; };
 		C00C26E92B069D6B00E92F89 /* librime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C00C26C62B069D6A00E92F89 /* librime.xcframework */; };
-		C01396FC2AB499D80043674A /* RimeSyncIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01396F92AB499CA0043674A /* RimeSyncIntent.swift */; };
-		C01396FD2AB499D80043674A /* RimeDeployIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01396FA2AB499CA0043674A /* RimeDeployIntent.swift */; };
 		C02435B42A0490230080CFB4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C02435932A0490220080CFB4 /* Assets.xcassets */; };
 		C02435B52A0490230080CFB4 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C02435952A0490220080CFB4 /* Preview Assets.xcassets */; };
-		C02C4D982AC105CA00FF91BA /* IntentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02C4D972AC105CA00FF91BA /* IntentProvider.swift */; };
 		C03319DA2A2DFEBB00CE4950 /* AppDelegete.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03319D92A2DFEBB00CE4950 /* AppDelegete.swift */; };
 		C03319DC2A2DFEF700CE4950 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03319DB2A2DFEF700CE4950 /* SceneDelegate.swift */; };
 		C03319E22A2E1BEA00CE4950 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C03319E12A2E1BEA00CE4950 /* LaunchScreen.storyboard */; };
@@ -53,7 +50,6 @@
 		C0C7EAEC29E5A236008D4EE1 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = C0C7EAEF29E5A236008D4EE1 /* InfoPlist.strings */; };
 		C0D672B429F1E0E7002D0439 /* SharedSupport.zip in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = C0D672B329F1E066002D0439 /* SharedSupport.zip */; };
 		C0D856CC2B026FF6003DB275 /* rime-ice.zip in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = C0D856CA2B026FDA003DB275 /* rime-ice.zip */; };
-		C0DA3F422AFB5AE9003E74DA /* RimeDeployBackgroundIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DA3F412AFB5AE9003E74DA /* RimeDeployBackgroundIntent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -461,12 +457,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C01396FC2AB499D80043674A /* RimeSyncIntent.swift in Sources */,
-				C01396FD2AB499D80043674A /* RimeDeployIntent.swift in Sources */,
-				C0DA3F422AFB5AE9003E74DA /* RimeDeployBackgroundIntent.swift in Sources */,
 				C03319DC2A2DFEF700CE4950 /* SceneDelegate.swift in Sources */,
 				C03319DA2A2DFEBB00CE4950 /* AppDelegete.swift in Sources */,
-				C02C4D982AC105CA00FF91BA /* IntentProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
