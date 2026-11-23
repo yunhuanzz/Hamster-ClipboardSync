@@ -53,7 +53,7 @@ class KeyboardFeedbackRootView: NibLessView {
 
 extension KeyboardFeedbackRootView: UITableViewDataSource, UITableViewDelegate {
   func numberOfSections(in tableView: UITableView) -> Int {
-    2
+    3
   }
 
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -72,7 +72,20 @@ extension KeyboardFeedbackRootView: UITableViewDataSource, UITableViewDelegate {
       )
       return cell
     }
-    return HapticFeedbackTableViewCell(keyboardFeedbackViewModel: keyboardFeedbackViewModel)
+    if indexPath.section == 1 {
+      return HapticFeedbackTableViewCell(keyboardFeedbackViewModel: keyboardFeedbackViewModel)
+    }
+    // 按键气泡 (与键盘设置页同一配置键, 这里是按键效果页的入口)。
+    // 注意: 按键音没有音量设置项 (Hamster 只有开/关), 不造假滑块。
+    let cell = ToggleTableViewCell(style: .default, reuseIdentifier: ToggleTableViewCell.identifier)
+    cell.settingItem = .init(
+      text: "显示按键气泡",
+      toggleValue: { [unowned self] in keyboardFeedbackViewModel.displayButtonBubbles },
+      toggleHandled: { [unowned self] in
+        keyboardFeedbackViewModel.displayButtonBubbles = $0
+      }
+    )
+    return cell
   }
 
   func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {

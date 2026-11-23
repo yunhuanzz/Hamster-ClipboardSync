@@ -1029,6 +1029,112 @@ public class KeyboardSettingsViewModel: ObservableObject, Hashable, Identifiable
     ])
   ]
 
+  /// 布局和显示设置 (设置首页"布局和显示"卡片的子页用)。
+  /// 全部接到真实设置项, 与"候选栏设置"页同一批配置键, 不做假开关:
+  /// - 候选字/序号/Comment 字号、候选字最大数量、候选栏/编码区高度与字号
+  ///   (与 toolbarSettings 第 2 节同一批键, 只是换个入口);
+  /// - 拼音显示位置 = enableEmbeddedInputMode (开: 显示在输入框, 关: 显示在候选栏);
+  /// - 26 键数字输入方式 = enableNineGridOfNumericKeyboard
+  ///   (开: 点 123 进九宫格数字键盘, 关: 全键盘数字键盘)。
+  /// 没有"九宫格上滑输数字"总开关——九宫格上滑数字没有单一配置键,
+  /// 它由每键的划动配置控制 (键盘设置 -> 键盘布局 -> 划动设置), 不造假开关。
+  /// 也没有"键盘高度"总调节——键盘行高是固定的, 只有候选栏高度可调。
+  lazy var layoutDisplaySettings: [SettingSectionModel] = [
+    .init(
+      title: "候选栏",
+      items: [
+        .init(
+          text: "候选字体大小",
+          type: .step,
+          textValue: { [unowned self] in String(candidateWordFontSize) },
+          minValue: 10,
+          maxValue: 30,
+          stepValue: 1,
+          valueChangeHandled: { [unowned self] in
+            candidateWordFontSize = Int($0)
+          }),
+        .init(
+          text: "候选序号字体大小",
+          type: .step,
+          textValue: { [unowned self] in String(candidateLabelFontSize) },
+          minValue: 10,
+          maxValue: 30,
+          stepValue: 1,
+          valueChangeHandled: { [unowned self] in
+            candidateLabelFontSize = Int($0)
+          }),
+        .init(
+          text: "候选 Comment 字体大小",
+          type: .step,
+          textValue: { [unowned self] in String(candidateCommentFontSize) },
+          minValue: 5,
+          maxValue: 30,
+          stepValue: 1,
+          valueChangeHandled: { [unowned self] in
+            candidateCommentFontSize = Int($0)
+          }),
+        .init(
+          text: "候选字最大数量",
+          type: .step,
+          textValue: { [unowned self] in String(maximumNumberOfCandidateWords) },
+          minValue: 50,
+          maxValue: 500,
+          stepValue: 50,
+          valueChangeHandled: { [unowned self] in
+            maximumNumberOfCandidateWords = Int($0)
+          }),
+        .init(
+          text: "候选栏高度",
+          type: .step,
+          textValue: { [unowned self] in String(heightOfToolbar) },
+          minValue: 30,
+          maxValue: 80,
+          stepValue: 1,
+          valueChangeHandled: { [unowned self] in
+            heightOfToolbar = Int($0)
+          }),
+        .init(
+          text: "编码区高度",
+          type: .step,
+          textValue: { [unowned self] in String(heightOfCodingArea) },
+          minValue: 5,
+          maxValue: 20,
+          stepValue: 1,
+          valueChangeHandled: { [unowned self] in
+            heightOfCodingArea = Int($0)
+          }),
+        .init(
+          text: "编码区字体大小",
+          type: .step,
+          textValue: { [unowned self] in String(codingAreaFontSize) },
+          minValue: 5,
+          maxValue: 20,
+          stepValue: 1,
+          valueChangeHandled: { [unowned self] in
+            codingAreaFontSize = Int($0)
+          }),
+      ]),
+    .init(
+      title: "拼音与数字",
+      footer: "拼音显示: 开启时拼音显示在输入框里, 关闭时显示在候选栏。\n26 键数字输入: 开启时点 123 进入九宫格数字键盘, 关闭时使用全键盘数字键盘。",
+      items: [
+        .init(
+          text: "拼音显示在输入框",
+          type: .toggle,
+          toggleValue: { [unowned self] in enableEmbeddedInputMode },
+          toggleHandled: { [unowned self] in
+            enableEmbeddedInputMode = $0
+          }),
+        .init(
+          text: "26 键数字输入用九宫格",
+          type: .toggle,
+          toggleValue: { [unowned self] in enableNineGridOfNumericKeyboard },
+          toggleHandled: { [unowned self] in
+            enableNineGridOfNumericKeyboard = $0
+          }),
+      ]),
+  ]
+
   lazy var numberNineGridSettings: [SettingItemModel] = [
     .init(
       text: "启用数字九宫格",

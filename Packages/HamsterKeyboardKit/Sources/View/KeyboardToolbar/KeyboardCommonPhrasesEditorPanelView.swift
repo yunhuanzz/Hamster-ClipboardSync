@@ -27,6 +27,17 @@ class KeyboardCommonPhrasesEditorPanelView: NibLessView {
   /// 正在编辑的常用语下标 (nil 表示新增)。
   private var editingIndex: Int?
 
+  /// 覆盖式面板底色: 调用方 (KeyboardToolbarView) 传入与键盘本体一致的不透明颜色;
+  /// 默认用系统键盘标准底色 (浅色 #D5D6DD / 深色 #2C2C2C, 不透明)。
+  /// 注意: 不能用 .clear——第 3 轮的透明修法是错的, 面板是全屏覆盖层,
+  /// 透明底会让键盘按键从列表后面透出来。
+  var panelBackgroundColor: UIColor = HamsterUIColor.shared.standardKeyboardBackground {
+    didSet {
+      backgroundColor = panelBackgroundColor
+      tableView.backgroundColor = panelBackgroundColor
+    }
+  }
+
   private lazy var titleLabel: UILabel = {
     let label = UILabel()
     label.text = "常用语管理"
@@ -104,8 +115,9 @@ class KeyboardCommonPhrasesEditorPanelView: NibLessView {
     tableView.delegate = self
     tableView.rowHeight = UITableView.automaticDimension
     tableView.estimatedRowHeight = 44
-    // 透明: 默认是不透明的系统背景, 深色模式会盖出一块黑斑; 透出面板后的键盘底色。
-    tableView.backgroundColor = .clear
+    // 不透明: 面板本身已是不透明底色, 列表用同一颜色, 按键透不出来;
+    // 深色模式下是深灰, 不是纯黑, 不会出现黑斑。
+    tableView.backgroundColor = panelBackgroundColor
     tableView.register(UITableViewCell.self, forCellReuseIdentifier: "CommonPhraseCell")
     return tableView
   }()
@@ -192,10 +204,10 @@ class KeyboardCommonPhrasesEditorPanelView: NibLessView {
   }
 
   override func setupAppearance() {
-    // 透明: 面板是盖在键盘根视图上的全屏覆盖层, 透出根视图的背景,
-    // 即与键盘本体同一块底色 (浅色/深色模式都一致)。
-    // 之前用 .systemBackground, 深色模式是纯黑, 与深灰键盘底色割裂成黑斑。
-    backgroundColor = .clear
+    // 不透明: 面板是盖在键盘根视图上的全屏覆盖层, 必须用与键盘本体一致的
+    // 不透明底色, 否则按键会从列表后面透出来 (第 3 轮改成 .clear 是错的)。
+    // 深色模式下底色是深灰 (#2C2C2C), 不是纯黑, 所以不会再出现黑斑。
+    backgroundColor = panelBackgroundColor
   }
 
   /// 刷新列表内容 (从共享 UserDefaults 读)。

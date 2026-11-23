@@ -35,6 +35,17 @@ public class KeyboardFeedbackViewModel {
     }
   }
 
+  /// 显示按键气泡 (与键盘设置页同一配置键, 这里是按键效果页的入口)。
+  public var displayButtonBubbles: Bool {
+    get {
+      HamsterAppDependencyContainer.shared.configuration.keyboard?.displayButtonBubbles ?? true
+    }
+    set {
+      HamsterAppDependencyContainer.shared.configuration.keyboard?.displayButtonBubbles = newValue
+      HamsterAppDependencyContainer.shared.applicationConfiguration.keyboard?.displayButtonBubbles = newValue
+    }
+  }
+
   public let hapticFeedbackStateSubject = PassthroughSubject<Bool, Never>()
   public var hapticFeedbackStatePublished: AnyPublisher<Bool, Never> {
     hapticFeedbackStateSubject.eraseToAnyPublisher()

@@ -468,10 +468,47 @@ public extension UserDefaults {
     toolbarToolsOrder = order
   }
 
-  /// 恢复默认顺序并全部显示。
+  /// 恢复默认顺序并全部显示 (工具栏工具 + 菜单格子都恢复)。
   func resetToolbarToolsOrder() {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
     toolbarVisibleTools = Set(Self.toolbarToolAllIDs)
+    menuVisibleTiles = Set(Self.menuTileAllIDs)
+  }
+
+  // MARK: - 菜单宫格格子显隐 (工具面板)
+
+  /// 工具面板里全部格子 id (与 KeyboardToolbarView.menuTiles() 的 id 一一对应)。
+  static let menuTileAllIDs: [String] = [
+    "clipboard", "phrases", "dismiss", "switchLayout",
+    "customize", "syncNow", "settings", "managePhrases",
+  ]
+
+  /// 菜单宫格格子可见性: 存放"显示"的格子 id 集合。
+  /// 未设置过时全部显示。
+  var menuVisibleTiles: Set<String> {
+    get {
+      if let array = array(forKey: Self.menuVisibleTilesKey) as? [String] {
+        return Set(array)
+      }
+      return Set(Self.menuTileAllIDs)
+    }
+    set { set(Array(newValue), forKey: Self.menuVisibleTilesKey) }
+  }
+
+  /// 某个菜单格子是否显示 (未设置过默认显示)
+  func isMenuTileVisible(_ tileID: String) -> Bool {
+    menuVisibleTiles.contains(tileID)
+  }
+
+  /// 设置某个菜单格子是否显示
+  func setMenuTileVisible(_ tileID: String, visible: Bool) {
+    var tiles = menuVisibleTiles
+    if visible {
+      tiles.insert(tileID)
+    } else {
+      tiles.remove(tileID)
+    }
+    menuVisibleTiles = tiles
   }
 
   // MARK: - 剪贴板历史 (键盘内剪贴板按钮)
@@ -590,6 +627,7 @@ extension UserDefaults {
   private static let chinesePrimaryKeyboardIsNineGridKey = "com.ihsiao.apps.Hamster.UserDefault.keys.chinesePrimaryKeyboardIsNineGrid"
   private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"
   private static let toolbarToolsOrderKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolsOrder"
+  private static let menuVisibleTilesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.menuVisibleTiles"
 
   // MARK: - 剪贴板历史 / 常用语
 

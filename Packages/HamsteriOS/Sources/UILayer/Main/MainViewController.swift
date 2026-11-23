@@ -23,6 +23,14 @@ protocol SubViewControllerFactory {
   func makeRimeViewController() -> RimeViewController
   func makeCommonPhrasesViewController() -> CommonPhrasesViewController
   func makeCustomPhrasesViewController() -> CustomPhrasesViewController
+  /// 键盘管理页 (复用键盘布局页: 九宫格/全键盘选择)
+  func makeKeyboardLayoutViewController() -> KeyboardLayoutViewController
+  /// 布局和显示页
+  func makeLayoutDisplayViewController() -> LayoutDisplayViewController
+  /// 跨设备粘贴传送页 (剪贴板同步设置)
+  func makeClipboardSyncSettingsViewController() -> ClipboardSyncSettingsViewController
+  /// 定制工具栏页 (复用候选栏设置页)
+  func makeToolbarSettingsViewController() -> ToolbarSettingsViewController
 }
 
 open class MainViewController: UISplitViewController {
@@ -65,6 +73,20 @@ open class MainViewController: UISplitViewController {
 
   private lazy var customPhrasesViewController: CustomPhrasesViewController
     = subViewControllerFactory.makeCustomPhrasesViewController()
+
+  /// 键盘管理页 (复用键盘布局页)
+  private lazy var keyboardManagementViewController: KeyboardLayoutViewController
+    = subViewControllerFactory.makeKeyboardLayoutViewController()
+
+  private lazy var layoutDisplayViewController: LayoutDisplayViewController
+    = subViewControllerFactory.makeLayoutDisplayViewController()
+
+  private lazy var clipboardSyncSettingsViewController: ClipboardSyncSettingsViewController
+    = subViewControllerFactory.makeClipboardSyncSettingsViewController()
+
+  /// 定制工具栏页 (复用候选栏设置页)
+  private lazy var toolbarSettingsViewController: ToolbarSettingsViewController
+    = subViewControllerFactory.makeToolbarSettingsViewController()
 
   private lazy var primaryNavigationViewController: UINavigationController = {
     let vc = UINavigationController(rootViewController: settingsViewController)
@@ -171,6 +193,14 @@ extension MainViewController {
       presentCommonPhrasesViewController()
     case .customPhrases:
       presentCustomPhrasesViewController()
+    case .keyboardManagement:
+      presentKeyboardManagementViewController()
+    case .layoutDisplay:
+      presentLayoutDisplayViewController()
+    case .clipboardSync:
+      presentClipboardSyncSettingsViewController()
+    case .toolbarSettings:
+      presentToolbarSettingsViewController()
     case .main:
       presentMainViewController()
     default:
@@ -228,6 +258,22 @@ extension MainViewController {
 
   func presentCustomPhrasesViewController() {
     presentViewController(customPhrasesViewController)
+  }
+
+  func presentKeyboardManagementViewController() {
+    presentViewController(keyboardManagementViewController)
+  }
+
+  func presentLayoutDisplayViewController() {
+    presentViewController(layoutDisplayViewController)
+  }
+
+  func presentClipboardSyncSettingsViewController() {
+    presentViewController(clipboardSyncSettingsViewController)
+  }
+
+  func presentToolbarSettingsViewController() {
+    presentViewController(toolbarSettingsViewController)
   }
 
   private func presentViewController(_ vc: UIViewController) {

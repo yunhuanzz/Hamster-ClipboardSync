@@ -206,21 +206,31 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
     }()
 
     if let swipe = context.keyboardSwipe[keyboardTypeKey]?[actionKey] {
-      // 英文 26 键: 配置里没有该键的上滑时, 补默认上滑数字/符号 (顶行 1~0, 其余行符号);
-      // 中文 26 键走 YAML 配置, 这里不补。
-      let swipes = keyboardTypeKey.isAlphabetic ? KeySwipe.withDefaultAlphabeticUpSwipe(swipe, for: action) : swipe
-      // 中文 26 键角标去噪: YAML 给每键都配了上滑/下滑角标, 全显示太乱 ("8太乱了")。
-      // 只保留顶行数字 (1~0) 的上滑角标, 其余上滑/下滑仍可用但不显示角标。
+      // 26 键上滑统一用默认映射 (顶行 1~0, 其余行符号):
+      // 英文: YAML 本身没有 alphabetic 段, 配置里的 alphabetic 项只能来自旧的
+      //   划动设置编辑; 若它含一条上滑, withDefaultAlphabeticUpSwipe 会以为
+      //   已有上滑而不补默认, 导致英文上滑没反应 (build #18-#20 实测问题)。
+      //   所以先丢弃配置里的上滑, 再补默认映射。
+      // 中文: YAML 给的上滑是另一套符号 (a->`、b->《》...), 用户要的是跟英文
+      //   同一套数字/符号; 第 2 轮只留顶行数字角标后, 符号上滑还在但看不见。
+      //   同样先丢弃配置上滑、再补默认映射。下滑保留 (YAML 的), 只隐藏角标。
+      // 九宫格等其他键盘类型不受影响。
+      let swipes: [KeySwipe]
+      if keyboardTypeKey == .chinese(.lowercased) || keyboardTypeKey.isAlphabetic {
+        let withoutUp = swipe.filter { $0.direction != .up }
+        swipes = KeySwipe.withDefaultAlphabeticUpSwipe(withoutUp, for: action)
+      } else {
+        swipes = swipe
+      }
+      // 角标只显示上滑方向 (微信风格: 每键一个 8pt 浅灰上标); 下滑角标一律隐藏。
+      // 第 2 轮只留顶行数字是怕乱, 但 8pt 浅灰上标本身不重, 乱的是上下两个
+      // 角标全显示 (52 个); 这次把符号上滑恢复显示, 只去掉下滑提示。
       // (配置已缓存到老用户设备, 改 YAML 到不了他那里, 所以这里用代码过滤。)
       let displaySwipes: [KeySwipe]
-      if keyboardTypeKey == .chinese(.lowercased) {
+      if keyboardTypeKey == .chinese(.lowercased) || keyboardTypeKey.isAlphabetic {
         displaySwipes = swipes.map { swipe in
           var swipe = swipe
-          if swipe.direction == .up,
-             case .character(let char) = swipe.action,
-             char.count == 1, "0123456789".contains(char) {
-            // 顶行数字: 保留角标
-          } else {
+          if swipe.direction == .down {
             swipe.display = false
           }
           return swipe
@@ -230,8 +240,14 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
       }
       return KeySwipe.withDefaultBackspaceUpSwipe(displaySwipes, for: action)
     }
-    // 英文 26 键默认上滑 (无配置时): 顶行字母 -> 数字 1~0, 其余行 -> 常用符号
-    let swipes = keyboardTypeKey.isAlphabetic ? KeySwipe.withDefaultAlphabeticUpSwipe([], for: action) : []
+    // 无配置时: 英文/中文 26 键同样补默认上滑 (顶行字母 -> 数字 1~0, 其余行 -> 常用符号);
+    // 其他类型无上滑。
+    let swipes: [KeySwipe]
+    if keyboardTypeKey == .chinese(.lowercased) || keyboardTypeKey.isAlphabetic {
+      swipes = KeySwipe.withDefaultAlphabeticUpSwipe([], for: action)
+    } else {
+      swipes = []
+    }
     return KeySwipe.withDefaultBackspaceUpSwipe(swipes, for: action)
   }
 

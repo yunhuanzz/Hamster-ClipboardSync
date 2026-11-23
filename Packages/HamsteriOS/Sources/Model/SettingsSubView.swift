@@ -42,6 +42,18 @@ public enum SettingsSubView: String {
   /// 我的词组页面
   case customPhrases
 
+  /// 键盘管理页面 (九宫格/全键盘选择)
+  case keyboardManagement
+
+  /// 布局和显示页面 (候选字大小、拼音显示位置、数字输入方式等)
+  case layoutDisplay
+
+  /// 跨设备粘贴传送页面 (剪贴板同步设置)
+  case clipboardSync
+
+  /// 定制工具栏页面 (候选栏设置)
+  case toolbarSettings
+
   /// 关于页面
   case about
 

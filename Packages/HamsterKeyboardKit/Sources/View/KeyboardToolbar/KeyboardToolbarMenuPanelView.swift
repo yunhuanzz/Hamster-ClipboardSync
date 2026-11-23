@@ -21,6 +21,14 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   /// 格子: (id, 标题, SF Symbol 名)。由调用方传入。
   private var tiles: [(id: String, title: String, systemImage: String)] = []
 
+  /// 覆盖式面板底色: 调用方 (KeyboardToolbarView) 传入与键盘本体一致的不透明颜色;
+  /// 默认用系统键盘标准底色 (浅色 #D5D6DD / 深色 #2C2C2C, 不透明)。
+  /// 注意: 不能用 .clear——第 3 轮的透明修法是错的, 面板是全屏覆盖层,
+  /// 透明底会让键盘按键从格子后面透出来, 格子文字叠在 ABC/DEF 键上。
+  var panelBackgroundColor: UIColor = HamsterUIColor.shared.standardKeyboardBackground {
+    didSet { backgroundColor = panelBackgroundColor }
+  }
+
   private lazy var titleLabel: UILabel = {
     let label = UILabel()
     label.text = "工具"
@@ -77,10 +85,12 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   override func setupAppearance() {
-    // 透明: 面板是盖在键盘根视图上的全屏覆盖层, 透出根视图的背景,
-    // 即与键盘本体同一块底色 (浅色/深色模式都一致, 配色方案的渐变/图片也一样透出)。
-    // 之前用 .systemBackground, 深色模式是纯黑, 与深灰键盘底色割裂成黑斑。
-    backgroundColor = .clear
+    // 不透明: 面板是盖在键盘根视图上的全屏覆盖层, 必须用与键盘本体一致的
+    // 不透明底色, 否则按键会从格子后面透出来。
+    // (第 3 轮改成 .clear 是为了修深色模式黑斑, 但透明对覆盖式面板是错的:
+    //  工具栏那条细条透一下没事, 全屏面板透了就是格子浮在按键上。)
+    // 深色模式下底色是深灰 (#2C2C2C), 不是纯黑, 所以不会再出现黑斑。
+    backgroundColor = panelBackgroundColor
   }
 
   /// 刷新格子 (按 4 列分行)。
@@ -136,8 +146,19 @@ class KeyboardToolbarMenuPanelView: NibLessView {
 }
 
 /// 菜单格子按钮: 图标在上、文字在下的 UIControl, 点按时有轻微高亮。
+/// 每个格子自带淡淡的圆角矩形底 (仿微信白格子): 浅色模式偏白、深色模式偏深灰,
+/// 不硬编码黑/白, 深色模式也不会出现黑斑。
 private class MenuTileButton: UIControl {
   var tileID: String = ""
+
+  /// 格子底色 (随深浅模式自动切换): 浅色纯白, 深色半透明白 (≈深灰)。
+  private static let tileBackgroundColor = UIColor { trait in
+    trait.userInterfaceStyle == .dark
+      ? UIColor.white.withAlphaComponent(0.22)
+      : UIColor.white
+  }
+
+  /// 点按高亮色: 浅色浅灰、深色更深一档, 在格子底色上能看出按下反馈。
 
   private let iconImageView: UIImageView = {
     let imageView = UIImageView()
@@ -158,8 +179,9 @@ private class MenuTileButton: UIControl {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    layer.cornerRadius = 8
+    layer.cornerRadius = 10
     clipsToBounds = true
+    backgroundColor = Self.tileBackgroundColor
     let stack = UIStackView(arrangedSubviews: [iconImageView, titleLabel])
     stack.axis = .vertical
     stack.spacing = 6
@@ -193,6 +215,8 @@ private class MenuTileButton: UIControl {
   }
 
   override var isHighlighted: Bool {
-    didSet { backgroundColor = isHighlighted ? .secondarySystemBackground : .clear }
+    didSet {
+      backgroundColor = isHighlighted ? .secondarySystemBackground : Self.tileBackgroundColor
+    }
   }
 }

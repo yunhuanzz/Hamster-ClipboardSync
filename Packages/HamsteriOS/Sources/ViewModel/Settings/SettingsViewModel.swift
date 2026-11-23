@@ -127,6 +127,73 @@ public class SettingsViewModel: ObservableObject {
   }
 
   /// 设置选项
+  /// 剪贴板同步设置 (跨设备粘贴传送子页用; 也是 sections 里"剪贴板同步"那一节
+  /// 的唯一来源, 两边共用同一批 item, 数据不重复、不漂移)。
+  /// 搬到子页的原因: 设置首页改成卡片宫格后不再 inline 展示这一节,
+  /// 点卡片"跨设备粘贴传送"进子页改。同步 URL/账号/密码原样保留, 不迁移。
+  public lazy var clipboardSyncSettings: [SettingSectionModel] = [
+    SettingSectionModel(
+      title: "剪贴板同步",
+      footer: "键盘每次弹出时同步一次: 上传本机剪贴板, 再下载服务器最新内容。需在系统设置中为仓输入法开启「允许完全访问」, 否则无法读取剪贴板与联网。注意: iOS 14 起每次读取剪贴板都会在屏幕顶部弹出提示横幅, 这是系统行为。",
+      items: [
+        .init(
+          icon: UIImage(systemName: "doc.on.clipboard")!,
+          text: "启用剪贴板同步",
+          type: .toggle,
+          toggleValue: { [unowned self] in clipboardSyncEnabled },
+          toggleHandled: { [unowned self] in
+            clipboardSyncEnabled = $0
+          }
+        ),
+        .init(
+          icon: UIImage(systemName: "server.rack")!,
+          placeholder: "服务器地址, 如 https://example.com:8444",
+          type: .textField,
+          textValue: { [unowned self] in clipboardSyncServerURL },
+          textHandled: { [unowned self] in
+            clipboardSyncServerURL = $0
+          }
+        ),
+        .init(
+          icon: UIImage(systemName: "person")!,
+          placeholder: "用户名 (可空)",
+          type: .textField,
+          textValue: { [unowned self] in clipboardSyncUsername },
+          textHandled: { [unowned self] in
+            clipboardSyncUsername = $0
+          }
+        ),
+        .init(
+          icon: UIImage(systemName: "lock")!,
+          placeholder: "密码 (可空)",
+          type: .textField,
+          textValue: { [unowned self] in clipboardSyncPassword },
+          textHandled: { [unowned self] in
+            clipboardSyncPassword = $0
+          }
+        ),
+        .init(
+          icon: UIImage(systemName: "info.circle")!,
+          text: "上次同步",
+          navigationLinkLabel: { UserDefaults.hamster.clipboardSyncLastStatusText ?? "尚未同步" }
+        ),
+        .init(
+          text: "立即同步",
+          type: .button,
+          buttonAction: {
+            ClipboardSyncService.shared.syncNow()
+            // 同步完成后子页收到通知会刷新状态行
+          }
+        ),
+      ]
+    ),
+  ]
+
+  /// 卡片宫格首页导航入口 (mainViewModel 是 private, 首页通过这里跳转子页)。
+  func navigate(to subView: SettingsSubView) {
+    mainViewModel.subViewSubject.send(subView)
+  }
+
   public lazy var sections: [SettingSectionModel] = {
     let sections = [
       SettingSectionModel(title: "输入相关", items: [
@@ -217,61 +284,7 @@ public class SettingsViewModel: ObservableObject {
           }
         ),
       ]),
-      SettingSectionModel(
-        title: "剪贴板同步",
-        footer: "键盘每次弹出时同步一次: 上传本机剪贴板, 再下载服务器最新内容。需在系统设置中为仓输入法开启「允许完全访问」, 否则无法读取剪贴板与联网。注意: iOS 14 起每次读取剪贴板都会在屏幕顶部弹出提示横幅, 这是系统行为。",
-        items: [
-          .init(
-            icon: UIImage(systemName: "doc.on.clipboard")!,
-            text: "启用剪贴板同步",
-            type: .toggle,
-            toggleValue: { [unowned self] in clipboardSyncEnabled },
-            toggleHandled: { [unowned self] in
-              clipboardSyncEnabled = $0
-            }
-          ),
-          .init(
-            icon: UIImage(systemName: "server.rack")!,
-            placeholder: "服务器地址, 如 https://example.com:8444",
-            type: .textField,
-            textValue: { [unowned self] in clipboardSyncServerURL },
-            textHandled: { [unowned self] in
-              clipboardSyncServerURL = $0
-            }
-          ),
-          .init(
-            icon: UIImage(systemName: "person")!,
-            placeholder: "用户名 (可空)",
-            type: .textField,
-            textValue: { [unowned self] in clipboardSyncUsername },
-            textHandled: { [unowned self] in
-              clipboardSyncUsername = $0
-            }
-          ),
-          .init(
-            icon: UIImage(systemName: "lock")!,
-            placeholder: "密码 (可空)",
-            type: .textField,
-            textValue: { [unowned self] in clipboardSyncPassword },
-            textHandled: { [unowned self] in
-              clipboardSyncPassword = $0
-            }
-          ),
-          .init(
-            icon: UIImage(systemName: "info.circle")!,
-            text: "上次同步",
-            navigationLinkLabel: { UserDefaults.hamster.clipboardSyncLastStatusText ?? "尚未同步" }
-          ),
-          .init(
-            text: "立即同步",
-            type: .button,
-            buttonAction: {
-              ClipboardSyncService.shared.syncNow()
-              // 同步完成后 SettingsRootView 收到通知会刷新状态行
-            }
-          ),
-        ]
-      ),
+      clipboardSyncSettings[0],
       .init(title: "RIME", items: [
         .init(
           icon: UIImage(systemName: "r.square")!,

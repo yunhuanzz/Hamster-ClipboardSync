@@ -353,4 +353,12 @@ extension HamsterAppDependencyContainer: SubViewControllerFactory {
   func makeCustomPhrasesViewController() -> CustomPhrasesViewController {
     CustomPhrasesViewController()
   }
+
+  func makeLayoutDisplayViewController() -> LayoutDisplayViewController {
+    LayoutDisplayViewController(keyboardSettingsViewModel: keyboardSettingsViewModel)
+  }
+
+  func makeClipboardSyncSettingsViewController() -> ClipboardSyncSettingsViewController {
+    ClipboardSyncSettingsViewController(settingsViewModel: settingsViewModel)
+  }
 }

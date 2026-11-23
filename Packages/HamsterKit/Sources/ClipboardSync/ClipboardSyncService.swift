@@ -5,12 +5,12 @@
 //  跨设备剪贴板同步服务（键盘触发式，类似微信输入法的做法）:
 //
 //  触发时机: 键盘每次弹出时 (KeyboardInputViewController.viewWillAppear),
-//  以及键盘打开期间每 3 秒一次 (KeyboardToolbarView 的定时器, 键盘隐藏时停止)。
+//  以及键盘打开期间每 1 秒一次 (KeyboardToolbarView 的定时器, 键盘隐藏时停止)。
 //  流程:
 //    1. 读取本机剪贴板 (UIPasteboard)，若与上次同步内容不同则上传到服务器;
 //    2. 从服务器下载最新一条剪贴板，若与本机不同则写回本机剪贴板。
 //  因此另一台设备打开键盘时，就能拿到这边复制的内容；键盘开着时复制
-//  (本机或 PC) 也不用等关闭重开，3 秒内就能同步到。
+//  (本机或 PC) 也不用等关闭重开，1 秒内就能同步到。
 //
 //  服务器协议 (SyncClipboard 服务器, 见 https://github.com/Jeric-X/SyncClipboard):
 //    上传: PUT {serverURL}/SyncClipboard.json, Body 为 JSON
@@ -49,8 +49,8 @@ public final class ClipboardSyncService {
   public static let didFinishNotification = Notification.Name("dev.fuxiao.app.Hamster.ClipboardSync.didFinish")
 
   /// 每次键盘弹出后最短同步间隔 (秒), 避免快速切换键盘时频繁请求。
-  /// 2026-11-23 由 10 秒改为 2 秒: 连续复制时两次同步之间不再有几秒的空窗。
-  private static let minSyncInterval: TimeInterval = 2
+  /// 2026-11-23 由 10 秒改为 2 秒、再改为 0.5 秒: 连续复制时两次同步之间不再有几秒的空窗。
+  private static let minSyncInterval: TimeInterval = 0.5
 
   /// 单次网络请求超时 (秒)
   private static let requestTimeout: TimeInterval = 3
@@ -69,7 +69,7 @@ public final class ClipboardSyncService {
 
   private var lastAttempt: Date?
 
-  /// 是否正在同步 (只在串行队列上读写)。定时器每 3 秒调一次 syncNow(),
+  /// 是否正在同步 (只在串行队列上读写)。定时器每 1 秒调一次 syncNow(),
   /// 若上一次同步 (弱网时最多等 4 秒) 还没结束, 新的直接跳过, 不堆积。
   private var isSyncing = false
 
@@ -101,7 +101,7 @@ public final class ClipboardSyncService {
     }
   }
 
-  /// 立即同步一次 (跳过 2 秒节流), 供剪贴板面板/菜单/设置/定时器手动触发。
+  /// 立即同步一次 (跳过 0.5 秒节流), 供剪贴板面板/菜单/设置/定时器手动触发。
   /// 同样异步执行、失败静默, 不阻塞打字; 完成后发 didFinishNotification。
   public func syncNow() {
     queue.async { [weak self] in
@@ -160,7 +160,7 @@ public final class ClipboardSyncService {
     var failureReason: String?
     #if canImport(UIKit)
       // 只有剪贴板真的变了 (changeCount 移动) 才读内容; 没变直接跳过读取,
-      // 否则定时器每 3 秒调一次就会每 3 秒弹一次横幅。
+      // 否则定时器每 1 秒调一次就会每 1 秒弹一次横幅。
       // changeCount 是个整数, 读它不弹横幅。
       let currentChangeCount = UIPasteboard.general.changeCount
       if currentChangeCount != lastSeenPasteboardChangeCount {

@@ -103,6 +103,19 @@ public extension KeyboardButton {
     }
   }
 
+  /// 上滑识别窗口: 空格/回退键有真实长按/重复行为, 窗口保持 longPressDelay (0.3s);
+  /// 字母/符号键长按无动作 (standardLongPressAction 只对空格返回非空,
+  /// repeat 也只对回退键有意义), 放宽到 0.6s——慢速试探的上滑
+  /// (0.3s 内划不满 32pt) 否则会被当成点按, 表现为"上滑没反应"。
+  /// 这是英文上滑失效的第二种可能原因 (第一种见 SystemKeyboardLayoutProvider
+  /// itemSwipes: 已保存的 alphabetic 配置上滑挡住了默认映射)。
+  private var swipeRecognitionWindow: TimeInterval {
+    switch item.action {
+    case .space, .backspace: return longPressDelay
+    default: return max(longPressDelay, 0.6)
+    }
+  }
+
   func tryHandleDrag(_ touch: UITouch, event: UIEvent?) {
     // dragStartLocation 在 touchesBegan 阶段设置值，在 touchesEnd/touchesCancel 阶段取消值
     guard let startLocation = dragStartLocation else { return }
@@ -110,7 +123,7 @@ public extension KeyboardButton {
     lastDragLocation = currentPoint
 
     /// 划动手势应在长按手势之前触发
-    if let touchBeginTimestamp = touchBeginTimestamp, touch.timestamp - touchBeginTimestamp < longPressDelay {
+    if let touchBeginTimestamp = touchBeginTimestamp, touch.timestamp - touchBeginTimestamp < swipeRecognitionWindow {
       let distanceThreshold: CGFloat = keyboardContext.distanceThreshold // 划动距离的阈值
       let tangentThreshold: CGFloat = keyboardContext.tangentThreshold // 划动角度正切阈值
 
