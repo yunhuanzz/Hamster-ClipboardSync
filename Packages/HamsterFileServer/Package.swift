@@ -9,7 +9,7 @@ let package = Package(
   platforms: [
     .iOS(.v14),
   ],
-  swiftLanguageVersions: [.v5],
+  swiftLanguageModes: [.v5],
   products: [
     .library(
       name: "HamsterFileServer",

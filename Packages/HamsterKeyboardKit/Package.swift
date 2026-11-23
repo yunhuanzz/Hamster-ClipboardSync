@@ -9,7 +9,7 @@ let package = Package(
   platforms: [
     .iOS(.v15),
   ],
-  swiftLanguageVersions: [.v5],
+  swiftLanguageModes: [.v5],
   products: [
     .library(name: "HamsterKeyboardKit", targets: ["HamsterKeyboardKit"]),
   ],
