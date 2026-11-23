@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  permissions:
+    contents: write
 
 jobs:
   build:
@@ -65,3 +67,11 @@ jobs:
           name: Hamster-ClipboardSync-unsigned
           path: Hamster-ClipboardSync-unsigned.ipa
           if-no-files-found: error
+      - name: Publish IPA to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" Hamster-ClipboardSync-unsigned.ipa \
+            --title "Build ${{ github.run_number }}" \
+            --notes "Unsigned IPA (commit ${{ github.sha }}). Sign with LCSign using the LiveContainer Development profile; do not change the Bundle ID and do not import entitlements."
