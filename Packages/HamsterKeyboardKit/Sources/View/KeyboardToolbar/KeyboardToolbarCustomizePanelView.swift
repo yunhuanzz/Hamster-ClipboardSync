@@ -2,16 +2,16 @@
 //  KeyboardToolbarCustomizePanelView.swift
 //
 //  键盘内"定制工具栏"面板 (仿微信输入法, 第 7 轮重写为网格):
-//  第 0 节: 当前工具栏——横向一排工具图标 (每个右上角带 ⊖ 红色删除标记,
-//    点按拿掉回池里); 长按拖动图标自由排序。
-//  第 1 节: 可选工具池——4 列网格 (图标 + 名称), 点按加入工具栏 (追加到末尾)。
-//  第 2 节: 菜单格子——2 列开关, 逐个控制菜单宫格里格子的显示/隐藏。
+//  第 0 节: 工具栏左侧——横向一排工具图标 (每个右上角带 ⊖ 红色删除标记,
+//    点按拿掉回池里); 长按拖动图标自由排序, 也可拖到第 1 节换到右侧。
+//  第 1 节: 工具栏右侧——同上, 拖到第 0 节换回左侧。
+//  第 2 节: 可选工具池——4 列网格 (图标 + 名称), 点按加入工具栏 (进左侧末尾)。
+//  第 3 节: 菜单格子——2 列开关, 逐个控制菜单宫格里格子的显示/隐藏。
 //  右上角 ✓ 关闭; 底部"恢复默认"恢复默认顺序并全部显示。
 //  工具注册表共 6 个 (剪贴板/常用语/切换26键·九宫格/立即同步剪贴板/
 //  设置/常用语管理; "定制工具栏"本身是入口、不上栏, "收起键盘"是固定按钮、
 //  也不上栏), 由调用方 (KeyboardToolbarView) 传入; 面板不自己决定有哪些工具。
-//  位置完全由拖动顺序决定 (拖到中间就是中间), 第 5 轮的左/中/右分区
-//  模型已取消 (toolbarToolZones 键留着不用, 不删已存数据)。
+//  位置由拖动决定: 组内拖动排序, 跨组拖动换侧 (第 9 轮, 左右分组显示)。
 //  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上;
 //  内容是可纵向滚动的单个 UICollectionView, 面板只有键盘那么高时
 //  工具池也能滚到, 不会被截断 (第 6 轮的问题之一)。
@@ -37,16 +37,17 @@
 import HamsterUIKit
 import UIKit
 
-/// 定制工具栏面板: 标题 + ✓ 关闭 + 当前工具栏 (⊖ 删除/长按拖拽排序) +
-/// 可选工具池 (网格点按加入) + 菜单格子开关 + 恢复默认。
+/// 定制工具栏面板: 标题 + ✓ 关闭 + 工具栏左侧 (⊖ 删除/长按拖拽排序/可拖到右侧) +
+/// 工具栏右侧 (同上) + 可选工具池 (网格点按加入) + 菜单格子开关 + 恢复默认。
 class KeyboardToolbarCustomizePanelView: NibLessView {
   /// 某一工具被 ⊖ 拿掉时的回调 (toolID), 由调用方从顺序里删掉并重建工具栏。
   var onRemoveTool: ((String) -> Void)?
   /// 某一池中工具被点按加入时的回调 (toolID), 由调用方加进顺序并重建工具栏。
   var onAddTool: ((String) -> Void)?
-  /// 拖拽排序后的回调 (新的全部工具 id 顺序), 由调用方保存顺序并重建工具栏。
-  /// 面板内已自行调整顺序, 调用方不需要再 reload。
-  var onReorder: (([String]) -> Void)?
+  /// 拖拽排序/换侧后的回调 (新的左侧 id 顺序, 新的右侧 id 顺序),
+  /// 面板内已自行调整顺序并刷新, 这里只保存新布局并重建工具栏。
+  /// 调用方不需要再 reload。
+  var onReorder: (([String], [String]) -> Void)?
   /// 某一菜单格子开关变化时的回调 (tileID, 是否显示), 由调用方写 UserDefaults。
   var onTileToggle: ((String, Bool) -> Void)?
   /// 点"恢复默认"时的回调 (由调用方恢复默认顺序并全部显示, 再刷新列表)。
@@ -54,10 +55,13 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   /// 关闭按钮回调
   var onClose: (() -> Void)?
 
-  /// 当前工具栏上的工具: (id, 显示名, 图标)。顺序即工具栏上的顺序。
-  private var tools: [(id: String, title: String, systemImage: String)] = []
+  /// 工具栏左侧的工具: (id, 显示名, 图标)。顺序即栏上左侧顺序。
+  private var leftTools: [(id: String, title: String, systemImage: String)] = []
 
-  /// 可选工具池: 注册表里不在工具栏上的工具 (点按加入)。
+  /// 工具栏右侧的工具: (id, 显示名, 图标)。顺序即栏上右侧顺序。
+  private var rightTools: [(id: String, title: String, systemImage: String)] = []
+
+  /// 可选工具池: 注册表里不在工具栏上的工具 (点按加入, 进左侧末尾)。
   private var poolTools: [(id: String, title: String, systemImage: String)] = []
 
   /// 菜单格子列表: (id, 显示名, 是否显示)。由调用方传入 menuTiles()。
@@ -91,9 +95,9 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     return button
   }()
 
-  /// 网格: 3 节 (当前工具栏 / 可选工具池 / 菜单格子), 纵向滚动。
+  /// 网格: 4 节 (工具栏左侧 / 工具栏右侧 / 可选工具池 / 菜单格子), 纵向滚动。
   /// 面板只有键盘根视图那么高 (~310pt), 内容超出时靠滚动到达,
-  /// 不会被截断; 第 0 节 (当前工具栏) 和第 1 节首行在首屏内。
+  /// 不会被截断; 第 0 节 (工具栏左侧) 和第 1 节首行在首屏内。
   private lazy var collectionView: UICollectionView = {
     let layout = UICollectionViewFlowLayout()
     layout.scrollDirection = .vertical
@@ -174,9 +178,10 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     backgroundColor = panelBackgroundColor
   }
 
-  /// 刷新当前工具 + 工具池 + 菜单格子列表
-  func reload(currentTools: [(id: String, title: String, systemImage: String)], poolTools: [(id: String, title: String, systemImage: String)], tiles: [(id: String, title: String, visible: Bool)]) {
-    self.tools = currentTools
+  /// 刷新左/右侧工具 + 工具池 + 菜单格子列表
+  func reload(leftTools: [(id: String, title: String, systemImage: String)], rightTools: [(id: String, title: String, systemImage: String)], poolTools: [(id: String, title: String, systemImage: String)], tiles: [(id: String, title: String, visible: Bool)]) {
+    self.leftTools = leftTools
+    self.rightTools = rightTools
     self.poolTools = poolTools
     self.tiles = tiles
     collectionView.reloadData()
@@ -190,16 +195,16 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     onReset?()
   }
 
-  // MARK: - 长按拖动排序 (第 0 节, 交互式移动)
+  // MARK: - 长按拖动排序/换侧 (第 0/1 节, 交互式移动)
 
-  /// 长按开始拖动 (只在第 0 节); 移动中更新目标位置; 松手提交;
-  /// 其他状态取消。交互式移动不需要 drag & drop 的 item provider,
+  /// 长按开始拖动 (只在第 0/1 节); 移动中更新目标位置 (可跨节换侧);
+  /// 松手提交; 其他状态取消。交互式移动不需要 drag & drop 的 item provider,
   /// 拖动只在面板内部, 见文件头选型注释。
   @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
     switch gesture.state {
     case .began:
       guard let indexPath = collectionView.indexPathForItem(at: gesture.location(in: collectionView)),
-            indexPath.section == 0, !tools.isEmpty else { return }
+            indexPath.section <= 1, !tools(in: indexPath.section).isEmpty else { return }
       _ = collectionView.beginInteractiveMovementForItem(at: indexPath)
     case .changed:
       collectionView.updateInteractiveMovementTargetPosition(gesture.location(in: collectionView))
@@ -210,27 +215,38 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     }
   }
 
+  /// 第 0/1 节的工具数组 (左/右)。
+  private func tools(in section: Int) -> [(id: String, title: String, systemImage: String)] {
+    section == 0 ? leftTools : rightTools
+  }
+
   /// ⊖ 删除: 把工具从工具栏拿掉 (回工具池)。先本地改状态并刷新,
   /// 再通知调用方保存 (调用方随后 reload, 数据与这里一致)。
   private func removeTool(id: String) {
-    guard let index = tools.firstIndex(where: { $0.id == id }) else { return }
-    let tool = tools.remove(at: index)
-    poolTools.append(tool)
+    if let index = leftTools.firstIndex(where: { $0.id == id }) {
+      let tool = leftTools.remove(at: index)
+      poolTools.append(tool)
+    } else if let index = rightTools.firstIndex(where: { $0.id == id }) {
+      let tool = rightTools.remove(at: index)
+      poolTools.append(tool)
+    } else {
+      return
+    }
     collectionView.reloadData()
-    onRemoveTool?(tool.id)
+    onRemoveTool?(id)
   }
 
-  /// 池中工具加入工具栏: 本地先追加到末尾 (收起键盘是固定按钮,
-  /// 不在顺序里, 不用再"插在它前面"), 再通知调用方保存。
+  /// 池中工具加入工具栏: 本地先追加到左侧末尾 (默认左, 调用方也按左保存),
+  /// 再通知调用方保存。
   private func addTool(at index: Int) {
     guard poolTools.indices.contains(index) else { return }
     let tool = poolTools.remove(at: index)
-    tools.append(tool)
+    leftTools.append(tool)
     collectionView.reloadData()
     onAddTool?(tool.id)
   }
 
-  /// 网格列数: 第 1 节 4 列, 第 2 节 2 列; 第 0 节是横向一排,
+  /// 网格列数: 第 2 节 4 列, 第 3 节 2 列; 第 0/1 节是横向一排,
   /// 每格固定 56pt (6 个工具 6x56+5x12=396pt, 在 440pt 栏宽
   /// 减去左右各 16pt 的 sectionInset 后剩 408pt 内, 不换行;
   /// 60pt 的话要 420pt 会折到第二行)。
@@ -244,31 +260,33 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
 
 extension KeyboardToolbarCustomizePanelView: UICollectionViewDataSource {
   func numberOfSections(in collectionView: UICollectionView) -> Int {
-    3
+    4
   }
 
   func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
     switch section {
-    case 0: return tools.isEmpty ? 1 : tools.count
-    case 1: return poolTools.isEmpty ? 1 : poolTools.count
+    case 0: return leftTools.isEmpty ? 1 : leftTools.count
+    case 1: return rightTools.isEmpty ? 1 : rightTools.count
+    case 2: return poolTools.isEmpty ? 1 : poolTools.count
     default: return tiles.count
     }
   }
 
   func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
     switch indexPath.section {
-    case 0:
-      guard !tools.isEmpty else {
+    case 0, 1:
+      let sectionTools = tools(in: indexPath.section)
+      guard !sectionTools.isEmpty else {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PlaceholderCell.reuseIdentifier, for: indexPath) as! PlaceholderCell
-        cell.configure(text: "工具栏为空, 在下方点按加入工具")
+        cell.configure(text: indexPath.section == 0 ? "左侧没有工具, 从工具池点按加入或从右侧拖过来" : "右侧没有工具, 从工具池点按加入或从左侧拖过来")
         return cell
       }
-      let tool = tools[indexPath.item]
+      let tool = sectionTools[indexPath.item]
       let cell = collectionView.dequeueReusableCell(withReuseIdentifier: CurrentToolCell.reuseIdentifier, for: indexPath) as! CurrentToolCell
       cell.configure(title: tool.title, systemImage: tool.systemImage)
       cell.onRemove = { [weak self] in self?.removeTool(id: tool.id) }
       return cell
-    case 1:
+    case 2:
       guard !poolTools.isEmpty else {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PlaceholderCell.reuseIdentifier, for: indexPath) as! PlaceholderCell
         cell.configure(text: "全部工具都已在工具栏上")
@@ -290,28 +308,34 @@ extension KeyboardToolbarCustomizePanelView: UICollectionViewDataSource {
   func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
     let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: SectionHeaderView.reuseIdentifier, for: indexPath) as! SectionHeaderView
     switch indexPath.section {
-    case 0: header.configure(title: "当前工具栏")
-    case 1: header.configure(title: "可选工具")
+    case 0: header.configure(title: "工具栏左侧")
+    case 1: header.configure(title: "工具栏右侧")
+    case 2: header.configure(title: "可选工具")
     default: header.configure(title: "菜单格子")
     }
     return header
   }
 
-  /// 只有"当前工具栏"一节可拖拽排序; 工具池 (点按加入) 和菜单格子 (只开关) 不排序。
+  /// 只有"工具栏左侧/右侧"两节可拖拽排序/换侧; 工具池 (点按加入)
+  /// 和菜单格子 (只开关) 不排序。空节的占位行不可拖。
   func collectionView(_ collectionView: UICollectionView, canMoveItemAt indexPath: IndexPath) -> Bool {
-    indexPath.section == 0 && !tools.isEmpty
+    (indexPath.section == 0 || indexPath.section == 1) && !tools(in: indexPath.section).isEmpty
   }
 
-  /// 拖拽排序提交: 调整本地顺序并通知调用方保存。
+  /// 拖拽排序/换侧提交: 组内移动调顺序, 跨组移动换侧。
+  /// 目标 item 可以等于目标节的工具数 (追加到节末, 是合法插入位置)。
   /// (交互式移动结束时调, 这里不要 reloadData——UIKit 自己处理拖动动画。)
   func collectionView(_ collectionView: UICollectionView, moveItemAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
-    guard sourceIndexPath.section == 0, destinationIndexPath.section == 0,
-          tools.indices.contains(sourceIndexPath.item),
-          destinationIndexPath.item >= 0,
-          destinationIndexPath.item < tools.count else { return }
-    let tool = tools.remove(at: sourceIndexPath.item)
-    tools.insert(tool, at: destinationIndexPath.item)
-    onReorder?(tools.map { $0.id })
+    guard (sourceIndexPath.section == 0 || sourceIndexPath.section == 1),
+          (destinationIndexPath.section == 0 || destinationIndexPath.section == 1) else { return }
+    var sourceTools = tools(in: sourceIndexPath.section)
+    guard sourceTools.indices.contains(sourceIndexPath.item) else { return }
+    let tool = sourceTools.remove(at: sourceIndexPath.item)
+    if sourceIndexPath.section == 0 { leftTools = sourceTools } else { rightTools = sourceTools }
+    var destTools = tools(in: destinationIndexPath.section)
+    destTools.insert(tool, at: min(destinationIndexPath.item, destTools.count))
+    if destinationIndexPath.section == 0 { leftTools = destTools } else { rightTools = destTools }
+    onReorder?(leftTools.map { $0.id }, rightTools.map { $0.id })
   }
 }
 
@@ -320,19 +344,20 @@ extension KeyboardToolbarCustomizePanelView: UICollectionViewDataSource {
 extension KeyboardToolbarCustomizePanelView: UICollectionViewDelegate {
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
     collectionView.deselectItem(at: indexPath, animated: true)
-    // 工具池点按 = 加入工具栏 (与 + 标记相同); 占位行 (池空时) 不处理。
-    // 第 0 节点按图标本身无动作 (删除用右上角 ⊖, 排序用长按拖动);
-    // 第 2 节用开关, 点按整行无动作。
-    if indexPath.section == 1, !poolTools.isEmpty {
+    // 工具池点按 = 加入工具栏左侧 (与 + 标记相同); 占位行 (池空时) 不处理。
+    // 第 0/1 节点按图标本身无动作 (删除用右上角 ⊖, 排序/换侧用长按拖动);
+    // 第 3 节用开关, 点按整行无动作。
+    if indexPath.section == 2, !poolTools.isEmpty {
       addTool(at: indexPath.item)
     }
   }
 
-  /// 拖动目标限制在第 0 节内: 不允许把工具拖进工具池或菜单格子节。
+  /// 拖动目标限制在第 0/1 节内: 不允许把工具拖进工具池或菜单格子节。
+  /// 目标 item 可以等于目标节的工具数 (追加到节末)。
   func collectionView(_ collectionView: UICollectionView, targetIndexPathForMoveFromItemAt originalIndexPath: IndexPath, toProposedIndexPath proposedIndexPath: IndexPath) -> IndexPath {
-    guard proposedIndexPath.section == 0 else { return originalIndexPath }
-    let last = max(tools.count - 1, 0)
-    return IndexPath(item: min(proposedIndexPath.item, last), section: 0)
+    guard proposedIndexPath.section == 0 || proposedIndexPath.section == 1 else { return originalIndexPath }
+    let count = tools(in: proposedIndexPath.section).count
+    return IndexPath(item: min(max(proposedIndexPath.item, 0), count), section: proposedIndexPath.section)
   }
 }
 
@@ -343,11 +368,11 @@ extension KeyboardToolbarCustomizePanelView: UICollectionViewDelegateFlowLayout 
     let width = contentWidth()
     let horizontalInset: CGFloat = 32 // sectionInset 左右各 16
     switch indexPath.section {
-    case 0:
+    case 0, 1:
       // 占位行通栏; 工具格固定 56x72 (6 个 396pt, 见 contentWidth 注释)。
-      if tools.isEmpty { return CGSize(width: width - horizontalInset, height: 40) }
+      if tools(in: indexPath.section).isEmpty { return CGSize(width: width - horizontalInset, height: 40) }
       return CGSize(width: 56, height: 72)
-    case 1:
+    case 2:
       // 占位行通栏; 工具池 4 列。
       if poolTools.isEmpty { return CGSize(width: width - horizontalInset, height: 40) }
       let itemWidth = (width - horizontalInset - 3 * 12) / 4

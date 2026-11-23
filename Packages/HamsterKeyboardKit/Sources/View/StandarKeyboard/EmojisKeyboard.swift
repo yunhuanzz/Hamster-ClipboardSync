@@ -2,12 +2,16 @@
 //  EmojisKeyboard.swift
 //
 //  表情面板 (仿微信输入法 emoji 界面):
-//  顶部: 分类标题 + “✨定制表情” + “···”
+//  顶部: 分类标题
 //  中间: emoji 网格 (每行 9 个, 可滚动)
 //  底部: 分类切换栏 — 绿色返回箭头 (回键盘) | 分类图标 | ⌫ 删除
 //  点按插入 emoji 文本; ⌫ 删一个字符; 绿色箭头回到键盘。
 //  先做“表情符号与人物”+ 最近使用, 其他分类图标先摆出来,
 //  点按后若暂无内容显示提示 (绝不点按无反应)。
+//  第 9 轮: 右上角“✨定制表情”“···”是占位 toast、无实际功能,
+//  用户让去掉, 已删 (连同短暂提示 toast 机制一起删);
+//  底部符号分类键原来显示 KeyboardKit 的 "T&%" 标签 (像乱码),
+//  改成“符号”文字。
 //  底色取 appearance.backgroundStyle.backgroundColor (与键盘本体同一块
 //  系统底色, 不写死色值, 深色模式同样一致)。
 //  九宫格右列第三行的 😊 键经 .keyboardType(.emojis) 切到本面板;
@@ -29,7 +33,7 @@ private enum EmojiPanelCategory: CaseIterable {
   case symbols
   case flags
 
-  /// 底部栏图标 (symbols 分类没有合适的单个 emoji, 用文字 “T&%”)。
+  /// 底部栏图标 (symbols 分类没有合适的单个 emoji, 用文字“符号”)。
   var icon: String {
     switch self {
     case .frequent: return "🕐"
@@ -37,7 +41,7 @@ private enum EmojiPanelCategory: CaseIterable {
     case .animals: return "🌸"
     case .foods: return "🎂"
     case .activities: return "⚽"
-    case .symbols: return "T&%"
+    case .symbols: return "符号"
     case .flags: return "🏳"
     }
   }
@@ -85,9 +89,6 @@ class EmojisKeyboard: NibLessView {
   private var selectedCategory: EmojiPanelCategory = .smileys
   private var currentEmojis: [Emoji] = EmojiCategory.smileys.emojis
 
-  /// “定制表情 / ···” 的短暂提示任务 (1.5 秒后自动消失, 恢复空分类提示)。
-  private var toastWorkItem: DispatchWorkItem?
-
   private lazy var titleLabel: UILabel = {
     let label = UILabel()
     label.text = EmojiPanelCategory.smileys.title
@@ -95,26 +96,6 @@ class EmojisKeyboard: NibLessView {
     label.textColor = .label
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
-  }()
-
-  private lazy var customEmojiButton: UIButton = {
-    let button = UIButton(type: .system)
-    button.setTitle("✨定制表情", for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 14)
-    button.setTitleColor(.secondaryLabel, for: .normal)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.addTarget(self, action: #selector(customEmojiTapped), for: .touchUpInside)
-    return button
-  }()
-
-  private lazy var moreButton: UIButton = {
-    let button = UIButton(type: .system)
-    button.setTitle("···", for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
-    button.setTitleColor(.secondaryLabel, for: .normal)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.addTarget(self, action: #selector(moreTapped), for: .touchUpInside)
-    return button
   }()
 
   private lazy var collectionView: UICollectionView = {
@@ -207,8 +188,6 @@ class EmojisKeyboard: NibLessView {
 
   override func constructViewHierarchy() {
     addSubview(titleLabel)
-    addSubview(customEmojiButton)
-    addSubview(moreButton)
     addSubview(collectionView)
     addSubview(hintLabel)
     addSubview(categoryBar)
@@ -217,7 +196,7 @@ class EmojisKeyboard: NibLessView {
     for category in EmojiPanelCategory.allCases {
       let button = UIButton(type: .system)
       button.setTitle(category.icon, for: .normal)
-      // “T&%” 是文字图标, 字号小一点; 其余是 emoji, 字号大一点。
+      // “符号”是两个汉字, 字号小一点; 其余是 emoji, 字号大一点。
       button.titleLabel?.font = category == .symbols
         ? .systemFont(ofSize: 12, weight: .bold)
         : .systemFont(ofSize: 20)
@@ -236,13 +215,6 @@ class EmojisKeyboard: NibLessView {
     NSLayoutConstraint.activate([
       titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
       titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-
-      moreButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-      moreButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-      moreButton.widthAnchor.constraint(equalToConstant: 28),
-
-      customEmojiButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-      customEmojiButton.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: -8),
 
       collectionView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
       collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -308,8 +280,6 @@ class EmojisKeyboard: NibLessView {
   }
 
   private func selectCategory(_ category: EmojiPanelCategory) {
-    toastWorkItem?.cancel()
-    toastWorkItem = nil
     selectedCategory = category
     titleLabel.text = category.title
     // 最近使用每次选中时重新读 (点过的 emoji 会立刻出现)。
@@ -324,24 +294,6 @@ class EmojisKeyboard: NibLessView {
     if currentEmojis.isEmpty {
       hintLabel.text = selectedCategory.emptyHint
     }
-  }
-
-  /// 短暂提示 (定制表情 / ···): 显示 1.5 秒后消失, 网格非空时藏起,
-  /// 空分类时恢复该分类的空提示。
-  private func showToast(_ text: String) {
-    toastWorkItem?.cancel()
-    hintLabel.text = text
-    hintLabel.isHidden = false
-    let workItem = DispatchWorkItem { [weak self] in
-      guard let self = self else { return }
-      if self.currentEmojis.isEmpty {
-        self.hintLabel.text = self.selectedCategory.emptyHint
-      } else {
-        self.hintLabel.isHidden = true
-      }
-    }
-    toastWorkItem = workItem
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: workItem)
   }
 
   // MARK: - 动作
@@ -359,14 +311,6 @@ class EmojisKeyboard: NibLessView {
   @objc private func deleteTapped() {
     // 删一个字符 (退格键的按压动作)。
     actionHandler.handle(.press, on: .backspace)
-  }
-
-  @objc private func customEmojiTapped() {
-    showToast("定制表情暂未开放")
-  }
-
-  @objc private func moreTapped() {
-    showToast("更多表情设置即将推出")
   }
 
   /// 点按插入 emoji: 先把未上屏的拼音候选顶上去 (与符号键 insertSymbol

@@ -2,28 +2,37 @@
 //  KeyboardToolbarMenuPanelView.swift
 //
 //  键盘内功能菜单面板 (仿微信输入法): 全宽面板 + 4 列图标+文字宫格, 不是系统 UIMenu 列表。
-//  点格子执行对应功能并关闭面板; 点右上角关闭按钮关闭面板。
+//  点格子执行对应功能并关闭面板; 点左上角 ⌃ 收起面板 (第 9 轮:
+//  蓝色"关闭"文字按钮已去掉, 关闭入口是 ⌃ / 格子图标开关)。
 //  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上。
 //  第 7 轮: 格子加到 8 个一页、横向分页 (UIPageControl, 多页时才显示圆点;
 //  目前 7 个格子只有 1 页, 圆点隐藏); 格子加高到 68pt、图标 26pt、
 //  文字 13pt, 比原来更接近微信功能面板。打开动画 (0.2s 淡入+上滑)
 //  在调用方 KeyboardToolbarView.showMenuPanel 里做, 不在这里。
+//  第 9 轮: 格子再放大 (76pt, 图标 28pt, 圆角 12pt, 更接近微信的大白格子);
+//  已在工具栏上的工具, 格子以彩色显示 (绿图标 + 淡绿底), 不在栏上的灰色;
+//  顶栏改成 ⌃ 收起 (左) + 标题, 不再用 safeAreaLayoutGuide 定位标题
+//  (第 8 轮 build #27 里标题"工具"只剩一条 4pt 高的笔画带跑到左沿外,
+//  位置与笔画形状都对得上标题本身, 其余部分被盖住/裁掉; 新顶栏用
+//  普通 topAnchor + 横向栈, 旧标题控件已删, 该残影随之消失)。
 //
 
 import HamsterKit
 import HamsterUIKit
 import UIKit
 
-/// 键盘内功能菜单面板: 标题 + 关闭按钮 + 4 列宫格 (分页)。
+/// 键盘内功能菜单面板: 标题 + ⌃ 收起 + 4 列宫格 (分页)。
 /// 格子 (id, 标题, SF Symbol 名) 由调用方传入, 点格子时通过 onSelect 回传 id。
 class KeyboardToolbarMenuPanelView: NibLessView {
   /// 点某个格子时的回调 (格子 id), 由调用方执行对应功能并关闭面板。
   var onSelect: ((String) -> Void)?
-  /// 关闭按钮回调
+  /// ⌃ 收起按钮回调
   var onClose: (() -> Void)?
 
   /// 格子: (id, 标题, SF Symbol 名)。由调用方传入。
   private var tiles: [(id: String, title: String, systemImage: String)] = []
+  /// 已在工具栏上的格子 id: 这些格子以彩色显示, 其余灰色 (第 9 轮)。
+  private var activeTileIDs: Set<String> = []
 
   /// 每页格子数: 2 行 x 4 列 = 8。
   private static let tilesPerPage = 8
@@ -42,6 +51,18 @@ class KeyboardToolbarMenuPanelView: NibLessView {
     didSet { backgroundColor = panelBackgroundColor }
   }
 
+  /// 顶栏: ⌃ 收起按钮 (左) + 标题“工具”。横向栈定高 28pt,
+  /// 直接贴面板顶边 (普通 topAnchor, 不用 safeAreaLayoutGuide)。
+  private lazy var collapseButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.setImage(UIImage(systemName: "chevron.up"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18, weight: .semibold), scale: .default), forImageIn: .normal)
+    button.tintColor = .label
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+    return button
+  }()
+
   private lazy var titleLabel: UILabel = {
     let label = UILabel()
     label.text = "工具"
@@ -51,13 +72,13 @@ class KeyboardToolbarMenuPanelView: NibLessView {
     return label
   }()
 
-  private lazy var closeButton: UIButton = {
-    let button = UIButton(type: .system)
-    button.setTitle("关闭", for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 15)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-    return button
+  private lazy var headerStackView: UIStackView = {
+    let stack = UIStackView(arrangedSubviews: [collapseButton, titleLabel])
+    stack.axis = .horizontal
+    stack.spacing = 4
+    stack.alignment = .center
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
   }()
 
   /// 分页滚动容器: 每页一个 4 列宫格, 横向滑动换页。
@@ -80,6 +101,8 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }()
 
   /// 页点: 只有多页时显示 (目前 7 个格子 = 1 页, 隐藏)。
+  /// 单页时高度压到 0 (不留 20pt 空位, 给放大的格子腾地方);
+  /// 多页时恢复 20pt。
   private lazy var pageControl: UIPageControl = {
     let control = UIPageControl()
     control.translatesAutoresizingMaskIntoConstraints = false
@@ -89,6 +112,8 @@ class KeyboardToolbarMenuPanelView: NibLessView {
     return control
   }()
 
+  private var pageControlHeightConstraint: NSLayoutConstraint?
+
   init() {
     super.init(frame: .zero)
     constructViewHierarchy()
@@ -97,30 +122,31 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   override func constructViewHierarchy() {
-    addSubview(titleLabel)
-    addSubview(closeButton)
+    addSubview(headerStackView)
     addSubview(pagingScrollView)
     pagingScrollView.addSubview(pagesStackView)
     addSubview(pageControl)
   }
 
   override func activateViewConstraints() {
+    pageControlHeightConstraint = pageControl.heightAnchor.constraint(equalToConstant: 20)
     NSLayoutConstraint.activate([
-      titleLabel.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
-      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      headerStackView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+      headerStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+      headerStackView.heightAnchor.constraint(equalToConstant: 28),
 
-      closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+      collapseButton.widthAnchor.constraint(equalToConstant: 28),
+      collapseButton.heightAnchor.constraint(equalToConstant: 28),
 
-      pagingScrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+      pagingScrollView.topAnchor.constraint(equalTo: headerStackView.bottomAnchor, constant: 12),
       pagingScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       pagingScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       pagingScrollView.bottomAnchor.constraint(equalTo: pageControl.topAnchor, constant: -8),
 
       pageControl.leadingAnchor.constraint(equalTo: leadingAnchor),
       pageControl.trailingAnchor.constraint(equalTo: trailingAnchor),
-      pageControl.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -8),
-      pageControl.heightAnchor.constraint(equalToConstant: 20),
+      pageControl.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+      pageControlHeightConstraint!,
 
       // 横向分页的标准约束: 内容栈贴 contentLayoutGuide,
       // 高度等于 frame 高度 (每页高与容器同高)。
@@ -141,8 +167,11 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   /// 刷新格子 (按 4 列分行, 每 8 个一页)。
-  func reload(with tiles: [(id: String, title: String, systemImage: String)]) {
+  /// activeIDs: 已在工具栏上的格子 id, 以彩色显示 (绿图标 + 淡绿底);
+  /// 不在栏上的灰色。
+  func reload(with tiles: [(id: String, title: String, systemImage: String)], activeIDs: Set<String> = []) {
     self.tiles = tiles
+    self.activeTileIDs = activeIDs
     // 旧页必须先从 arrangedSubviews 里摘掉再移出层级: 只调
     // removeFromSuperview 不会把它从 arrangedSubviews 摘掉, 旧页的约束
     // (页宽 == 滚动容器宽) 会残留, 下次 reload 再加一页就多一套,
@@ -164,8 +193,10 @@ class KeyboardToolbarMenuPanelView: NibLessView {
     }
     let pageCount = max(pagesStackView.arrangedSubviews.count, 1)
     pageControl.numberOfPages = pageCount
-    // 只有多页时显示圆点; 单页时留 20pt 空位 (与多页时对齐, 不跳动)。
+    // 只有多页时显示圆点; 单页时隐藏并把高度压到 0 (不留空位,
+    // 给放大的格子腾地方, 之前留 20pt 空位的做法已取消)。
     pageControl.isHidden = pageCount <= 1
+    pageControlHeightConstraint?.constant = pageCount <= 1 ? 0 : 20
     pageControl.currentPage = 0
     pagingScrollView.setContentOffset(.zero, animated: false)
   }
@@ -233,10 +264,11 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   /// 单个格子: 图标在上、文字在下的按钮。
+  /// 已在工具栏上的 (activeIDs 里) 以彩色显示, 其余灰色 (第 9 轮)。
   private func makeTile(_ tile: (id: String, title: String, systemImage: String)) -> UIControl {
     let button = MenuTileButton()
     button.tileID = tile.id
-    button.configure(title: tile.title, systemImage: tile.systemImage)
+    button.configure(title: tile.title, systemImage: tile.systemImage, isActive: activeTileIDs.contains(tile.id))
     button.addTarget(self, action: #selector(tileTapped(_:)), for: .touchUpInside)
     return button
   }
@@ -265,14 +297,32 @@ extension KeyboardToolbarMenuPanelView: UIScrollViewDelegate {
 /// 菜单格子按钮: 图标在上、文字在下的 UIControl, 点按时有轻微高亮。
 /// 每个格子自带淡淡的圆角矩形底 (仿微信白格子): 浅色模式偏白、深色模式偏深灰,
 /// 不硬编码黑/白, 深色模式也不会出现黑斑。
+/// 第 9 轮: 格子放大 (76pt 高、28pt 图标、圆角 12pt, 更接近微信的大白格子);
+/// 已在工具栏上的格子以彩色显示 (绿图标 + 淡绿底), 不在栏上的灰色
+/// (图标/文字都灰), 一眼看出哪个已生效。
 private class MenuTileButton: UIControl {
   var tileID: String = ""
+  private var isActiveTile = false
 
   /// 格子底色 (随深浅模式自动切换): 浅色纯白, 深色半透明白 (≈深灰)。
   private static let tileBackgroundColor = UIColor { trait in
     trait.userInterfaceStyle == .dark
       ? UIColor.white.withAlphaComponent(0.22)
       : UIColor.white
+  }
+
+  /// 已生效格子的底色: 淡绿 (浅色 0.12 / 深色 0.20 透明度的微信绿)。
+  private static let activeTileBackgroundColor = UIColor { trait in
+    trait.userInterfaceStyle == .dark
+      ? UIColor(red: 0.03, green: 0.76, blue: 0.38, alpha: 0.20)
+      : UIColor(red: 0.03, green: 0.76, blue: 0.38, alpha: 0.12)
+  }
+
+  /// 已生效格子的图标色: 微信绿 (#07C160); 深色模式提亮一点保证对比度。
+  private static let activeIconColor = UIColor { trait in
+    trait.userInterfaceStyle == .dark
+      ? UIColor(red: 0.20, green: 0.85, blue: 0.50, alpha: 1)
+      : UIColor(red: 0.03, green: 0.76, blue: 0.38, alpha: 1)
   }
 
   /// 点按高亮色: 浅色浅灰、深色更深一档, 在格子底色上能看出按下反馈。
@@ -296,7 +346,7 @@ private class MenuTileButton: UIControl {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    layer.cornerRadius = 10
+    layer.cornerRadius = 12
     clipsToBounds = true
     backgroundColor = Self.tileBackgroundColor
     let stack = UIStackView(arrangedSubviews: [iconImageView, titleLabel])
@@ -309,11 +359,11 @@ private class MenuTileButton: UIControl {
     stack.isUserInteractionEnabled = false
     stack.translatesAutoresizingMaskIntoConstraints = false
     addSubview(stack)
-    // 格子高 68pt 是期望值, 不是硬性: 面板矮时 (小屏/横屏) 两行 68pt +
+    // 格子高 76pt 是期望值, 不是硬性: 面板矮时 (小屏/横屏) 两行 76pt +
     // 16pt 间距会超过滚动容器高; 约束用 defaultHigh 让格子可压缩,
-    // 避免“无法同时满足约束”的警告, 内容 (26pt 图标 + 13pt 文字) 最低约 53pt,
+    // 避免“无法同时满足约束”的警告, 内容 (28pt 图标 + 13pt 文字) 最低约 55pt,
     // 压不到裁切。
-    let tileHeightConstraint = heightAnchor.constraint(equalToConstant: 68)
+    let tileHeightConstraint = heightAnchor.constraint(equalToConstant: 76)
     tileHeightConstraint.priority = .defaultHigh
     NSLayoutConstraint.activate([
       tileHeightConstraint,
@@ -321,8 +371,8 @@ private class MenuTileButton: UIControl {
       stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
       stack.leadingAnchor.constraint(equalTo: leadingAnchor),
       stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-      iconImageView.heightAnchor.constraint(equalToConstant: 26),
-      iconImageView.widthAnchor.constraint(equalToConstant: 26),
+      iconImageView.heightAnchor.constraint(equalToConstant: 28),
+      iconImageView.widthAnchor.constraint(equalToConstant: 28),
     ])
   }
 
@@ -330,16 +380,23 @@ private class MenuTileButton: UIControl {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func configure(title: String, systemImage: String) {
+  func configure(title: String, systemImage: String, isActive: Bool = false) {
+    isActiveTile = isActive
     titleLabel.text = title
     iconImageView.image = UIImage(
       systemName: systemImage,
-      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 24)))
+      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 26)))
+    // 已生效: 绿图标 + 深色标题 + 淡绿底; 未生效: 图标/标题都灰。
+    iconImageView.tintColor = isActive ? Self.activeIconColor : .tertiaryLabel
+    titleLabel.textColor = isActive ? .label : .secondaryLabel
+    backgroundColor = isActive ? Self.activeTileBackgroundColor : Self.tileBackgroundColor
   }
 
   override var isHighlighted: Bool {
     didSet {
-      backgroundColor = isHighlighted ? .secondarySystemBackground : Self.tileBackgroundColor
+      backgroundColor = isHighlighted
+        ? .secondarySystemBackground
+        : (isActiveTile ? Self.activeTileBackgroundColor : Self.tileBackgroundColor)
     }
   }
 }

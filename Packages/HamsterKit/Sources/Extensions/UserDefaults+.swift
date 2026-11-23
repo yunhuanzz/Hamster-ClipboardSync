@@ -323,6 +323,15 @@ public extension UserDefaults {
 
   // MARK: - 剪贴板同步 (ClipboardSync)
 
+  /// 内置剪贴板同步服务器 (用户自己的 SyncClipboard 服务器, 跑在他自己的 BWG 上)。
+  /// 仅作为"无已存值时"的默认值: 读不到已存值 (或已存值为空) 时返回这里;
+  /// 一旦用户在设置页改过 (非空), 永远读改过的值, 启动时绝不覆盖, 改密码不会被重置。
+  /// 注意: 仓库与 Release 是公开的, 这三项会随源码/IPA 公开, 任何人下载都能看到;
+  /// 用户本人知情并接受 ("反正是我自己用")。
+  private static let defaultClipboardSyncServerURL = "https://95-181-188-70.sslip.io:8444"
+  private static let defaultClipboardSyncUsername = "yunhuan"
+  private static let defaultClipboardSyncPassword = "qXpFxE30ym3RAd2"
+
   /// 是否启用剪贴板同步 (默认关闭)
   var clipboardSyncEnabled: Bool {
     get { bool(forKey: Self.clipboardSyncEnabledKey) }
@@ -330,21 +339,33 @@ public extension UserDefaults {
   }
 
   /// 剪贴板同步服务器地址, 如 https://example.com:8444 (留空表示未配置)
+  /// 未配过时返回内置默认值 (见上)。
   var clipboardSyncServerURL: String {
-    get { string(forKey: Self.clipboardSyncServerURLKey) ?? "" }
+    get {
+      if let stored = string(forKey: Self.clipboardSyncServerURLKey), !stored.isEmpty { return stored }
+      return Self.defaultClipboardSyncServerURL
+    }
     set { set(newValue, forKey: Self.clipboardSyncServerURLKey) }
   }
 
   /// 剪贴板同步用户名 (可空, 留空则不做 Basic Auth)
+  /// 未配过时返回内置默认值 (见上)。
   var clipboardSyncUsername: String {
-    get { string(forKey: Self.clipboardSyncUsernameKey) ?? "" }
+    get {
+      if let stored = string(forKey: Self.clipboardSyncUsernameKey), !stored.isEmpty { return stored }
+      return Self.defaultClipboardSyncUsername
+    }
     set { set(newValue, forKey: Self.clipboardSyncUsernameKey) }
   }
 
   /// 剪贴板同步密码 (可空)
   /// 注意: 与仓内其他配置一样保存在 App Group UserDefaults 中, 未使用 Keychain。
+  /// 未配过时返回内置默认值 (见上)。
   var clipboardSyncPassword: String {
-    get { string(forKey: Self.clipboardSyncPasswordKey) ?? "" }
+    get {
+      if let stored = string(forKey: Self.clipboardSyncPasswordKey), !stored.isEmpty { return stored }
+      return Self.defaultClipboardSyncPassword
+    }
     set { set(newValue, forKey: Self.clipboardSyncPasswordKey) }
   }
 
@@ -485,6 +506,61 @@ public extension UserDefaults {
     toolbarVisibleTools = tools
   }
 
+  // MARK: - 工具栏工具左右摆放 (第 9 轮)
+
+  /// 工具栏工具所在侧: 只有左/右两档 (没有中)。
+  /// 第 5 轮的左/中/右三分区被第 6 轮换掉, 是因为那版定制面板只是个
+  /// 只能排序的下拉列表、用户说"完全没用", 不是他不要左右摆放;
+  /// 现在他明确要左右放, 这次做对: 每工具一侧属性 + 可视化拖动。
+  /// 与旧的 toolbarToolZones 键无关 (那键留着, 不删已存数据, 也不再读)。
+  public enum ToolbarToolSide: String, Codable {
+    case left, right
+  }
+
+  /// 各工具所在侧 (toolID -> left/right)。未设置过时全部默认左,
+  /// 老用户现有布局原样保留 (原来都是一串从左往右排)。
+  var toolbarToolSides: [String: ToolbarToolSide] {
+    get {
+      if let dict = dictionary(forKey: Self.toolbarToolSidesKey) as? [String: String] {
+        var sides: [String: ToolbarToolSide] = [:]
+        for id in Self.toolbarToolAllIDs {
+          sides[id] = dict[id].flatMap(ToolbarToolSide.init(rawValue:)) ?? .left
+        }
+        return sides
+      }
+      return Dictionary(uniqueKeysWithValues: Self.toolbarToolAllIDs.map { ($0, ToolbarToolSide.left) })
+    }
+    set {
+      set(newValue.mapValues { $0.rawValue }, forKey: Self.toolbarToolSidesKey)
+    }
+  }
+
+  /// 某个工具所在侧 (未设置过默认左)。
+  func toolbarToolSide(for toolID: String) -> ToolbarToolSide {
+    toolbarToolSides[toolID] ?? .left
+  }
+
+  /// 设置某个工具所在侧 (写盘)。
+  func setToolbarToolSide(_ toolID: String, side: ToolbarToolSide) {
+    var sides = toolbarToolSides
+    sides[toolID] = side
+    toolbarToolSides = sides
+  }
+
+  /// 一次保存整栏布局 (拖动换侧 / 定制面板拖拽后调用):
+  /// 左组 id + 右组 id 按组内顺序拼成 toolbarToolsOrder,
+  /// 顺序里藏起来的工具 (可见开关关着) 保持原相对顺序跟在最后,
+  /// 不丢; 两侧属性同步写盘。调用方不用再分开写顺序和侧。
+  func saveToolbarLayout(leftIDs: [String], rightIDs: [String]) {
+    let visibleIDs = Set(leftIDs + rightIDs)
+    let hiddenIDs = toolbarToolsOrder.filter { !visibleIDs.contains($0) }
+    toolbarToolsOrder = leftIDs + rightIDs + hiddenIDs
+    var sides = toolbarToolSides
+    for id in leftIDs { sides[id] = .left }
+    for id in rightIDs { sides[id] = .right }
+    toolbarToolSides = sides
+  }
+
   /// 移动工具栏工具顺序 (拖拽排序后调用): from/to 为全部工具顺序中的下标。
   func moveToolbarTool(from source: Int, to destination: Int) {
     var order = toolbarToolsOrder
@@ -499,6 +575,8 @@ public extension UserDefaults {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
     toolbarVisibleTools = Set(Self.toolbarToolDefaultOrder)
     menuVisibleTiles = Set(Self.menuTileAllIDs)
+    // 左右摆放也恢复默认 (全部回左侧)。
+    removeObject(forKey: Self.toolbarToolSidesKey)
     // 分区也恢复默认 (剪贴板左、常用语左)。
     removeObject(forKey: Self.toolbarToolZonesKey)
   }
@@ -746,6 +824,7 @@ extension UserDefaults {
   private static let toolbarToolsOrderKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolsOrder"
   private static let toolbarToolZonesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolZones"
   private static let toolbarOrderFreeMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarOrderMigratedToFreeOrder"
+  private static let toolbarToolSidesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolSides"
   private static let menuVisibleTilesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.menuVisibleTiles"
 
   // MARK: - 剪贴板历史 / 常用语

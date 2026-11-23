@@ -350,6 +350,35 @@ public extension RimeContext {
       }
     }
 
+    // 九宫格修复 (第 9 轮): 部署器 (librime UpdateSchemas) 只给 schema_list
+    // (default.custom.yaml) 里的方案编译词库/prism, 而 App 里的方案勾选
+    // (selectSchemas) 从不写 schema_list; 用户勾了 t9、键盘切到 t9 能拼
+    // 数字, 但 t9.prism.bin 从未编译 → script_translator 找不到词库,
+    // 全输入零候选 (26 键 rime_ice 能出字, 正是因为它在 schema_list 里)。
+    // 这里把"已选且存在"的方案并进 schema_list (只加不减), 缺谁补谁,
+    // 再重启一次维护模式编译; 并把本地 schemas 同步成新列表, 否则下面
+    // 的交集逻辑会把刚补的方案又从 selectSchemas 里踢掉、切回 rime_ice。
+    do {
+      let selectedIDs = Set(self.selectSchemas.map { $0.schemaId })
+      let availableIDs = Set(Rime.shared.getAvailableRimeSchemas().map { $0.schemaId })
+      let listedIDs = Set(schemas.map { $0.schemaId })
+      let missingIDs = selectedIDs.intersection(availableIDs).subtracting(listedIDs)
+      if !missingIDs.isEmpty {
+        let mergedIDs = listedIDs.union(selectedIDs.intersection(availableIDs)).sorted()
+        if Rime.shared.selectRimeSchemas(mergedIDs) {
+          Logger.statistics.info("rime deploy: scheme_list 缺已选方案 \(missingIDs), 已补齐并重新编译")
+          Rime.shared.shutdown()
+          Rime.shared.start(Rime.createTraits(
+            sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
+            userDataDir: FileManager.sandboxUserDataDirectory.path
+          ), maintenance: true, fullCheck: true)
+          schemas = Rime.shared.getSchemas().sorted()
+        } else {
+          Logger.statistics.warning("rime deploy: scheme_list 补齐失败: \(missingIDs)")
+        }
+      }
+    }
+
     // 提前在部署阶段加载 RimeSwitch hotKey, 此步骤放在键盘启动阶段会减慢启动速度
     // 加载Switcher切换键
     let hotKeys = Rime.shared.getHotkeys()
