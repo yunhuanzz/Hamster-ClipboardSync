@@ -21,7 +21,7 @@
 	</array>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.dev.fuxiao.app.Hamster</string>
+		<string>group.com.SideStore.SideStore.FXSHN6DRCU</string>
 	</array>
 </dict>
 </plist>
