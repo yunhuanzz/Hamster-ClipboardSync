@@ -370,8 +370,7 @@ class KeyboardToolbarView: NibLessView {
   /// 透明底会让按键从格子/列表后面透出来; 工具栏那条细条透一下没事,
   /// 全屏面板必须不透明。
   private var opaquePanelBackgroundColor: UIColor {
-    let bg = appearance.backgroundStyle.backgroundColor
-    if bg.cgColor.alpha > 0.5 { return bg }
+    if let bg = appearance.backgroundStyle.backgroundColor, bg.cgColor.alpha > 0.5 { return bg }
     return HamsterUIColor.shared.standardKeyboardBackground
   }
 
