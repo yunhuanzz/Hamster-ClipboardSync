@@ -1,0 +1,64 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Select Xcode 15
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The 4 large FileServer JS bundles (~1MB each) were not pushed to this
+      # repo (GitHub single-file push limit); restore all binary assets
+      # (PNG/PDF/fonts/JS) from upstream so the build has the complete tree.
+      - name: Restore binary assets from upstream
+        run: |
+          git clone --depth 1 https://github.com/imfuxiao/Hamster.git /tmp/upstream-hamster
+          rsync -a --include='*.png' --include='*.jpg' --include='*.pdf' --include='*.ttf' --include='*.otf' --include='*.js' --include='*/' --exclude='*' /tmp/upstream-hamster/ ./
+          rm -rf /tmp/upstream-hamster
+
+      - name: Download librime framework
+        run: bash ./librimeFramework.sh
+
+      - name: Build input schemas
+        run: bash ./InputSchemaBuild.sh
+
+      - name: Copy schema zips
+        run: |
+          mkdir -p Resources/SharedSupport
+          cp .tmp/SharedSupport/SharedSupport.zip Resources/SharedSupport/ || true
+          cp .tmp/.rime-ice/rime-ice.zip Resources/SharedSupport/ || true
+
+      - name: Build unsigned .app
+        run: |
+          xcodebuild -project Hamster.xcodeproj \
+            -scheme Hamster \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "App: $APP_PATH"
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r Hamster-ClipboardSync-unsigned.ipa Payload
+          ls -lh Hamster-ClipboardSync-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hamster-ClipboardSync-unsigned
+          path: Hamster-ClipboardSync-unsigned.ipa
+          if-no-files-found: error
