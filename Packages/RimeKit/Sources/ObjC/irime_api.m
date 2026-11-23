@@ -417,7 +417,23 @@ static RimeLeversApi *get_levers() {
 }
 
 - (BOOL)replaceInputKeys:(NSString *)keys withStartPos:(int)pos AndCount:(int)length AndSession:(RimeSessionId)session {
-  return RimeReplaceInput(session, pos, length, [keys UTF8String]);
+  // NOTE: RimeReplaceInput does not exist in the bundled librime
+  // (amorphobia/LibrimeKit v0.1.0, librime from 2023). Reimplement it with
+  // get_input + clear composition + retype the modified input.
+  const char *current = rime_get_api()->get_input(session);
+  if (!current) return NO;
+  NSString *currentInput = @(current);
+  NSUInteger len = currentInput.length;
+  if (pos < 0) pos = 0;
+  if (pos > (int)len) pos = (int)len;
+  if (length < 0) length = 0;
+  if (pos + length > (int)len) length = (int)len - pos;
+  NSString *newInput = [NSString stringWithFormat:@"%@%@%@",
+                        [currentInput substringToIndex:(NSUInteger)pos],
+                        keys ?: @"",
+                        [currentInput substringFromIndex:(NSUInteger)(pos + length)]];
+  RimeClearComposition(session);
+  return RimeSimulateKeySequence(session, [newInput UTF8String]);
 }
 
 - (NSArray<IRimeCandidate *> *)getCandidateList:(RimeSessionId)session {
