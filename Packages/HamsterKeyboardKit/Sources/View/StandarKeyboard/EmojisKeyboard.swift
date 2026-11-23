@@ -257,7 +257,7 @@ class EmojisKeyboard: NibLessView {
     }
   }
 
-  private func setupAppearance() {
+  override func setupAppearance() {
     // 与键盘本体同一块系统底色, 不写死色值 (深色模式同样一致)。
     backgroundColor = appearance.backgroundStyle.backgroundColor
   }

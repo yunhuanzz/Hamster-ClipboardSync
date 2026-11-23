@@ -227,7 +227,7 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   private func zoneSegmentedControl(for tool: (id: String, title: String, visible: Bool, zone: UserDefaults.ToolbarToolZone)) -> UISegmentedControl {
     let control = UISegmentedControl(items: UserDefaults.ToolbarToolZone.allCases.map { $0.title })
     control.selectedSegmentIndex = UserDefaults.ToolbarToolZone.allCases.firstIndex(of: tool.zone) ?? 0
-    control.addTarget(self, action: #selector(zoneChanged(_:)), for: .valueChanged)
+    control.addTarget(self, action: #selector(zoneChanged(_:)), for: UIControl.Event.valueChanged)
     return control
   }
 

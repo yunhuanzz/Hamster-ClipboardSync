@@ -498,10 +498,10 @@ public extension UserDefaults {
   /// 工具栏工具所在分区。工具栏分左、中、右三组排布, 每组内按
   /// toolbarToolsOrder 的相对顺序紧凑排列 (组内间距 12pt, 不均分);
   /// 左侧菜单按钮 (格子图标) 不参与分区, 永远在最左。
-  enum ToolbarToolZone: String, Codable, CaseIterable {
+  public enum ToolbarToolZone: String, Codable, CaseIterable {
     case left, center, right
 
-    var title: String {
+    public var title: String {
       switch self {
       case .left: return "左"
       case .center: return "中"
