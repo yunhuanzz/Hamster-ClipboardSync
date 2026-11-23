@@ -337,6 +337,53 @@ public extension UserDefaults {
     get { string(forKey: Self.clipboardSyncLastHashKey) ?? "" }
     set { set(newValue, forKey: Self.clipboardSyncLastHashKey) }
   }
+
+  // MARK: - 剪贴板历史 (键盘内剪贴板按钮)
+
+  /// 最近剪贴板文本历史, 最新在前, 最多 20 条 (只存文本)
+  var clipboardHistory: [String] {
+    get { array(forKey: Self.clipboardHistoryKey) as? [String] ?? [] }
+    set { set(Array(newValue.prefix(Self.clipboardHistoryMaxCount)), forKey: Self.clipboardHistoryKey) }
+  }
+
+  /// 记录一条剪贴板文本到历史 (去重、置顶、截断到 20 条)
+  func recordClipboardHistory(_ text: String) {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    var history = clipboardHistory
+    history.removeAll { $0 == trimmed }
+    history.insert(trimmed, at: 0)
+    clipboardHistory = history
+  }
+
+  // MARK: - 常用语 (键盘内常用语按钮)
+
+  /// 内置常用语 (首次使用、未自定义时返回)
+  static let builtinCommonPhrases: [String] = [
+    "好的",
+    "收到",
+    "谢谢",
+    "正在忙，稍后回复",
+    "好的，我知道了",
+    "没问题",
+    "辛苦了",
+    "请稍等",
+    "我看一下再回复你",
+    "好的，谢谢",
+  ]
+
+  /// 常用语列表。未设置过时返回内置列表; 设置过后返回保存的值
+  /// (即使删空也返回保存的空数组, 不会重置回内置)。
+  /// App 设置页可通过此属性增删; 键盘内长按可删除单条。
+  var commonPhrases: [String] {
+    get {
+      if object(forKey: Self.commonPhrasesKey) != nil {
+        return array(forKey: Self.commonPhrasesKey) as? [String] ?? []
+      }
+      return Self.builtinCommonPhrases
+    }
+    set { set(newValue, forKey: Self.commonPhrasesKey) }
+  }
 }
 
 extension UserDefaults {
@@ -400,6 +447,12 @@ extension UserDefaults {
   private static let clipboardSyncUsernameKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncUsername"
   private static let clipboardSyncPasswordKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncPassword"
   private static let clipboardSyncLastHashKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastHash"
+
+  // MARK: - 剪贴板历史 / 常用语
+
+  private static let clipboardHistoryKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardHistory"
+  private static let clipboardHistoryMaxCount = 20
+  private static let commonPhrasesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.commonPhrases"
 
   // MARK: - 补丁
 

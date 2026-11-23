@@ -341,6 +341,13 @@ public struct KeySwipe: Codable, Hashable {
     self.label = label
   }
 
+  /// 删除键默认上滑动作: 上滑回退键清空全部已输入内容。
+  /// 若已有上滑配置, 则以已有配置为准, 不追加。
+  public static func withDefaultBackspaceUpSwipe(_ swipes: [KeySwipe], for action: KeyboardAction) -> [KeySwipe] {
+    guard action == .backspace, !swipes.contains(where: { $0.direction == .up }) else { return swipes }
+    return swipes + [KeySwipe(direction: .up, action: .backspace, processByRIME: false, display: false, label: .empty)]
+  }
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 

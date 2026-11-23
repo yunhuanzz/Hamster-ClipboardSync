@@ -206,9 +206,9 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
     }()
 
     if let swipe = context.keyboardSwipe[keyboardTypeKey]?[actionKey] {
-      return swipe
+      return KeySwipe.withDefaultBackspaceUpSwipe(swipe, for: action)
     }
-    return []
+    return KeySwipe.withDefaultBackspaceUpSwipe([], for: action)
   }
 
   /**

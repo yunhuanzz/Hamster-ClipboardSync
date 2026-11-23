@@ -50,6 +50,13 @@ public protocol KeyboardController: AnyObject {
   func deleteBackward(times: Int)
 
   /**
+   Delete all input text (swipe up on backspace).
+
+   清空全部已输入内容（上滑回退键）。
+   */
+  func deleteAllText()
+
+  /**
    Dismiss the keyboard.
 
    关闭键盘。

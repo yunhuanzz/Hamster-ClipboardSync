@@ -100,9 +100,9 @@ open class NumericNineGridKeyboardLayoutProvider: KeyboardLayoutProvider {
 
   open func itemSwipes(for action: KeyboardAction, row: Int, index: Int, context: KeyboardContext) -> [KeySwipe] {
     if let swipe = context.keyboardSwipe[context.keyboardType]?[action] {
-      return swipe
+      return KeySwipe.withDefaultBackspaceUpSwipe(swipe, for: action)
     }
-    return []
+    return KeySwipe.withDefaultBackspaceUpSwipe([], for: action)
   }
 
   open func keyboardReturnAction(for context: KeyboardContext) -> KeyboardAction {

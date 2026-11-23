@@ -507,6 +507,29 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     textDocumentProxy.deleteBackward(times: times)
   }
 
+  /// 上滑回退键: 清空全部已输入内容。
+  /// 先重置 RIME (清空候选/输入状态), 光标移到文末, 再分批删除,
+  /// 每批最多 100 字, 用 main.async 串行, 避免一次删除过长阻塞键盘。
+  open func deleteAllText() {
+    rimeContext.reset()
+    // 光标移到文末 (若光标不在末尾, 先向前移到末尾)
+    if let after = textDocumentProxy.documentContextAfterInput, !after.isEmpty {
+      textDocumentProxy.adjustTextPosition(byCharacterOffset: after.count)
+    }
+    deleteAllTextBatch(remainingAttempts: 100)
+  }
+
+  private func deleteAllTextBatch(remainingAttempts: Int) {
+    guard remainingAttempts > 0, textDocumentProxy.hasText else { return }
+    let beforeCount = textDocumentProxy.documentContextBeforeInput?.count ?? 0
+    // 若拿不到前文长度, 仍按一批 100 字删, 避免停滞
+    let batch = beforeCount > 0 ? min(100, beforeCount) : 100
+    textDocumentProxy.deleteBackward(times: batch)
+    DispatchQueue.main.async { [weak self] in
+      self?.deleteAllTextBatch(remainingAttempts: remainingAttempts - 1)
+    }
+  }
+
   open func insertSymbol(_ symbol: Symbol) {
     // 检测是否需要顶字上屏
     if !rimeContext.userInputKey.isEmpty {

@@ -828,8 +828,25 @@ static RimeLeversApi *get_levers() {
 }
 
 - (NSString *) getStateLabelAbbreviated:(RimeSessionId) session optionName:(NSString *) option state:(BOOL)state abbreviated:(BOOL)abbreviated {
-  struct rime_string_slice_t stateLabel = rime_get_api()->get_state_label_abbreviated(session, [option UTF8String], state ? 1 : 0, abbreviated ? 1 : 0);
-  return stateLabel.str ? [NSString stringWithUTF8String: stateLabel.str] : @"";
+  // NOTE: get_state_label_abbreviated does NOT exist in the bundled librime
+  // (amorphobia/LibrimeKit v0.1.0, librime from 2023). It sits at the end of
+  // the RimeApi struct, right next to the equally-missing replace_input.
+  // Calling it reads a garbage function pointer past the end of the struct
+  // and jumps into heap memory -> EXC_BAD_ACCESS / CODESIGNING "Invalid Page"
+  // (seen in HamsterKeyboard-2026-11-23-120816.ips, via
+  // RimeContext.start -> setupRimeInputSchema -> setSchema -> onChangeMode).
+  // Do NOT call rime_get_api()->get_state_label_abbreviated here.
+  // Return hardcoded labels instead; the caller only ever uses the
+  // abbreviated form, and these short labels serve for both.
+  // (void) to silence unused-parameter warnings.
+  (void)session;
+  (void)abbreviated;
+  if (!option || option.length == 0) return @"";
+  if ([option isEqualToString:@"ascii_mode"]) return state ? @"英" : @"中";
+  if ([option isEqualToString:@"simplification"]) return state ? @"简" : @"繁";
+  if ([option isEqualToString:@"full_shape"]) return state ? @"全" : @"半";
+  if ([option isEqualToString:@"ascii_punct"]) return state ? @"英" : @"中";
+  return option;
 }
 
 @end

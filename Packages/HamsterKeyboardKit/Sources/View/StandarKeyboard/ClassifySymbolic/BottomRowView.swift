@@ -49,6 +49,12 @@ class BottomRowView: NibLessView {
     button.tintColor = .label
     button.addTarget(self, action: #selector(backspacePressHandled(_:)), for: .touchDown)
     button.addTarget(self, action: #selector(backspaceReleaseHandled(_:)), for: .touchUpInside)
+    // 上滑回退键清空全部已输入内容。
+    // 符号键盘的回退键是独立 UIButton, 不走 KeyboardButton 的 itemSwipes,
+    // 所以这里单独加一个上滑手势。
+    let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(backspaceSwipeUpHandled(_:)))
+    swipeUp.direction = .up
+    button.addGestureRecognizer(swipeUp)
     return button
   }()
 
@@ -167,5 +173,11 @@ extension BottomRowView {
   @objc func backspaceReleaseHandled(_ button: UIButton) {
     button.backgroundColor = .clear
     actionHandler.handle(.release, on: .backspace)
+  }
+
+  @objc func backspaceSwipeUpHandled(_ gesture: UISwipeGestureRecognizer) {
+    guard gesture.state == .ended else { return }
+    let swipe = KeySwipe(direction: .up, action: .backspace, processByRIME: false, display: false, label: .empty)
+    actionHandler.handle(.swipeUp(swipe), on: .backspace)
   }
 }
