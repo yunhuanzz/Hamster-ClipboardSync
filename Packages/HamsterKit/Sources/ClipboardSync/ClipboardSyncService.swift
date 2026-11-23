@@ -10,12 +10,16 @@
 //    2. 从服务器下载最新一条剪贴板，若与本机不同则写回本机剪贴板。
 //  因此另一台设备打开键盘时，就能拿到这边复制的内容。
 //
-//  服务器协议 (极简 HTTP, 任何能实现 GET/PUT 的服务器都能用):
-//    上传: PUT {serverURL}, Body 为纯文本剪贴板内容
-//    下载: GET {serverURL}, 响应 Body 为纯文本; 若为 JSON 则解析 {"text": "..."}
+//  服务器协议 (SyncClipboard 服务器, 见 https://github.com/Jeric-X/SyncClipboard):
+//    上传: PUT {serverURL}/SyncClipboard.json, Body 为 JSON
+//          {"type":"Text","text":"...","hasData":false}, Content-Type: application/json
+//          (纯文本 PUT 会被服务器 415 拒绝)
+//    下载: GET {serverURL}/SyncClipboard.json, 响应为 SyncClipboard.json
+//          (解析其中 "text" 字段; 兼容纯文本响应)
 //    鉴权: 若配置了用户名/密码, 则附加 HTTP Basic Auth
 //    服务器只需保存"最新一条"剪贴板内容即可, 仓库 Tools/ 下附了一个
-//    极简参考服务端 (clipboard-sync-server.py)。
+//    极简参考服务端 (clipboard-sync-server.py, 仅支持纯文本 PUT, 与
+//    真实 SyncClipboard 服务器协议不同, 仅供本地测试)。
 //
 //  注意:
 //  - 需要键盘开启"允许完全访问" (Hamster 已在 Info.plist 中声明
@@ -106,12 +110,15 @@ public final class ClipboardSyncService {
 
   // MARK: - 网络
 
-  /// PUT 纯文本到服务器, 成功返回 true
+  /// PUT SyncClipboard.json (JSON) 到服务器, 成功返回 true。
+  /// 真实 SyncClipboard 服务器只接受 JSON (纯文本会被 415 拒绝),
+  /// body 格式: {"type":"Text","text":"...","hasData":false}
   private func upload(text: String, to url: URL, username: String, password: String) -> Bool {
     var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
     request.httpMethod = "PUT"
-    request.httpBody = text.data(using: .utf8)
-    request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
+    let payload: [String: Any] = ["type": "Text", "text": text, "hasData": false]
+    request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+    request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
     applyBasicAuth(to: &request, username: username, password: password)
 
     let semaphore = DispatchSemaphore(value: 0)
