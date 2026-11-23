@@ -9,7 +9,6 @@ let package = Package(
   platforms: [
     .iOS(.v15),
   ],
-  swiftLanguageModes: [.v5],
   products: [
     .library(name: "HamsterKeyboardKit", targets: ["HamsterKeyboardKit"]),
   ],
@@ -84,4 +83,6 @@ let package = Package(
         "libyaml-cpp",
       ],
       path: "Tests"),
-  ])
+  ],
+  swiftLanguageModes: [.v5],
+)

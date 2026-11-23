@@ -8,7 +8,6 @@ let package = Package(
   platforms: [
     .iOS(.v15),
   ],
-  swiftLanguageModes: [.v5],
   products: [
     .library(
       name: "HamsterKit",
@@ -30,4 +29,6 @@ let package = Package(
       name: "HamsterKitTests",
       dependencies: ["HamsterKit"],
       path: "Tests"),
-  ])
+  ],
+  swiftLanguageModes: [.v5],
+)

@@ -9,7 +9,6 @@ let package = Package(
   platforms: [
     .iOS(.v14),
   ],
-  swiftLanguageModes: [.v5],
   products: [
     .library(
       name: "HamsterFileServer",
@@ -33,4 +32,6 @@ let package = Package(
     .testTarget(
       name: "HamsterFileServerTests",
       dependencies: ["HamsterFileServer"]),
-  ])
+  ],
+  swiftLanguageModes: [.v5],
+)

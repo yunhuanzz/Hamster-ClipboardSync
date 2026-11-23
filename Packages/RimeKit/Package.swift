@@ -8,7 +8,6 @@ let package = Package(
   platforms: [
     .iOS(.v15),
   ],
-  swiftLanguageModes: [.v5],
   products: [
     .library(name: "RimeKit", targets: ["RimeKit"]),
   ],
@@ -75,4 +74,6 @@ let package = Package(
         "libopenccRIME",
         "libyaml-cppRIME",
       ]),
-  ])
+  ],
+  swiftLanguageModes: [.v5],
+)
