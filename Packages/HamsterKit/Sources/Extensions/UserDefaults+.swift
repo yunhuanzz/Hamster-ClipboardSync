@@ -369,6 +369,31 @@ public extension UserDefaults {
 
   // MARK: - 工具栏自定义 (定制工具栏)
 
+  /// 工具栏工具顺序: 全部工具 id 按显示顺序排列 (包括已隐藏的工具, 这样重新显示时
+  /// 仍回到用户排好的位置)。未设置过时默认 ["clipboard", "phrases", "dismiss"]
+  /// (收起键盘在最右, 方便拇指点按)。可见性仍由 toolbarVisibleTools 集合单独控制,
+  /// 旧版的显示/隐藏选择不受影响, 无需迁移。
+  /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口), 不在列表里。
+  var toolbarToolsOrder: [String] {
+    get {
+      if let array = array(forKey: Self.toolbarToolsOrderKey) as? [String] {
+        // 过滤掉未知 id, 并补上漏掉的已知工具 (以后新增工具时默认显示在末尾)
+        let known = array.filter { Self.toolbarToolAllIDs.contains($0) }
+        let missing = Self.toolbarToolAllIDs.filter { !known.contains($0) }
+        return known + missing
+      }
+      return Self.toolbarToolDefaultOrder
+    }
+    set {
+      let ordered = newValue.filter { Self.toolbarToolAllIDs.contains($0) }
+      let missing = Self.toolbarToolAllIDs.filter { !ordered.contains($0) }
+      set(ordered + missing, forKey: Self.toolbarToolsOrderKey)
+    }
+  }
+
+  /// 工具栏默认顺序: 剪贴板、常用语、收起键盘 (收起键盘在最右, 方便拇指点按)。
+  static let toolbarToolDefaultOrder: [String] = ["clipboard", "phrases", "dismiss"]
+
   /// 工具栏工具可见性: 存放"显示"的工具 id 集合。
   /// 未设置过时全部显示; 工具 id: "clipboard"(剪贴板)、"phrases"(常用语)、"dismiss"(收起键盘)。
   /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口)。
@@ -399,6 +424,21 @@ public extension UserDefaults {
       tools.remove(toolID)
     }
     toolbarVisibleTools = tools
+  }
+
+  /// 移动工具栏工具顺序 (拖拽排序后调用): from/to 为全部工具顺序中的下标。
+  func moveToolbarTool(from source: Int, to destination: Int) {
+    var order = toolbarToolsOrder
+    guard order.indices.contains(source), order.indices.contains(destination), source != destination else { return }
+    let tool = order.remove(at: source)
+    order.insert(tool, at: destination)
+    toolbarToolsOrder = order
+  }
+
+  /// 恢复默认顺序并全部显示。
+  func resetToolbarToolsOrder() {
+    toolbarToolsOrder = Self.toolbarToolDefaultOrder
+    toolbarVisibleTools = Set(Self.toolbarToolAllIDs)
   }
 
   // MARK: - 剪贴板历史 (键盘内剪贴板按钮)
@@ -513,6 +553,7 @@ extension UserDefaults {
   private static let clipboardSyncLastStatusTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastStatusText"
   private static let chinesePrimaryKeyboardIsNineGridKey = "com.ihsiao.apps.Hamster.UserDefault.keys.chinesePrimaryKeyboardIsNineGrid"
   private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"
+  private static let toolbarToolsOrderKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolsOrder"
 
   // MARK: - 剪贴板历史 / 常用语
 

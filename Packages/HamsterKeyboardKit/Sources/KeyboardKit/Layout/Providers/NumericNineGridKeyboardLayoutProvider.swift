@@ -150,12 +150,14 @@ open class NumericNineGridKeyboardLayoutProvider: KeyboardLayoutProvider {
 
   /**
    应用于下一行(相对与 middle 行)的附加 leading 操作。
+   符号在左、返回在右: 返回正好落在字母键盘 "123" 键原来的位置,
+   点一下就回到字母键盘, 不会误点进符号页。
    */
   open func bottomLeadingActions(
     for actions: KeyboardActionRows,
     context: KeyboardContext
   ) -> KeyboardActions {
-    return [.returnLastKeyboard, .keyboardType(.classifySymbolicOfLight)]
+    return [.keyboardType(.classifySymbolicOfLight), .returnLastKeyboard]
   }
 
   /**

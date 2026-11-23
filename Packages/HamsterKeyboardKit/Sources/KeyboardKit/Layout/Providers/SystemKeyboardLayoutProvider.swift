@@ -209,7 +209,26 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
       // 英文 26 键: 配置里没有该键的上滑时, 补默认上滑数字/符号 (顶行 1~0, 其余行符号);
       // 中文 26 键走 YAML 配置, 这里不补。
       let swipes = keyboardTypeKey.isAlphabetic ? KeySwipe.withDefaultAlphabeticUpSwipe(swipe, for: action) : swipe
-      return KeySwipe.withDefaultBackspaceUpSwipe(swipes, for: action)
+      // 中文 26 键角标去噪: YAML 给每键都配了上滑/下滑角标, 全显示太乱 ("8太乱了")。
+      // 只保留顶行数字 (1~0) 的上滑角标, 其余上滑/下滑仍可用但不显示角标。
+      // (配置已缓存到老用户设备, 改 YAML 到不了他那里, 所以这里用代码过滤。)
+      let displaySwipes: [KeySwipe]
+      if keyboardTypeKey == .chinese(.lowercased) {
+        displaySwipes = swipes.map { swipe in
+          var swipe = swipe
+          if swipe.direction == .up,
+             case .character(let char) = swipe.action,
+             char.count == 1, "0123456789".contains(char) {
+            // 顶行数字: 保留角标
+          } else {
+            swipe.display = false
+          }
+          return swipe
+        }
+      } else {
+        displaySwipes = swipes
+      }
+      return KeySwipe.withDefaultBackspaceUpSwipe(displaySwipes, for: action)
     }
     // 英文 26 键默认上滑 (无配置时): 顶行字母 -> 数字 1~0, 其余行 -> 常用符号
     let swipes = keyboardTypeKey.isAlphabetic ? KeySwipe.withDefaultAlphabeticUpSwipe([], for: action) : []

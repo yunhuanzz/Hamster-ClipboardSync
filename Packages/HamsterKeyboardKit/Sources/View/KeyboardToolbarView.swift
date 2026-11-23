@@ -18,8 +18,10 @@ import UIKit
  2. 常用功能视图
 
  工具栏左侧菜单 (点左上角图标打开, 仿微信输入法):
- 剪贴板 / 常用语 / 收起键盘 / 切换26键·九宫格 / 定制工具栏 / 立即同步 / 设置。
- 工具栏按钮可通过"定制工具栏"逐个隐藏/显示 (开关存在共享 UserDefaults)。
+ 4 列宫格面板, 含剪贴板 / 常用语 / 收起键盘 / 切换26键·九宫格 /
+ 定制工具栏 / 立即同步 / 设置 / 常用语管理。
+ 工具栏按钮可通过"定制工具栏"逐个隐藏/显示并拖拽排序
+ (顺序存在共享 UserDefaults, 收起键盘默认在最右)。
  */
 class KeyboardToolbarView: NibLessView {
   private let appearance: KeyboardAppearance
@@ -31,25 +33,26 @@ class KeyboardToolbarView: NibLessView {
   private var oldBounds: CGRect = .zero
   private var subscriptions = Set<AnyCancellable>()
 
-  /// 常用功能项: 左上角菜单按钮 (点开工具栏菜单)。点按时系统自动高亮图标。
+  /// 常用功能项: 左上角菜单按钮 (点开宫格菜单)。点按时系统自动高亮图标。
   lazy var iconButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setImage(UIImage(systemName: "r.circle"), for: .normal)
+    button.setImage(UIImage(systemName: "square.grid.2x2"), for: .normal)
     button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
     button.tintColor = style.toolbarButtonFrontColor
     button.backgroundColor = style.toolbarButtonBackgroundColor
-    // iOS 14+: 点按直接弹出系统菜单 (自动处理关闭/点外面关闭/高亮状态)
-    button.showsMenuAsPrimaryAction = true
-    button.menu = makeToolbarMenu()
+    button.addTarget(self, action: #selector(menuButtonTouchDownAction), for: .touchDown)
+    button.addTarget(self, action: #selector(menuButtonTouchUpAction), for: .touchUpInside)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchCancel)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchUpOutside)
     return button
   }()
 
-  /// 解散键盘 Button
+  /// 解散键盘 Button (微信式细线图标, 与工具栏其他按钮同一套 18pt SF Symbols)。
   lazy var dismissKeyboardButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setImage(UIImage(systemName: "chevron.down.circle"), for: .normal)
+    button.setImage(UIImage(systemName: "keyboard.chevron.compact.down"), for: .normal)
     button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
     button.tintColor = style.toolbarButtonFrontColor
     button.backgroundColor = style.toolbarButtonBackgroundColor
@@ -64,7 +67,7 @@ class KeyboardToolbarView: NibLessView {
   lazy var clipboardButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setImage(UIImage(systemName: "doc.on.clipboard"), for: .normal)
+    button.setImage(UIImage(systemName: "list.clipboard"), for: .normal)
     button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
     button.tintColor = style.toolbarButtonFrontColor
     button.backgroundColor = style.toolbarButtonBackgroundColor
@@ -79,7 +82,7 @@ class KeyboardToolbarView: NibLessView {
   lazy var phrasesButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setImage(UIImage(systemName: "text.quote"), for: .normal)
+    button.setImage(UIImage(systemName: "quote.bubble"), for: .normal)
     button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
     button.tintColor = style.toolbarButtonFrontColor
     button.backgroundColor = style.toolbarButtonBackgroundColor
@@ -90,38 +93,77 @@ class KeyboardToolbarView: NibLessView {
     return button
   }()
 
-  /// 剪贴板粘贴提示 chip (仿微信输入法): 键盘弹出/同步完成后, 若剪贴板有新内容,
-  /// 在工具栏右侧显示一条可点按粘贴的提示, 点后粘贴并消失。只在未输入时显示。
-  private lazy var clipboardChipButton: UIButton = {
+  /// 微信式粘贴提示行: 收起键盘图标 + 剪贴板文字 (点按粘贴) + X (关闭)。
+  /// 展示时工具栏其他按钮暂时隐藏。只在未输入时显示。
+  private lazy var pasteRowView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = .secondarySystemBackground
+    view.layer.cornerRadius = 8
+    view.layer.masksToBounds = true
+    view.isHidden = true
+    return view
+  }()
+
+  /// 粘贴提示行左侧: 收起键盘图标 (点按收起键盘)。
+  private lazy var pasteRowDismissButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.backgroundColor = .secondarySystemBackground
-    button.layer.cornerRadius = 8
-    button.layer.masksToBounds = true
+    button.setImage(UIImage(systemName: "keyboard.chevron.compact.down"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.tintColor = .secondaryLabel
+    button.addTarget(self, action: #selector(pasteRowDismissTapped), for: .touchUpInside)
+    return button
+  }()
+
+  /// 粘贴提示行中间: 剪贴板文字 (单行截断, 点按粘贴)。
+  private lazy var pasteRowTextButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
     button.titleLabel?.font = .systemFont(ofSize: 14)
     button.titleLabel?.lineBreakMode = .byTruncatingTail
     button.setTitleColor(.label, for: .normal)
     button.contentHorizontalAlignment = .left
     button.titleEdgeInsets = UIEdgeInsets(top: 0, left: 6, bottom: 0, right: 6)
-    button.imageEdgeInsets = UIEdgeInsets(top: 0, left: 6, bottom: 0, right: 0)
-    button.setImage(UIImage(systemName: "doc.on.clipboard"), for: .normal)
-    button.tintColor = .secondaryLabel
-    button.addTarget(self, action: #selector(clipboardChipTapped), for: .touchUpInside)
-    button.isHidden = true
+    button.addTarget(self, action: #selector(pasteRowTextTapped), for: .touchUpInside)
     return button
   }()
 
-  /// chip 当前展示的剪贴板文本 (nil 表示未展示)
+  /// 粘贴提示行右侧: X (关闭提示, 相同内容不再重复提示)。
+  private lazy var pasteRowCloseButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "xmark"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 14), scale: .default), forImageIn: .normal)
+    button.tintColor = .secondaryLabel
+    button.addTarget(self, action: #selector(pasteRowCloseTapped), for: .touchUpInside)
+    return button
+  }()
+
+  /// 粘贴提示行当前展示的剪贴板文本 (nil 表示未展示)
   private var clipboardChipText: String?
-  /// 已粘贴/忽略过的剪贴板文本: 相同内容不再重复提示, 直到剪贴板换成新内容
-  private var clipboardChipDismissedText: String?
-  private var clipboardChipConstraints: [NSLayoutConstraint] = []
+  /// 已粘贴/忽略过的剪贴板文本的 SHA-256: 相同内容不再重复提示, 直到剪贴板换成新内容
+  private var clipboardChipDismissedHash: String?
+  /// 上次读取剪贴板内容时的 changeCount。只在 changeCount 变化时才重读剪贴板
+  /// (读剪贴板会弹"粘贴自xxx"横幅), 其余时候只用缓存展示, 绝不重复读。
+  /// -1 表示从未读过。
+  private var lastChipChangeCount: Int = -1
+  /// 上次读到的剪贴板文本缓存 (打字/输入变化时只用缓存展示, 不读剪贴板)。
+  private var lastReadPasteboardText: String?
+  /// 粘贴提示行是否正在展示 (展示时工具栏其他按钮暂时隐藏)。
+  private var isPasteRowVisible = false
 
   /// 当前展示的文本列表面板 (剪贴板 / 常用语), 覆盖在键盘根视图上
   private var textListPanel: KeyboardTextListPanelView?
 
   /// 当前展示的定制工具栏面板, 覆盖在键盘根视图上
   private var customizePanel: KeyboardToolbarCustomizePanelView?
+
+  /// 当前展示的功能菜单宫格面板, 覆盖在键盘根视图上
+  private var menuPanel: KeyboardToolbarMenuPanelView?
+
+  /// 当前展示的常用语管理面板, 覆盖在键盘根视图上
+  private var phrasesEditorPanel: KeyboardCommonPhrasesEditorPanelView?
 
   /// 工具栏按钮约束 (重建工具栏按钮时先停用旧约束)
   private var toolbarButtonConstraints: [NSLayoutConstraint] = []
@@ -185,18 +227,88 @@ class KeyboardToolbarView: NibLessView {
     }
   }
 
-  /// 键盘弹出/回到窗口时刷新粘贴提示 (键盘每次弹出都会触发)。
+  /// 键盘弹出/回到窗口时刷新粘贴提示并启动定期同步;
+  /// 键盘隐藏时停止定期同步并关掉覆盖面板。
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window != nil {
       refreshClipboardChip()
+      startSyncTimer()
+    } else {
+      stopSyncTimer()
+      dismissAllPanels()
     }
+  }
+
+  /// 键盘打开期间的定期同步定时器 (每 3 秒): 键盘开着时复制的内容
+  /// (本机或 PC) 不用等关闭重开就能同步, 连续复制的间隔也不再受节流拖累。
+  /// 失败静默, 不阻塞打字; 键盘隐藏时停止。
+  private var syncTimer: Timer?
+
+  private func startSyncTimer() {
+    stopSyncTimer()
+    guard UserDefaults.hamster.clipboardSyncEnabled else { return }
+    let timer = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
+      self?.syncTimerTick()
+    }
+    // .common: 打字/滑动时 (UITracking) 也照常触发
+    RunLoop.main.add(timer, forMode: .common)
+    syncTimer = timer
+  }
+
+  private func stopSyncTimer() {
+    syncTimer?.invalidate()
+    syncTimer = nil
+  }
+
+  /// 定时器每拍: 同步一次。服务内部用 changeCount 判断本机剪贴板是否真变了,
+  /// 没变不读剪贴板、不弹横幅; 每拍都拉取服务器, PC 复制的内容 3 秒内到达,
+  /// 到达后发通知刷新粘贴提示与状态行。
+  private func syncTimerTick() {
+    guard window != nil else {
+      stopSyncTimer()
+      return
+    }
+    guard UserDefaults.hamster.clipboardSyncEnabled else {
+      stopSyncTimer()
+      return
+    }
+    ClipboardSyncService.shared.syncNow()
   }
 
   override func constructViewHierarchy() {
     addSubview(commonFunctionBar)
-    commonFunctionBar.addSubview(clipboardChipButton)
+    setupPasteRow()
     rebuildToolbarButtons()
+  }
+
+  /// 粘贴提示行: 加入工具栏并定好内部布局 (默认隐藏)。
+  private func setupPasteRow() {
+    commonFunctionBar.addSubview(pasteRowView)
+    pasteRowView.addSubview(pasteRowDismissButton)
+    pasteRowView.addSubview(pasteRowTextButton)
+    pasteRowView.addSubview(pasteRowCloseButton)
+    NSLayoutConstraint.activate([
+      pasteRowView.leadingAnchor.constraint(equalTo: commonFunctionBar.leadingAnchor),
+      pasteRowView.trailingAnchor.constraint(equalTo: commonFunctionBar.trailingAnchor),
+      pasteRowView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+      pasteRowView.heightAnchor.constraint(equalToConstant: 30),
+
+      pasteRowDismissButton.leadingAnchor.constraint(equalTo: pasteRowView.leadingAnchor),
+      pasteRowDismissButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
+      pasteRowDismissButton.bottomAnchor.constraint(equalTo: pasteRowView.bottomAnchor),
+      pasteRowDismissButton.widthAnchor.constraint(equalToConstant: 30),
+
+      pasteRowTextButton.leadingAnchor.constraint(equalTo: pasteRowDismissButton.trailingAnchor),
+      pasteRowTextButton.trailingAnchor.constraint(equalTo: pasteRowCloseButton.leadingAnchor),
+      pasteRowTextButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
+      pasteRowTextButton.bottomAnchor.constraint(equalTo: pasteRowView.bottomAnchor),
+
+      pasteRowCloseButton.trailingAnchor.constraint(equalTo: pasteRowView.trailingAnchor),
+      pasteRowCloseButton.topAnchor.constraint(equalTo: pasteRowView.topAnchor),
+      pasteRowCloseButton.bottomAnchor.constraint(equalTo: pasteRowView.bottomAnchor),
+      pasteRowCloseButton.widthAnchor.constraint(equalToConstant: 30),
+    ])
   }
 
   override func activateViewConstraints() {
@@ -238,9 +350,10 @@ class KeyboardToolbarView: NibLessView {
           candidateBarView.fillSuperview()
         }
 
-        // 未输入时刷新粘贴提示; 开始输入后工具栏隐藏, 提示随之隐藏。
+        // 未输入时用缓存展示粘贴提示 (绝不读剪贴板, 打字不再弹"粘贴自xxx"横幅);
+        // 开始输入后工具栏隐藏, 提示随之隐藏。
         if isEmpty {
-          self.refreshClipboardChip()
+          self.showClipboardChipFromCache()
         } else {
           self.hideClipboardChip()
         }
@@ -256,6 +369,15 @@ class KeyboardToolbarView: NibLessView {
         }
       }
       .store(in: &subscriptions)
+  }
+
+  @objc func menuButtonTouchDownAction() {
+    iconButton.backgroundColor = style.toolbarButtonPressedBackgroundColor
+  }
+
+  @objc func menuButtonTouchUpAction() {
+    iconButton.backgroundColor = style.toolbarButtonBackgroundColor
+    showMenuPanel()
   }
 
   @objc func dismissKeyboardTouchDownAction() {
@@ -292,41 +414,102 @@ class KeyboardToolbarView: NibLessView {
     phrasesButton.backgroundColor = style.toolbarButtonBackgroundColor
   }
 
-  // MARK: - 左上角菜单 (UIMenu, 系统菜单)
+  // MARK: - 左上角菜单 (宫格面板, 仿微信输入法)
 
-  /// 生成工具栏菜单。切换 26 键/九宫格的标题随当前中文主键盘布局而变,
-  /// 切换后需调用 rebuildToolbarMenu() 刷新。
-  private func makeToolbarMenu() -> UIMenu {
-    let clipboard = UIAction(title: "剪贴板", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
-      self?.showClipboardHistoryPanel()
-    }
-    let phrases = UIAction(title: "常用语", image: UIImage(systemName: "text.quote")) { [weak self] _ in
-      self?.showCommonPhrasesPanel()
-    }
-    let dismiss = UIAction(title: "收起键盘", image: UIImage(systemName: "chevron.down.circle")) { [weak self] _ in
-      guard let self else { return }
-      self.actionHandler.handle(.release, on: .dismissKeyboard)
-    }
+  /// 菜单宫格: 与旧版 UIMenu 同样的功能项, 另加"常用语管理"。
+  /// 切换 26 键/九宫格的标题随当前中文主键盘布局而变, 面板每次打开时现算。
+  private func menuTiles() -> [(id: String, title: String, systemImage: String)] {
     let layoutTitle = currentChineseLayoutIsNineGrid ? "切换26键" : "切换九宫格"
-    let switchLayout = UIAction(title: layoutTitle, image: UIImage(systemName: "keyboard")) { [weak self] _ in
-      self?.toggleChineseKeyboardLayout()
-    }
-    let customize = UIAction(title: "定制工具栏", image: UIImage(systemName: "slider.horizontal.3")) { [weak self] _ in
-      self?.showToolbarCustomizePanel()
-    }
-    let syncNow = UIAction(title: "立即同步剪贴板", image: UIImage(systemName: "arrow.triangle.2.circlepath")) { _ in
-      ClipboardSyncService.shared.syncNow()
-    }
-    let settings = UIAction(title: "设置", image: UIImage(systemName: "gear")) { [weak self] _ in
-      guard let self else { return }
-      self.actionHandler.handle(.release, on: .url(URL(string: "hamster://dev.fuxiao.app.hamster/main"), id: "openHamster"))
-    }
-    return UIMenu(title: "", children: [clipboard, phrases, dismiss, switchLayout, customize, syncNow, settings])
+    return [
+      (id: "clipboard", title: "剪贴板", systemImage: "list.clipboard"),
+      (id: "phrases", title: "常用语", systemImage: "quote.bubble"),
+      (id: "dismiss", title: "收起键盘", systemImage: "keyboard.chevron.compact.down"),
+      (id: "switchLayout", title: layoutTitle, systemImage: "keyboard"),
+      (id: "customize", title: "定制工具栏", systemImage: "slider.horizontal.3"),
+      (id: "syncNow", title: "立即同步剪贴板", systemImage: "arrow.triangle.2.circlepath"),
+      (id: "settings", title: "设置", systemImage: "gear"),
+      (id: "managePhrases", title: "常用语管理", systemImage: "square.and.pencil"),
+    ]
   }
 
-  /// 刷新菜单 (主要用于切换 26 键/九宫格后更新菜单项标题)。
-  private func rebuildToolbarMenu() {
-    iconButton.menu = makeToolbarMenu()
+  /// 打开功能菜单宫格面板 (覆盖在键盘根视图上)。
+  private func showMenuPanel() {
+    dismissAllPanels()
+    guard let container = superview else { return }
+    let panel = KeyboardToolbarMenuPanelView()
+    panel.onSelect = { [weak self] tileID in
+      self?.dismissMenuPanel()
+      self?.handleMenuSelection(tileID)
+    }
+    panel.onClose = { [weak self] in self?.dismissMenuPanel() }
+    panel.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(panel)
+    panel.fillSuperview()
+    panel.reload(with: menuTiles())
+    menuPanel = panel
+  }
+
+  private func dismissMenuPanel() {
+    menuPanel?.removeFromSuperview()
+    menuPanel = nil
+  }
+
+  /// 点宫格后的动作 (与旧版 UIMenu 的各项一一对应)。
+  private func handleMenuSelection(_ tileID: String) {
+    switch tileID {
+    case "clipboard":
+      showClipboardHistoryPanel()
+    case "phrases":
+      showCommonPhrasesPanel()
+    case "dismiss":
+      actionHandler.handle(.release, on: .dismissKeyboard)
+    case "switchLayout":
+      toggleChineseKeyboardLayout()
+    case "customize":
+      showToolbarCustomizePanel()
+    case "syncNow":
+      ClipboardSyncService.shared.syncNow()
+    case "settings":
+      actionHandler.handle(.release, on: .url(URL(string: "hamster://dev.fuxiao.app.hamster/main"), id: "openHamster"))
+    case "managePhrases":
+      showCommonPhrasesEditorPanel()
+    default:
+      break
+    }
+  }
+
+  /// 关掉所有覆盖面板 (打开任一面板前先调, 同一时间只展示一个)。
+  private func dismissAllPanels() {
+    dismissTextListPanel()
+    dismissCustomizePanel()
+    dismissMenuPanel()
+    dismissPhrasesEditorPanel()
+  }
+
+  // MARK: - 常用语管理面板 (键盘内编辑, 不离开键盘)
+
+  /// 打开常用语管理面板 (覆盖在键盘根视图上): 增删改常用语,
+  /// 读写与主 App 设置页同一个共享 UserDefaults commonPhrases。
+  private func showCommonPhrasesEditorPanel() {
+    dismissAllPanels()
+    guard let container = superview else { return }
+    let panel = KeyboardCommonPhrasesEditorPanelView()
+    panel.onClose = { [weak self] in self?.dismissPhrasesEditorPanel() }
+    panel.onOpenApp = { [weak self] in
+      guard let self else { return }
+      self.dismissPhrasesEditorPanel()
+      self.actionHandler.handle(.release, on: .url(URL(string: "hamster://dev.fuxiao.app.hamster/main"), id: "openHamster"))
+    }
+    panel.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(panel)
+    panel.fillSuperview()
+    panel.reload()
+    phrasesEditorPanel = panel
+  }
+
+  private func dismissPhrasesEditorPanel() {
+    phrasesEditorPanel?.removeFromSuperview()
+    phrasesEditorPanel = nil
   }
 
   // MARK: - 切换 26 键 / 九宫格
@@ -346,18 +529,20 @@ class KeyboardToolbarView: NibLessView {
 
   /// 在中文九宫格与 26 键全键盘之间切换, 并持久化选择 (下次打开键盘保持)。
   /// 用现有的 setKeyboardType 机制切换, KeyboardRootView 监听到类型变化后重建键盘,
-  /// 不需要重启键盘。
+  /// 不需要重启键盘。菜单宫格每次打开时现算标题, 不需要刷新。
   private func toggleChineseKeyboardLayout() {
     let toNineGrid = !currentChineseLayoutIsNineGrid
     UserDefaults.hamster.chinesePrimaryKeyboardIsNineGrid = toNineGrid
     keyboardContext.setKeyboardType(toNineGrid ? .chineseNineGrid : .chinese(.lowercased))
-    rebuildToolbarMenu()
   }
 
   // MARK: - 工具栏按钮重建 (定制工具栏)
 
-  /// 按配置 + 用户开关重建工具栏按钮。左侧菜单按钮常驻 (配置开启时);
-  /// 剪贴板/常用语/收起键盘按共享 UserDefaults 里的开关显示或隐藏。
+  /// 按配置 + 用户开关/顺序重建工具栏按钮。左侧菜单按钮常驻 (配置开启时);
+  /// 剪贴板/常用语/收起键盘按共享 UserDefaults 里的顺序 (toolbarToolsOrder,
+  /// 仅显示开关打开的工具) 从左到右排列, 其中顺序里的最后一个工具固定在最右侧
+  /// (默认是收起键盘, 方便拇指点按); 其余工具依次排在菜单按钮之后。
+  /// 左侧菜单按钮不参与排序。
   func rebuildToolbarButtons() {
     NSLayoutConstraint.deactivate(toolbarButtonConstraints)
     toolbarButtonConstraints.removeAll()
@@ -382,54 +567,70 @@ class KeyboardToolbarView: NibLessView {
       ])
     }
 
+    /// 固定在工具栏最右侧的按钮 (顺序里的最后一个工具)。
+    func pinButtonToTrailingEdge(_ button: UIButton) {
+      commonFunctionBar.addSubview(button)
+      constraints.append(contentsOf: [
+        button.heightAnchor.constraint(equalTo: button.widthAnchor),
+        button.trailingAnchor.constraint(equalTo: commonFunctionBar.trailingAnchor),
+        button.topAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.topAnchor),
+        commonFunctionBar.bottomAnchor.constraint(greaterThanOrEqualTo: button.bottomAnchor),
+        button.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+      ])
+    }
+
+    // 工具 id -> 按钮 (收起键盘仅在配置开启时才有按钮)
+    func buttonForTool(_ toolID: String) -> UIButton? {
+      switch toolID {
+      case "clipboard": return clipboardButton
+      case "phrases": return phrasesButton
+      case "dismiss":
+        guard keyboardContext.displayKeyboardDismissButton else { return nil }
+        return dismissKeyboardButton
+      default: return nil
+      }
+    }
+
     if keyboardContext.displayAppIconButton {
       placeButton(iconButton, after: nil)
       previousButton = iconButton
     }
-    if UserDefaults.hamster.isToolbarToolVisible("clipboard") {
-      placeButton(clipboardButton, after: previousButton)
-      previousButton = clipboardButton
-    }
-    if UserDefaults.hamster.isToolbarToolVisible("phrases") {
-      placeButton(phrasesButton, after: previousButton)
-      previousButton = phrasesButton
-    }
 
-    // 收起键盘按钮固定在最右侧 (配置开启且开关打开时才显示)
-    if keyboardContext.displayKeyboardDismissButton, UserDefaults.hamster.isToolbarToolVisible("dismiss") {
-      commonFunctionBar.addSubview(dismissKeyboardButton)
-      constraints.append(contentsOf: [
-        dismissKeyboardButton.heightAnchor.constraint(equalTo: dismissKeyboardButton.widthAnchor),
-        dismissKeyboardButton.trailingAnchor.constraint(equalTo: commonFunctionBar.trailingAnchor),
-        dismissKeyboardButton.topAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.topAnchor),
-        commonFunctionBar.bottomAnchor.constraint(greaterThanOrEqualTo: dismissKeyboardButton.bottomAnchor),
-        dismissKeyboardButton.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
-      ])
+    // 可见工具按保存的顺序排列: 除最后一个外依次排在左侧, 最后一个固定在最右侧
+    let orderedButtons = UserDefaults.hamster.toolbarToolsOrder
+      .filter { UserDefaults.hamster.isToolbarToolVisible($0) }
+      .compactMap(buttonForTool)
+    for (index, button) in orderedButtons.enumerated() {
+      if index == orderedButtons.count - 1 {
+        pinButtonToTrailingEdge(button)
+      } else {
+        placeButton(button, after: previousButton)
+        previousButton = button
+      }
     }
 
     toolbarButtonConstraints = constraints
     NSLayoutConstraint.activate(constraints)
 
-    // 按钮重建后, 粘贴提示 chip 的位置也要跟着重算 (它锚在最后一个左侧按钮之后)。
-    layoutClipboardChip()
+    // 粘贴提示行展示时, 工具栏其他按钮暂时隐藏 (提示行盖住整个工具栏);
+    // 提示行隐藏时恢复显示。
+    [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = isPasteRowVisible }
   }
 
-  /// 定制工具栏面板要列出的工具 (收起键盘仅在配置开启时才列出)。
+  /// 定制工具栏面板要列出的工具 (按保存的顺序, 包括已隐藏的工具;
+  /// 收起键盘仅在配置开启时才列出)。
   private func customizeTools() -> [(id: String, title: String, visible: Bool)] {
-    var tools: [(id: String, title: String, visible: Bool)] = [
-      (id: "clipboard", title: "剪贴板", visible: UserDefaults.hamster.isToolbarToolVisible("clipboard")),
-      (id: "phrases", title: "常用语", visible: UserDefaults.hamster.isToolbarToolVisible("phrases")),
-    ]
-    if keyboardContext.displayKeyboardDismissButton {
-      tools.append((id: "dismiss", title: "收起键盘", visible: UserDefaults.hamster.isToolbarToolVisible("dismiss")))
+    let titles = ["clipboard": "剪贴板", "phrases": "常用语", "dismiss": "收起键盘"]
+    return UserDefaults.hamster.toolbarToolsOrder.compactMap { id in
+      guard let title = titles[id] else { return nil }
+      if id == "dismiss", !keyboardContext.displayKeyboardDismissButton { return nil }
+      return (id: id, title: title, visible: UserDefaults.hamster.isToolbarToolVisible(id))
     }
-    return tools
   }
 
   /// 打开定制工具栏面板 (覆盖在键盘根视图上)。
   private func showToolbarCustomizePanel() {
-    dismissTextListPanel()
-    dismissCustomizePanel()
+    dismissAllPanels()
     guard let container = superview else { return }
     let panel = KeyboardToolbarCustomizePanelView()
     panel.onClose = { [weak self] in self?.dismissCustomizePanel() }
@@ -437,8 +638,13 @@ class KeyboardToolbarView: NibLessView {
       UserDefaults.hamster.setToolbarToolVisible(toolID, visible: visible)
       self?.rebuildToolbarButtons()
     }
+    // 拖拽排序: 面板内已调整顺序并刷新, 这里只保存新顺序并重建工具栏
+    panel.onReorder = { [weak self] orderedIDs in
+      UserDefaults.hamster.toolbarToolsOrder = orderedIDs
+      self?.rebuildToolbarButtons()
+    }
     panel.onReset = { [weak self] in
-      UserDefaults.hamster.toolbarVisibleTools = Set(UserDefaults.toolbarToolAllIDs)
+      UserDefaults.hamster.resetToolbarToolsOrder()
       self?.rebuildToolbarButtons()
       self?.customizePanel?.reload(with: self?.customizeTools() ?? [])
     }
@@ -454,85 +660,99 @@ class KeyboardToolbarView: NibLessView {
     customizePanel = nil
   }
 
-  // MARK: - 剪贴板粘贴提示 chip
+  // MARK: - 粘贴提示行 (微信式: 收起键盘图标 + 文字 + X)
 
   /// 刷新粘贴提示: 仅在未输入 (工具栏显示) 时, 若剪贴板有未提示过的新内容则显示。
   /// iPhone 上复制的和 PC 同步过来的内容都会出现 (同步完成后会收到通知再刷新一次)。
+  /// 只在 UIPasteboard.changeCount 变化时才读一次剪贴板内容 (读会弹"粘贴自xxx"横幅),
+  /// 其余时候只用缓存展示, 绝不重复读; 打字/输入变化时不走这里 (走 showClipboardChipFromCache)。
   func refreshClipboardChip() {
     #if canImport(UIKit)
       guard !commonFunctionBar.isHidden else {
         hideClipboardChip()
         return
       }
-      guard let text = UIPasteboard.general.string,
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      else {
-        hideClipboardChip()
-        return
+      // changeCount 是个整数, 读它不弹横幅; 只有内容真的变了才读一次剪贴板
+      let currentChangeCount = UIPasteboard.general.changeCount
+      if currentChangeCount != lastChipChangeCount {
+        lastChipChangeCount = currentChangeCount
+        let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastReadPasteboardText = (text?.isEmpty == false) ? text : nil
       }
-      // 已粘贴/忽略过的内容不再重复提示, 直到剪贴板换成新内容
-      if text == clipboardChipDismissedText {
-        hideClipboardChip()
-        return
-      }
-      // 已在展示同一内容时不重复布局
-      if text == clipboardChipText, !clipboardChipButton.isHidden {
-        return
-      }
-      clipboardChipText = text
-      // 单行显示, 换行符转空格, 超长由 label 截断
-      let singleLine = text.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
-      clipboardChipButton.setTitle(singleLine, for: .normal)
-      clipboardChipButton.isHidden = false
-      layoutClipboardChip()
+      showClipboardChipFromCache()
     #endif
   }
 
-  /// 按当前工具栏按钮布局, 把 chip 放在右侧空闲处。
-  private func layoutClipboardChip() {
-    NSLayoutConstraint.deactivate(clipboardChipConstraints)
-    clipboardChipConstraints.removeAll()
-    guard !clipboardChipButton.isHidden else { return }
+  /// 用缓存的剪贴板文本展示粘贴提示 (打字/输入变化时调用)。
+  /// 只读 changeCount (整数, 不弹横幅) 判断缓存是否过期:
+  /// 若剪贴板已变, 缓存过期, 不展示旧内容 (等下一次同步/定时检查刷新),
+  /// 绝不在此读剪贴板内容。所以打字时不会再弹"粘贴自xxx"横幅。
+  func showClipboardChipFromCache() {
+    guard !commonFunctionBar.isHidden else {
+      hideClipboardChip()
+      return
+    }
+    #if canImport(UIKit)
+      guard UIPasteboard.general.changeCount == lastChipChangeCount else {
+        hideClipboardChip()
+        return
+      }
+    #endif
+    guard let text = lastReadPasteboardText, !text.isEmpty else {
+      hideClipboardChip()
+      return
+    }
+    // 已粘贴/忽略过的内容不再重复提示, 直到剪贴板换成新内容
+    if ClipboardSyncService.sha256(text) == clipboardChipDismissedHash {
+      hideClipboardChip()
+      return
+    }
+    // 已在展示同一内容时不重复布局
+    if text == clipboardChipText, isPasteRowVisible {
+      return
+    }
+    clipboardChipText = text
+    displayPasteRow(text: text)
+  }
 
-    // chip 左侧锚点: 最后一个可见的左侧按钮之后 (都没有时贴工具栏左沿)
-    let lastLeftButton: UIView? = {
-      if phrasesButton.superview != nil { return phrasesButton }
-      if clipboardButton.superview != nil { return clipboardButton }
-      if iconButton.superview != nil { return iconButton }
-      return nil
-    }()
-    var constraints: [NSLayoutConstraint] = [
-      clipboardChipButton.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
-      clipboardChipButton.heightAnchor.constraint(equalToConstant: 30),
-    ]
-    if let lastLeftButton {
-      constraints.append(clipboardChipButton.leadingAnchor.constraint(greaterThanOrEqualTo: lastLeftButton.trailingAnchor, constant: 8))
-    } else {
-      constraints.append(clipboardChipButton.leadingAnchor.constraint(equalTo: commonFunctionBar.leadingAnchor, constant: 8))
-    }
-    if dismissKeyboardButton.superview != nil {
-      constraints.append(clipboardChipButton.trailingAnchor.constraint(equalTo: dismissKeyboardButton.leadingAnchor, constant: -8))
-    } else {
-      constraints.append(clipboardChipButton.trailingAnchor.constraint(equalTo: commonFunctionBar.trailingAnchor, constant: -8))
-    }
-    clipboardChipConstraints = constraints
-    NSLayoutConstraint.activate(constraints)
+  /// 显示微信式粘贴提示行 (收起键盘图标 + 文字 + X), 并暂时隐藏工具栏其他按钮。
+  private func displayPasteRow(text: String) {
+    // 单行显示, 换行符转空格, 超长由 label 截断
+    let singleLine = text.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+    pasteRowTextButton.setTitle(singleLine, for: .normal)
+    pasteRowView.isHidden = false
+    isPasteRowVisible = true
+    [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = true }
   }
 
   private func hideClipboardChip() {
-    clipboardChipButton.isHidden = true
+    pasteRowView.isHidden = true
+    isPasteRowVisible = false
     clipboardChipText = nil
-    NSLayoutConstraint.deactivate(clipboardChipConstraints)
-    clipboardChipConstraints.removeAll()
+    // 恢复工具栏按钮 (不在布局里的按钮改 isHidden 也没影响)
+    [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = false }
   }
 
-  /// 点 chip: 把剪贴板内容输入到当前输入框, 之后不再重复提示同一内容。
-  @objc private func clipboardChipTapped() {
+  /// 点粘贴提示行左侧收起键盘图标: 收起键盘。
+  @objc private func pasteRowDismissTapped() {
+    actionHandler.handle(.release, on: .dismissKeyboard)
+  }
+
+  /// 点粘贴提示行文字: 把剪贴板内容输入到当前输入框, 之后不再重复提示同一内容。
+  @objc private func pasteRowTextTapped() {
     guard let text = clipboardChipText, !text.isEmpty else { return }
-    clipboardChipDismissedText = text
+    clipboardChipDismissedHash = ClipboardSyncService.sha256(text)
     hideClipboardChip()
     insertPanelText(text)
     UserDefaults.hamster.recordClipboardHistory(text)
+  }
+
+  /// 点粘贴提示行右侧 X: 关闭提示, 相同内容不再重复提示 (直到剪贴板换成新内容)。
+  @objc private func pasteRowCloseTapped() {
+    if let text = clipboardChipText, !text.isEmpty {
+      clipboardChipDismissedHash = ClipboardSyncService.sha256(text)
+    }
+    hideClipboardChip()
   }
 
   /// 同步完成 (上传/下载结束) 后刷新粘贴提示: PC 复制的内容下载到本机后会出现。
@@ -556,8 +776,7 @@ class KeyboardToolbarView: NibLessView {
 
   /// 在键盘根视图上覆盖展示一个文本列表面板
   private func showTextListPanel(title: String, items: [String], onSelect: @escaping (String) -> Void, onDelete: @escaping (Int) -> Void) {
-    dismissTextListPanel()
-    dismissCustomizePanel()
+    dismissAllPanels()
     guard let container = superview else { return }
     let panel = KeyboardTextListPanelView(title: title)
     panel.onSelect = { [weak self] text in

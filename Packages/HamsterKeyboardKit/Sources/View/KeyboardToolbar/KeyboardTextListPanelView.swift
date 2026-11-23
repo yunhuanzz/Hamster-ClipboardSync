@@ -52,7 +52,7 @@ class KeyboardTextListPanelView: NibLessView {
     return label
   }()
 
-  /// 立即同步按钮 (仅剪贴板面板使用): 手动触发一次同步, 跳过 10 秒节流。
+  /// 立即同步按钮 (仅剪贴板面板使用): 手动触发一次同步, 跳过 2 秒节流。
   private lazy var syncNowButton: UIButton = {
     let button = UIButton(type: .system)
     button.setTitle("立即同步", for: .normal)

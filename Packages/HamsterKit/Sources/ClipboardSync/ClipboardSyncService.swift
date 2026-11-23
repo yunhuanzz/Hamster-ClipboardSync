@@ -4,11 +4,13 @@
 //
 //  跨设备剪贴板同步服务（键盘触发式，类似微信输入法的做法）:
 //
-//  触发时机: 键盘每次弹出时 (KeyboardInputViewController.viewWillAppear)。
+//  触发时机: 键盘每次弹出时 (KeyboardInputViewController.viewWillAppear),
+//  以及键盘打开期间每 3 秒一次 (KeyboardToolbarView 的定时器, 键盘隐藏时停止)。
 //  流程:
 //    1. 读取本机剪贴板 (UIPasteboard)，若与上次同步内容不同则上传到服务器;
 //    2. 从服务器下载最新一条剪贴板，若与本机不同则写回本机剪贴板。
-//  因此另一台设备打开键盘时，就能拿到这边复制的内容。
+//  因此另一台设备打开键盘时，就能拿到这边复制的内容；键盘开着时复制
+//  (本机或 PC) 也不用等关闭重开，3 秒内就能同步到。
 //
 //  服务器协议 (SyncClipboard 服务器, 见 https://github.com/Jeric-X/SyncClipboard):
 //    上传: PUT {serverURL}/SyncClipboard.json, Body 为 JSON
@@ -46,8 +48,9 @@ public final class ClipboardSyncService {
   /// 同步完成通知 (主线程发出)。剪贴板面板/工具栏监听它来刷新状态行与粘贴提示。
   public static let didFinishNotification = Notification.Name("dev.fuxiao.app.Hamster.ClipboardSync.didFinish")
 
-  /// 每次键盘弹出后最短同步间隔 (秒), 避免快速切换键盘时频繁请求
-  private static let minSyncInterval: TimeInterval = 10
+  /// 每次键盘弹出后最短同步间隔 (秒), 避免快速切换键盘时频繁请求。
+  /// 2026-11-23 由 10 秒改为 2 秒: 连续复制时两次同步之间不再有几秒的空窗。
+  private static let minSyncInterval: TimeInterval = 2
 
   /// 单次网络请求超时 (秒)
   private static let requestTimeout: TimeInterval = 3
@@ -66,6 +69,17 @@ public final class ClipboardSyncService {
 
   private var lastAttempt: Date?
 
+  /// 是否正在同步 (只在串行队列上读写)。定时器每 3 秒调一次 syncNow(),
+  /// 若上一次同步 (弱网时最多等 4 秒) 还没结束, 新的直接跳过, 不堆积。
+  private var isSyncing = false
+
+  /// 服务最后一次读写剪贴板时的 changeCount (只在串行队列上读写)。
+  /// 读剪贴板会弹"粘贴自xxx"横幅, 所以上传前先比 changeCount:
+  /// 没变说明本机剪贴板还是上次同步过的内容, 直接跳过读取 (不弹横幅);
+  /// 写回服务器内容后也更新它, 避免下次误以为本机剪贴板变了而重读。
+  /// nil 表示从未读写过 (首次同步一定读)。
+  private var lastSeenPasteboardChangeCount: Int?
+
   private init() {}
 
   // MARK: - 入口
@@ -75,20 +89,26 @@ public final class ClipboardSyncService {
   public func syncOnKeyboardAppear() {
     queue.async { [weak self] in
       guard let self = self else { return }
+      guard !self.isSyncing else { return }
       let now = Date()
       if let last = self.lastAttempt, now.timeIntervalSince(last) < Self.minSyncInterval {
         return
       }
+      self.isSyncing = true
+      defer { self.isSyncing = false }
       self.lastAttempt = now
       self.sync()
     }
   }
 
-  /// 立即同步一次 (跳过 10 秒节流), 供剪贴板面板/菜单/设置手动触发。
+  /// 立即同步一次 (跳过 2 秒节流), 供剪贴板面板/菜单/设置/定时器手动触发。
   /// 同样异步执行、失败静默, 不阻塞打字; 完成后发 didFinishNotification。
   public func syncNow() {
     queue.async { [weak self] in
       guard let self = self else { return }
+      guard !self.isSyncing else { return }
+      self.isSyncing = true
+      defer { self.isSyncing = false }
       self.lastAttempt = Date()
       self.sync()
     }
@@ -130,13 +150,20 @@ public final class ClipboardSyncService {
     // 1. 上传本机剪贴板 (若与上次同步内容不同)
     var failureReason: String?
     #if canImport(UIKit)
-      let localText = UIPasteboard.general.string
-      if let localText = localText, !localText.isEmpty, Self.sha256(localText) != lastHash {
-        let result = upload(text: localText, to: endpointURL, username: username, password: password)
-        if result.success {
-          defaults.clipboardSyncLastHash = Self.sha256(localText)
-        } else {
-          failureReason = "上传失败(\(result.shortReason))"
+      // 只有剪贴板真的变了 (changeCount 移动) 才读内容; 没变直接跳过读取,
+      // 否则定时器每 3 秒调一次就会每 3 秒弹一次横幅。
+      // changeCount 是个整数, 读它不弹横幅。
+      let currentChangeCount = UIPasteboard.general.changeCount
+      if currentChangeCount != lastSeenPasteboardChangeCount {
+        lastSeenPasteboardChangeCount = currentChangeCount
+        let localText = UIPasteboard.general.string
+        if let localText = localText, !localText.isEmpty, Self.sha256(localText) != lastHash {
+          let result = upload(text: localText, to: endpointURL, username: username, password: password)
+          if result.success {
+            defaults.clipboardSyncLastHash = Self.sha256(localText)
+          } else {
+            failureReason = "上传失败(\(result.shortReason))"
+          }
         }
       }
     #endif
@@ -150,10 +177,11 @@ public final class ClipboardSyncService {
       let remoteHash = Self.sha256(remoteText)
       if remoteHash != defaults.clipboardSyncLastHash {
         #if canImport(UIKit)
-          let currentLocal = UIPasteboard.general.string
-          if currentLocal != remoteText {
-            UIPasteboard.general.string = remoteText
-          }
+          // 不读本机剪贴板比较 (读会弹横幅): lastHash 已是上次同步内容的哈希,
+          // 与它不同即说明服务器内容是新的, 直接写回即可。
+          UIPasteboard.general.string = remoteText
+          // 写完后 changeCount 会变, 记下新值, 避免下次误以为本机剪贴板变了而重读
+          lastSeenPasteboardChangeCount = UIPasteboard.general.changeCount
         #endif
         defaults.clipboardSyncLastHash = remoteHash
       }
@@ -274,7 +302,8 @@ public final class ClipboardSyncService {
 
   // MARK: - 工具
 
-  static func sha256(_ text: String) -> String {
+  /// 文本的 SHA-256 (公开, 供工具栏用内容哈希去重: 相同内容不再重复提示)。
+  public static func sha256(_ text: String) -> String {
     let digest = SHA256.hash(data: Data(text.utf8))
     return digest.map { String(format: "%02x", $0) }.joined()
   }
