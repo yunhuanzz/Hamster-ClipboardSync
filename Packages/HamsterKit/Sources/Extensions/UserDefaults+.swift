@@ -418,25 +418,25 @@ public extension UserDefaults {
 
   // MARK: - 工具栏自定义 (定制工具栏)
 
-  /// 工具栏工具顺序: 全部工具 id 按显示顺序排列 (包括已隐藏的工具, 这样重新显示时
-  /// 仍回到用户排好的位置)。未设置过时默认 ["clipboard", "phrases", "dismiss"]
+  /// 工具栏工具顺序: 在工具栏上的工具 id 按显示顺序排列 (不在顺序里的工具
+  /// 在定制面板的工具池里, 点按加入)。未设置过时默认 ["clipboard", "phrases", "dismiss"]
   /// (收起键盘在最右, 方便拇指点按)。可见性仍由 toolbarVisibleTools 集合单独控制,
-  /// 旧版的显示/隐藏选择不受影响, 无需迁移。
+  /// 与顺序保持同步 (加入工具栏时置为显示, 从工具栏拿掉时置为隐藏)。
   /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口), 不在列表里。
   var toolbarToolsOrder: [String] {
     get {
       if let array = array(forKey: Self.toolbarToolsOrderKey) as? [String] {
-        // 过滤掉未知 id, 并补上漏掉的已知工具 (以后新增工具时默认显示在末尾)
-        let known = array.filter { Self.toolbarToolAllIDs.contains($0) }
-        let missing = Self.toolbarToolAllIDs.filter { !known.contains($0) }
-        return known + missing
+        // 只过滤未知 id, 不再补齐漏掉的已知工具: 工具栏上有哪些工具
+        // 完全由这个顺序决定, 不在顺序里的工具在定制面板的工具池里
+        // (第 6 轮改成微信式自由拖动后, 新工具默认进池、不自动上栏;
+        // 以前自动补齐会把新工具强行塞进用户工具栏)。
+        return array.filter { Self.toolbarToolAllIDs.contains($0) }
       }
       return Self.toolbarToolDefaultOrder
     }
     set {
-      let ordered = newValue.filter { Self.toolbarToolAllIDs.contains($0) }
-      let missing = Self.toolbarToolAllIDs.filter { !ordered.contains($0) }
-      set(ordered + missing, forKey: Self.toolbarToolsOrderKey)
+      // 同上: 只存调用方给的顺序, 不自动补齐。
+      set(newValue.filter { Self.toolbarToolAllIDs.contains($0) }, forKey: Self.toolbarToolsOrderKey)
     }
   }
 
@@ -456,8 +456,13 @@ public extension UserDefaults {
     set { set(Array(newValue), forKey: Self.toolbarVisibleToolsKey) }
   }
 
-  /// 全部工具栏工具 id
-  static let toolbarToolAllIDs: [String] = ["clipboard", "phrases", "dismiss"]
+  /// 全部工具栏工具 id (与 KeyboardToolbarView.toolbarToolDefinitions() 一一对应):
+  /// 剪贴板、常用语、收起键盘、切换26键/九宫格、立即同步剪贴板、设置、常用语管理。
+  /// "定制工具栏"本身是入口, 不上工具栏。
+  static let toolbarToolAllIDs: [String] = [
+    "clipboard", "phrases", "dismiss", "switchLayout",
+    "syncNow", "settings", "managePhrases",
+  ]
 
   /// 某个工具栏工具是否显示 (未设置过默认显示)
   func isToolbarToolVisible(_ toolID: String) -> Bool {
@@ -487,10 +492,32 @@ public extension UserDefaults {
   /// 恢复默认顺序并全部显示 (工具栏工具 + 菜单格子都恢复)。
   func resetToolbarToolsOrder() {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
-    toolbarVisibleTools = Set(Self.toolbarToolAllIDs)
+    toolbarVisibleTools = Set(Self.toolbarToolDefaultOrder)
     menuVisibleTiles = Set(Self.menuTileAllIDs)
     // 分区也恢复默认 (剪贴板左、常用语左、收起键盘右)。
     removeObject(forKey: Self.toolbarToolZonesKey)
+  }
+
+  /// 一次性迁移 (第 6 轮, 分区模型 -> 自由拖动模型): 把现有的分区顺序
+  /// 展平成一个总顺序 (左组 -> 中组 -> 右组), 组内保持 toolbarToolsOrder
+  /// 的相对顺序, 不丢用户现有的排列。分区键本身留着 (不删已存数据),
+  /// 只是以后不再用。跑过一次后写 flag, 不重复跑。
+  /// 注意: 显式 public——调用方在 HamsterKeyboardKit 模块 (跨模块,
+  /// build #23 就是死在跨模块 internal 上)。
+  public func migrateToolbarToolsOrderFromZonesIfNeeded() {
+    guard object(forKey: Self.toolbarOrderFreeMigrationKey) == nil else { return }
+    set(true, forKey: Self.toolbarOrderFreeMigrationKey)
+    let raw = (array(forKey: Self.toolbarToolsOrderKey) as? [String]) ?? Self.toolbarToolDefaultOrder
+    let zones = toolbarToolZones
+    func rank(_ id: String) -> Int {
+      switch zones[id] ?? Self.toolbarToolDefaultZone[id] ?? .left {
+      case .left: return 0
+      case .center: return 1
+      case .right: return 2
+      }
+    }
+    // sorted(by:) 是稳定排序, 只按分区排, 组内相对顺序原样保留。
+    toolbarToolsOrder = raw.sorted { rank($0) < rank($1) }
   }
 
   // MARK: - 工具栏工具位置分区 (左/中/右)
@@ -712,6 +739,7 @@ extension UserDefaults {
   private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"
   private static let toolbarToolsOrderKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolsOrder"
   private static let toolbarToolZonesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolZones"
+  private static let toolbarOrderFreeMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarOrderMigratedToFreeOrder"
   private static let menuVisibleTilesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.menuVisibleTiles"
 
   // MARK: - 剪贴板历史 / 常用语

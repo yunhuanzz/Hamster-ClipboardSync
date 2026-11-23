@@ -179,6 +179,18 @@ class EmojisKeyboard: NibLessView {
   /// 分类按钮 (与 EmojiPanelCategory.allCases 一一对应)。
   private var categoryButtons: [UIButton] = []
 
+  /// 表情面板高度约束: 面板自身必须有显式高度, 否则输入视图的高度由内容决定,
+  /// 本面板没有内在高度 (collectionView 没有 intrinsicContentSize),
+  /// 切换过来时整个面板会被压到只有标题 + 分类栏, 网格区 0 高、一个表情也显示不出来
+  /// (build #24 图1 的空白面板就是这么来的; 数据本身是全的)。
+  private var heightConstraint: NSLayoutConstraint?
+
+  /// 面板高度 = 标准键盘高度 (4 行 × 行高), 与九宫格/26 键同高。
+  /// Pro Max 竖屏 56×4=224; 横屏/其他机型由配置自适应。
+  private var emojiPanelHeight: CGFloat {
+    KeyboardLayoutConfiguration.standard(for: keyboardContext).rowHeight * 4
+  }
+
   init(actionHandler: KeyboardActionHandler, appearance: KeyboardAppearance, keyboardContext: KeyboardContext, rimeContext: RimeContext) {
     self.actionHandler = actionHandler
     self.appearance = appearance
@@ -188,6 +200,9 @@ class EmojisKeyboard: NibLessView {
     constructViewHierarchy()
     activateViewConstraints()
     setupAppearance()
+    // 网格数据在 init 时已就绪 (smileys 是几百个表情), 这里显式加载一次,
+    // 避免首帧布局时机问题导致 collectionView 迟迟不问 dataSource。
+    reloadGrid()
   }
 
   override func constructViewHierarchy() {
@@ -254,6 +269,19 @@ class EmojisKeyboard: NibLessView {
     for button in categoryButtons {
       button.widthAnchor.constraint(equalToConstant: 30).isActive = true
       button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+    }
+    // 面板自身高度 (见 heightConstraint 注释): 没有它, 输入视图高度由内容决定,
+    // 本面板没有内在高度, 网格会被压到 0 高。
+    heightConstraint = heightAnchor.constraint(equalToConstant: emojiPanelHeight)
+    heightConstraint?.isActive = true
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    // 横竖屏切换时行高会变 (Pro Max 竖屏 56 / 横屏 40), 同步更新面板高度。
+    // 只在变化时改 constant, 避免反复触发布局。
+    if heightConstraint?.constant != emojiPanelHeight {
+      heightConstraint?.constant = emojiPanelHeight
     }
   }
 

@@ -20,8 +20,10 @@ import UIKit
  工具栏左侧菜单 (点左上角图标打开, 仿微信输入法):
  4 列宫格面板, 含剪贴板 / 常用语 / 收起键盘 / 切换26键·九宫格 /
  定制工具栏 / 立即同步 / 设置 / 常用语管理。
- 工具栏按钮可通过"定制工具栏"逐个隐藏/显示、分区 (左/中/右) 并排序
- (顺序与分区存在共享 UserDefaults, 收起键盘默认在右区)。
+ 工具栏按钮: 7 个菜单功能 (除"定制工具栏"本身) 都可上栏,
+ 通过"定制工具栏"自由拖动排序、⊖ 拿掉 (回工具池)、点按加入;
+ 顺序存在共享 UserDefaults (toolbarToolsOrder), 收起键盘默认在最右。
+ 第 6 轮起不再用左/中/右分区 (toolbarToolZones 留着不用, 不删已存数据)。
  */
 class KeyboardToolbarView: NibLessView {
   private let appearance: KeyboardAppearance
@@ -88,6 +90,66 @@ class KeyboardToolbarView: NibLessView {
     button.backgroundColor = style.toolbarButtonBackgroundColor
     button.addTarget(self, action: #selector(phrasesButtonTouchDownAction), for: .touchDown)
     button.addTarget(self, action: #selector(phrasesButtonTouchUpAction), for: .touchUpInside)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchCancel)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchUpOutside)
+    return button
+  }()
+
+  /// 切换 26 键/九宫格 Button (图标与菜单格子一致: keyboard)。
+  lazy var switchLayoutButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "keyboard"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.tintColor = style.toolbarButtonFrontColor
+    button.backgroundColor = style.toolbarButtonBackgroundColor
+    button.addTarget(self, action: #selector(switchLayoutButtonTouchDownAction), for: .touchDown)
+    button.addTarget(self, action: #selector(switchLayoutButtonTouchUpAction), for: .touchUpInside)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchCancel)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchUpOutside)
+    return button
+  }()
+
+  /// 立即同步剪贴板 Button。
+  lazy var syncNowButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "arrow.triangle.2.circlepath"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.tintColor = style.toolbarButtonFrontColor
+    button.backgroundColor = style.toolbarButtonBackgroundColor
+    button.addTarget(self, action: #selector(syncNowButtonTouchDownAction), for: .touchDown)
+    button.addTarget(self, action: #selector(syncNowButtonTouchUpAction), for: .touchUpInside)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchCancel)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchUpOutside)
+    return button
+  }()
+
+  /// 设置 Button (打开 App)。
+  lazy var settingsButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "gear"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.tintColor = style.toolbarButtonFrontColor
+    button.backgroundColor = style.toolbarButtonBackgroundColor
+    button.addTarget(self, action: #selector(settingsButtonTouchDownAction), for: .touchDown)
+    button.addTarget(self, action: #selector(settingsButtonTouchUpAction), for: .touchUpInside)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchCancel)
+    button.addTarget(self, action: #selector(touchCancel), for: .touchUpOutside)
+    return button
+  }()
+
+  /// 常用语管理 Button (键盘内编辑常用语)。
+  lazy var managePhrasesButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "square.and.pencil"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.tintColor = style.toolbarButtonFrontColor
+    button.backgroundColor = style.toolbarButtonBackgroundColor
+    button.addTarget(self, action: #selector(managePhrasesButtonTouchDownAction), for: .touchDown)
+    button.addTarget(self, action: #selector(managePhrasesButtonTouchUpAction), for: .touchUpInside)
     button.addTarget(self, action: #selector(touchCancel), for: .touchCancel)
     button.addTarget(self, action: #selector(touchCancel), for: .touchUpOutside)
     return button
@@ -465,11 +527,51 @@ class KeyboardToolbarView: NibLessView {
     showCommonPhrasesPanel()
   }
 
+  @objc func switchLayoutButtonTouchDownAction() {
+    switchLayoutButton.backgroundColor = style.toolbarButtonPressedBackgroundColor
+  }
+
+  @objc func switchLayoutButtonTouchUpAction() {
+    switchLayoutButton.backgroundColor = style.toolbarButtonBackgroundColor
+    handleMenuSelection("switchLayout")
+  }
+
+  @objc func syncNowButtonTouchDownAction() {
+    syncNowButton.backgroundColor = style.toolbarButtonPressedBackgroundColor
+  }
+
+  @objc func syncNowButtonTouchUpAction() {
+    syncNowButton.backgroundColor = style.toolbarButtonBackgroundColor
+    handleMenuSelection("syncNow")
+  }
+
+  @objc func settingsButtonTouchDownAction() {
+    settingsButton.backgroundColor = style.toolbarButtonPressedBackgroundColor
+  }
+
+  @objc func settingsButtonTouchUpAction() {
+    settingsButton.backgroundColor = style.toolbarButtonBackgroundColor
+    handleMenuSelection("settings")
+  }
+
+  @objc func managePhrasesButtonTouchDownAction() {
+    managePhrasesButton.backgroundColor = style.toolbarButtonPressedBackgroundColor
+  }
+
+  @objc func managePhrasesButtonTouchUpAction() {
+    managePhrasesButton.backgroundColor = style.toolbarButtonBackgroundColor
+    handleMenuSelection("managePhrases")
+  }
+
   @objc func touchCancel() {
     dismissKeyboardButton.backgroundColor = style.toolbarButtonBackgroundColor
     iconButton.backgroundColor = style.toolbarButtonBackgroundColor
     clipboardButton.backgroundColor = style.toolbarButtonBackgroundColor
     phrasesButton.backgroundColor = style.toolbarButtonBackgroundColor
+    switchLayoutButton.backgroundColor = style.toolbarButtonBackgroundColor
+    syncNowButton.backgroundColor = style.toolbarButtonBackgroundColor
+    settingsButton.backgroundColor = style.toolbarButtonBackgroundColor
+    managePhrasesButton.backgroundColor = style.toolbarButtonBackgroundColor
   }
 
   // MARK: - 左上角菜单 (宫格面板, 仿微信输入法)
@@ -634,16 +736,14 @@ class KeyboardToolbarView: NibLessView {
     keyboardContext.setKeyboardType(toNineGrid ? .chineseNineGrid : .chinese(.lowercased))
   }
 
-  // MARK: - 工具栏按钮重建 (定制工具栏, 左/中/右分区)
+  // MARK: - 工具栏按钮重建 (定制工具栏, 自由顺序)
 
-  /// 三个分区的容器: 组内间距固定 12pt, 不均分、不拉伸 (distribution .fill)。
-  /// 左组贴在菜单按钮后, 中组居中, 右组贴右边缘。
-  /// 注意: 图4 图标横跨全栏、间隔巨大的原因不是 UIStackView 均分
-  /// (这里原来根本没有 stack, 是手写约束), 而是"顺序里最后一个工具钉死
-  /// 右边缘"——中间留出整段空白。分区模型取消了这个钉死规则。
-  private lazy var leftToolsStackView: UIStackView = makeToolsStackView()
-  private lazy var centerToolsStackView: UIStackView = makeToolsStackView()
-  private lazy var rightToolsStackView: UIStackView = makeToolsStackView()
+  /// 工具栏工具容器 (单个): 按 toolbarToolsOrder 的自由顺序从左往右紧凑排列,
+  /// 间距固定 12pt, 不均分、不拉伸 (distribution .fill), 不贴右边缘——
+  /// 第 5 轮左/中/右三组 + 收起键盘钉死右边缘的做法, 会让图标横跨全栏、
+  /// 中间留出整段空白 (图4); 位置完全由拖动顺序决定, 拖到中间就是中间。
+  /// 菜单按钮 (iconButton) 固定最左, 不参与排序。
+  private lazy var toolsStackView: UIStackView = makeToolsStackView()
 
   private func makeToolsStackView() -> UIStackView {
     let stack = UIStackView()
@@ -655,16 +755,14 @@ class KeyboardToolbarView: NibLessView {
     return stack
   }
 
-  /// 工具栏按钮布局 (只建一次): 菜单按钮固定最左, 三个分区容器分别贴左/居中/贴右。
-  private var toolsStacksLayoutSetup = false
+  /// 工具栏按钮布局 (只建一次): 菜单按钮固定最左, 工具容器跟在它后面。
+  private var toolsStackLayoutSetup = false
 
-  private func setupToolsStacksLayoutIfNeeded() {
-    guard !toolsStacksLayoutSetup else { return }
-    toolsStacksLayoutSetup = true
+  private func setupToolsStackLayoutIfNeeded() {
+    guard !toolsStackLayoutSetup else { return }
+    toolsStackLayoutSetup = true
     commonFunctionBar.addSubview(iconButton)
-    commonFunctionBar.addSubview(leftToolsStackView)
-    commonFunctionBar.addSubview(centerToolsStackView)
-    commonFunctionBar.addSubview(rightToolsStackView)
+    commonFunctionBar.addSubview(toolsStackView)
     NSLayoutConstraint.activate([
       iconButton.leadingAnchor.constraint(equalTo: commonFunctionBar.leadingAnchor),
       iconButton.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
@@ -672,67 +770,72 @@ class KeyboardToolbarView: NibLessView {
       iconButton.topAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.topAnchor),
       commonFunctionBar.bottomAnchor.constraint(greaterThanOrEqualTo: iconButton.bottomAnchor),
 
-      leftToolsStackView.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 12),
-      leftToolsStackView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
-
-      centerToolsStackView.centerXAnchor.constraint(equalTo: commonFunctionBar.centerXAnchor),
-      centerToolsStackView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
-
-      rightToolsStackView.trailingAnchor.constraint(equalTo: commonFunctionBar.trailingAnchor),
-      rightToolsStackView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+      toolsStackView.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 12),
+      toolsStackView.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
+      // 工具太多时不溢出工具栏 (小屏 7 个工具约 324pt, 仍在栏宽内; 这条是保险)。
+      toolsStackView.trailingAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.trailingAnchor),
     ])
   }
 
-  /// 按分区 + 用户开关/顺序重建工具栏按钮。左侧菜单按钮常驻 (配置开启时),
-  /// 永远在最左, 不参与分区; 剪贴板/常用语/收起键盘按共享 UserDefaults 里的
-  /// 分区 (toolbarToolZones) 分左/中/右三组, 每组内按 toolbarToolsOrder 的
-  /// 相对顺序紧凑排列 (组内 12pt), 中组居中、右组靠右; 只显示开关打开的工具。
+  /// 按自由顺序重建工具栏按钮: 左侧菜单按钮常驻 (配置开启时),
+  /// 永远在最左, 不参与排序; 7 个工具按 toolbarToolsOrder 的顺序
+  /// 在单个容器里从左往右紧凑排列 (12pt), 不分区、不钉死右边缘——
+  /// 位置完全由定制面板里的拖动顺序决定 (收起键盘默认在顺序最末, 即最右)。
   /// (收起键盘永远在工具列表里, 不再受 YAML 的 displayKeyboardDismissButton
   /// 开关影响——那个开关在老用户已保存的配置里是关的, 之前导致收起键盘
   /// 在工具栏上根本不出现, 显隐只由定制开关 toolbarVisibleTools 控制, 默认显示。)
   func rebuildToolbarButtons() {
-    setupToolsStacksLayoutIfNeeded()
-    for stack in [leftToolsStackView, centerToolsStackView, rightToolsStackView] {
-      stack.arrangedSubviews.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview() }
-    }
+    // 一次性迁移: 分区顺序展平成自由顺序 (只跑一次, 见 UserDefaults+)。
+    UserDefaults.hamster.migrateToolbarToolsOrderFromZonesIfNeeded()
+    setupToolsStackLayoutIfNeeded()
+    toolsStackView.arrangedSubviews.forEach { toolsStackView.removeArrangedSubview($0); $0.removeFromSuperview() }
 
-    // 工具 id -> 按钮。
+    // 工具 id -> 按钮 (7 个, 与 toolbarToolDefinitions() 一一对应)。
     func buttonForTool(_ toolID: String) -> UIButton? {
       switch toolID {
       case "clipboard": return clipboardButton
       case "phrases": return phrasesButton
       case "dismiss": return dismissKeyboardButton
+      case "switchLayout": return switchLayoutButton
+      case "syncNow": return syncNowButton
+      case "settings": return settingsButton
+      case "managePhrases": return managePhrasesButton
       default: return nil
       }
     }
 
-    func stackForZone(_ zone: UserDefaults.ToolbarToolZone) -> UIStackView {
-      switch zone {
-      case .left: return leftToolsStackView
-      case .center: return centerToolsStackView
-      case .right: return rightToolsStackView
-      }
-    }
-
-    // 可见工具按分区进组, 组内保持 toolbarToolsOrder 的相对顺序。
+    // 在顺序里的工具按顺序上栏 (可见开关与顺序保持同步, 见定制面板回调)。
     for toolID in UserDefaults.hamster.toolbarToolsOrder where UserDefaults.hamster.isToolbarToolVisible(toolID) {
       guard let button = buttonForTool(toolID) else { continue }
       button.isHidden = isPasteRowVisible
-      stackForZone(UserDefaults.hamster.toolbarToolZone(for: toolID)).addArrangedSubview(button)
+      toolsStackView.addArrangedSubview(button)
     }
 
     iconButton.isHidden = !keyboardContext.displayAppIconButton || isPasteRowVisible
   }
 
-  /// 定制工具栏面板要列出的工具 (按保存的顺序, 包括已隐藏的工具;
-  /// 收起键盘永远在列, 不再受 YAML 的 displayKeyboardDismissButton 开关影响)。
-  /// 每项带当前分区, 面板里可改分区 (左/中/右) 与组内顺序。
-  private func customizeTools() -> [(id: String, title: String, visible: Bool, zone: UserDefaults.ToolbarToolZone)] {
-    let titles = ["clipboard": "剪贴板", "phrases": "常用语", "dismiss": "收起键盘"]
+  /// 统一工具注册表: 全部 7 个可上工具栏的工具 (id, 标题, 图标),
+  /// 即菜单宫格的 8 个格子减去"定制工具栏"本身 (它是入口, 不上栏)。
+  /// 标题/图标复用 menuTiles(), 切换 26 键/九宫格的标题随当前布局而变。
+  private func toolbarToolDefinitions() -> [(id: String, title: String, systemImage: String)] {
+    menuTiles().filter { $0.id != "customize" }
+  }
+
+  /// 定制工具栏面板要列出的"当前工具栏" (按保存的顺序, 只含实际在栏上的工具)。
+  /// 注意: 老模型下藏起来的工具仍在顺序里 (可见开关关着), 这里按可见性过滤,
+  /// 让它回到工具池、可以点按重新上栏, 而不是卡在"当前工具栏"里却不在栏上。
+  private func customizeTools() -> [(id: String, title: String, systemImage: String)] {
+    let definitions = toolbarToolDefinitions()
     return UserDefaults.hamster.toolbarToolsOrder.compactMap { id in
-      guard let title = titles[id] else { return nil }
-      return (id: id, title: title, visible: UserDefaults.hamster.isToolbarToolVisible(id), zone: UserDefaults.hamster.toolbarToolZone(for: id))
+      guard UserDefaults.hamster.isToolbarToolVisible(id) else { return nil }
+      return definitions.first { $0.id == id }
     }
+  }
+
+  /// 定制工具栏面板要列出的"可选工具池" (注册表里不在工具栏上的工具, 点按加入)。
+  private func customizePoolTools() -> [(id: String, title: String, systemImage: String)] {
+    let onToolbar = Set(customizeTools().map { $0.id })
+    return toolbarToolDefinitions().filter { !onToolbar.contains($0.id) }
   }
 
   /// 定制工具栏面板要列出的菜单格子 (按菜单顺序, 包括已隐藏的格子)。
@@ -749,17 +852,39 @@ class KeyboardToolbarView: NibLessView {
     let panel = KeyboardToolbarCustomizePanelView()
     panel.panelBackgroundColor = opaquePanelBackgroundColor
     panel.onClose = { [weak self] in self?.dismissCustomizePanel() }
-    panel.onToggle = { [weak self] toolID, visible in
-      UserDefaults.hamster.setToolbarToolVisible(toolID, visible: visible)
+    // ⊖ 删除: 把工具从工具栏拿掉 (回工具池), 顺序与可见开关同步更新。
+    panel.onRemoveTool = { [weak self] toolID in
+      var order = UserDefaults.hamster.toolbarToolsOrder
+      order.removeAll { $0 == toolID }
+      UserDefaults.hamster.toolbarToolsOrder = order
+      UserDefaults.hamster.setToolbarToolVisible(toolID, visible: false)
       self?.rebuildToolbarButtons()
+      self?.customizePanel?.reload(
+        currentTools: self?.customizeTools() ?? [],
+        poolTools: self?.customizePoolTools() ?? [],
+        tiles: self?.customizeTiles() ?? [])
     }
-    // 分区切换: 保存新分区并重建工具栏, 面板刷新 (同组内的上下移可用性会变)。
-    panel.onZoneChange = { [weak self] toolID, zone in
-      UserDefaults.hamster.setToolbarToolZone(toolID, zone: zone)
+    // 点按加入: 从工具池放回工具栏。新工具插在收起键盘前面 (如果收起键盘
+    // 在栏上), 保证收起键盘仍默认在最右; 否则追加到末尾。拖动可再调位置。
+    // 老模型下藏起来的工具仍在顺序里: 只需重新置为显示, 不用再插一次。
+    panel.onAddTool = { [weak self] toolID in
+      var order = UserDefaults.hamster.toolbarToolsOrder
+      if !order.contains(toolID) {
+        if let dismissIndex = order.firstIndex(of: "dismiss") {
+          order.insert(toolID, at: dismissIndex)
+        } else {
+          order.append(toolID)
+        }
+        UserDefaults.hamster.toolbarToolsOrder = order
+      }
+      UserDefaults.hamster.setToolbarToolVisible(toolID, visible: true)
       self?.rebuildToolbarButtons()
-      self?.customizePanel?.reload(with: self?.customizeTools() ?? [], tiles: self?.customizeTiles() ?? [])
+      self?.customizePanel?.reload(
+        currentTools: self?.customizeTools() ?? [],
+        poolTools: self?.customizePoolTools() ?? [],
+        tiles: self?.customizeTiles() ?? [])
     }
-    // 拖拽/上下移排序: 面板内已调整顺序并刷新, 这里只保存新顺序并重建工具栏
+    // 拖拽排序: 面板内已调整顺序并刷新, 这里只保存新顺序并重建工具栏
     panel.onReorder = { [weak self] orderedIDs in
       UserDefaults.hamster.toolbarToolsOrder = orderedIDs
       self?.rebuildToolbarButtons()
@@ -770,12 +895,15 @@ class KeyboardToolbarView: NibLessView {
     panel.onReset = { [weak self] in
       UserDefaults.hamster.resetToolbarToolsOrder()
       self?.rebuildToolbarButtons()
-      self?.customizePanel?.reload(with: self?.customizeTools() ?? [], tiles: self?.customizeTiles() ?? [])
+      self?.customizePanel?.reload(
+        currentTools: self?.customizeTools() ?? [],
+        poolTools: self?.customizePoolTools() ?? [],
+        tiles: self?.customizeTiles() ?? [])
     }
     panel.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(panel)
     panel.fillSuperview()
-    panel.reload(with: customizeTools(), tiles: customizeTiles())
+    panel.reload(currentTools: customizeTools(), poolTools: customizePoolTools(), tiles: customizeTiles())
     customizePanel = panel
   }
 

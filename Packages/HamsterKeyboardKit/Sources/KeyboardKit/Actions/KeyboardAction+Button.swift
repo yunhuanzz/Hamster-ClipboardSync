@@ -67,7 +67,11 @@ public extension KeyboardAction {
       return "空格"
     case .returnLastKeyboard: return "返回"
     case .symbol(let symbol), .symbolOfDark(let symbol): return symbol.char
-    case .chineseNineGrid(let symbol): return symbol.char
+    case .chineseNineGrid(let symbol):
+      // 九宫格左上角键: 内部符号是 "@/." (点按输入 "@", 见 standardReleaseAction),
+      // 但微信同位置显示 "@#"。只改显示文本, 不改 Symbol 本身, 点按/上滑行为不变。
+      if symbol.char == "@/." { return "@#" }
+      return symbol.char
     case .cleanSpellingArea: return "重输"
     case .delimiter: return "分词"
     default: return nil

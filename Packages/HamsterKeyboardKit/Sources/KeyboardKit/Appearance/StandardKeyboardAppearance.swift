@@ -636,7 +636,7 @@ extension KeyboardAction {
     if isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
       return HamsterUIColor.shared.standardDarkButtonBackground(for: context)
     }
-    if isPrimaryAction { return UIColor.systemBlue }
+    if isPrimaryAction { return UIColor(red: 0x07 / 255.0, green: 0xC1 / 255.0, blue: 0x60 / 255.0, alpha: 1) } // 微信绿 #07C160 (回车/前往键, 原 systemBlue)
     if isUppercasedShiftAction { return HamsterUIColor.shared.standardButtonBackground(for: context) }
     return HamsterUIColor.shared.standardButtonBackground(for: context)
   }

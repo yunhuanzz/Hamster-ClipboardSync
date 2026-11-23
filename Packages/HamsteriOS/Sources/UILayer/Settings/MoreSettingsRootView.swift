@@ -7,8 +7,11 @@
 //  已覆盖的项 (常用语 / 我的词组 / 按键效果 / 剪贴板同步一节 /
 //  收藏的快捷操作一节)。
 //  行渲染方式与旧的设置首页表格一致 (navigation/toggle/textField/
-//  button/pullDown/settings/step), 点按行通过 item 自带的
-//  navigationAction 跳转 (SettingsTableViewCell 内部处理)。
+//  button/pullDown/settings/step); 点按跳转在下面的 didSelectRowAt 里
+//  调 setting.navigationAction (与 KeyboardSettingsRootView /
+//  RimeRootView / AboutRootView 同一写法)。注意: SettingTableViewCell
+//  是普通 UITableViewCell, 内部不处理点按——第 5 轮这里只 deselect
+//  不调 navigationAction, 是整页点不动的断点。
 //
 
 import Combine
@@ -110,7 +113,10 @@ extension MoreSettingsRootView: UITableViewDataSource {
       return cell
     case .step:
       let cell = tableView.dequeueReusableCell(withIdentifier: StepperTableViewCell.identifier, for: indexPath)
-      guard let cell = cell as? SettingTableViewCell else { return cell }
+      // 注意: StepperTableViewCell 继承 NibLessTableViewCell, 不是
+      // SettingTableViewCell 的子类, 以前这里强转 SettingTableViewCell
+      // 恒失败, step 行直接返回未配置的空 cell。
+      guard let cell = cell as? StepperTableViewCell else { return cell }
       cell.updateWithSettingItem(setting)
       return cell
     }
@@ -120,5 +126,15 @@ extension MoreSettingsRootView: UITableViewDataSource {
 extension MoreSettingsRootView: UITableViewDelegate {
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
     tableView.deselectRow(at: indexPath, animated: true)
+    // 整页点不动的断点就在这里: 第 5 轮只 deselect, 从不调 navigationAction。
+    // More 页的项本身都带 navigationAction (输入方案设置 -> .inputSchema,
+    // Wi-Fi上传方案 -> .uploadInputSchema, 文件管理 -> .finder,
+    // 键盘设置 -> .keyboardSettings, 键盘配色 -> .colorSchema,
+    // iCloud同步 -> .iCloud, 软件备份 -> .backup, RIME -> .rime,
+    // 关于 -> .about), MainViewController.navigationResponse 也全都处理,
+    // 只差这一行调用。非 navigation 行 (toggle/textField/button) 的
+    // navigationAction 是 nil, 调了也没事。
+    let setting = settingsViewModel.moreSections[indexPath.section].items[indexPath.row]
+    setting.navigationAction?()
   }
 }
