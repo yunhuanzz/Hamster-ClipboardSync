@@ -142,7 +142,7 @@ public extension KeyboardLayoutConfiguration
    您可以更改该值以影响全局默认值。
    */
   static var standardPad = KeyboardLayoutConfiguration(
-    buttonCornerRadius: 5,
+    buttonCornerRadius: 8,
     buttonInsets: .horizontal(6, vertical: 4),
     rowHeight: standardPadRowHeight)
 
@@ -226,7 +226,7 @@ public extension KeyboardLayoutConfiguration
    您可以更改该值以影响全局默认值。
    */
   static var standardPhone = KeyboardLayoutConfiguration(
-    buttonCornerRadius: 5,
+    buttonCornerRadius: 8,
     buttonInsets: .horizontal(3, vertical: 6),
     rowHeight: standardPhoneRowHeight)
 
@@ -247,7 +247,7 @@ public extension KeyboardLayoutConfiguration
    您可以更改该值以影响全局默认值。
    */
   static var standardPhoneLandscape = KeyboardLayoutConfiguration(
-    buttonCornerRadius: 5,
+    buttonCornerRadius: 8,
     buttonInsets: .horizontal(3, vertical: 4),
     rowHeight: standardPhoneLandscapeRowHeight)
 
@@ -268,7 +268,7 @@ public extension KeyboardLayoutConfiguration
    您可以更改该值以影响全局默认值。
    */
   static var standardPhoneProMax = KeyboardLayoutConfiguration(
-    buttonCornerRadius: 5,
+    buttonCornerRadius: 8,
     buttonInsets: .horizontal(3, vertical: 5.5),
     rowHeight: standardPhoneProMaxRowHeight)
 
@@ -289,7 +289,7 @@ public extension KeyboardLayoutConfiguration
    您可以更改该值以影响全局默认值。
    */
   static var standardPhoneProMaxLandscape = KeyboardLayoutConfiguration(
-    buttonCornerRadius: 5,
+    buttonCornerRadius: 8,
     buttonInsets: .horizontal(3, vertical: 4),
     rowHeight: standardPhoneProMaxLandscapeRowHeight)
 

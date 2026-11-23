@@ -345,4 +345,12 @@ extension HamsterAppDependencyContainer: SubViewControllerFactory {
     )
     return aboutViewController
   }
+
+  func makeCommonPhrasesViewController() -> CommonPhrasesViewController {
+    CommonPhrasesViewController()
+  }
+
+  func makeCustomPhrasesViewController() -> CustomPhrasesViewController {
+    CustomPhrasesViewController()
+  }
 }

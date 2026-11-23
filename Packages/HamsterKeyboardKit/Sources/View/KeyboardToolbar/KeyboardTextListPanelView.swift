@@ -19,6 +19,10 @@ class KeyboardTextListPanelView: NibLessView {
   var onDelete: ((Int) -> Void)?
   /// 关闭按钮回调
   var onClose: (() -> Void)?
+  /// 点"立即同步"时的回调 (仅剪贴板面板使用)
+  var onSyncNow: (() -> Void)?
+  /// 同步完成时的回调 (仅剪贴板面板使用, 供调用方刷新列表)
+  var onSyncFinished: (() -> Void)?
 
   private var items: [String] = []
 
@@ -38,6 +42,35 @@ class KeyboardTextListPanelView: NibLessView {
     button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
     return button
   }()
+
+  /// 同步状态文字 (仅剪贴板面板使用): 显示最近一次同步结果, 如 "13:20 同步成功"。
+  private lazy var statusLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 12)
+    label.textColor = .secondaryLabel
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+
+  /// 立即同步按钮 (仅剪贴板面板使用): 手动触发一次同步, 跳过 10 秒节流。
+  private lazy var syncNowButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.setTitle("立即同步", for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.addTarget(self, action: #selector(syncNowTapped), for: .touchUpInside)
+    return button
+  }()
+
+  /// 同步状态行容器 (仅剪贴板面板使用)。隐藏时高度为 0, 不占位置。
+  private lazy var syncRowView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    return view
+  }()
+
+  private var syncRowHeightConstraint: NSLayoutConstraint?
 
   private lazy var tableView: UITableView = {
     let tableView = UITableView(frame: .zero, style: .plain)
@@ -69,16 +102,28 @@ class KeyboardTextListPanelView: NibLessView {
 
     let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
     tableView.addGestureRecognizer(longPress)
+
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(syncDidFinish),
+      name: ClipboardSyncService.didFinishNotification, object: nil)
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 
   override func constructViewHierarchy() {
     addSubview(titleLabel)
     addSubview(closeButton)
+    syncRowView.addSubview(statusLabel)
+    syncRowView.addSubview(syncNowButton)
+    addSubview(syncRowView)
     addSubview(tableView)
     addSubview(emptyLabel)
   }
 
   override func activateViewConstraints() {
+    syncRowHeightConstraint = syncRowView.heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
       titleLabel.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
       titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -86,7 +131,19 @@ class KeyboardTextListPanelView: NibLessView {
       closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 
-      tableView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+      syncRowView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+      syncRowView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      syncRowView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+      syncRowHeightConstraint!,
+
+      statusLabel.leadingAnchor.constraint(equalTo: syncRowView.leadingAnchor),
+      statusLabel.centerYAnchor.constraint(equalTo: syncRowView.centerYAnchor),
+      statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: syncNowButton.leadingAnchor, constant: -8),
+
+      syncNowButton.trailingAnchor.constraint(equalTo: syncRowView.trailingAnchor),
+      syncNowButton.centerYAnchor.constraint(equalTo: syncRowView.centerYAnchor),
+
+      tableView.topAnchor.constraint(equalTo: syncRowView.bottomAnchor, constant: 8),
       tableView.leadingAnchor.constraint(equalTo: leadingAnchor),
       tableView.trailingAnchor.constraint(equalTo: trailingAnchor),
       tableView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -107,8 +164,31 @@ class KeyboardTextListPanelView: NibLessView {
     tableView.reloadData()
   }
 
+  /// 显示同步状态行 (仅剪贴板面板调用): 左侧最近一次同步结果, 右侧"立即同步"按钮。
+  func showSyncRow(statusText: String) {
+    syncRowView.isHidden = false
+    syncRowHeightConstraint?.constant = 28
+    setStatusText(statusText)
+  }
+
+  /// 更新同步状态文字 (同步完成通知到达时调用)。
+  func setStatusText(_ text: String) {
+    statusLabel.text = text.isEmpty ? "未同步过" : text
+  }
+
   @objc private func closeTapped() {
     onClose?()
+  }
+
+  @objc private func syncNowTapped() {
+    onSyncNow?()
+  }
+
+  /// 同步完成: 刷新状态文字, 并通知调用方刷新列表 (下载的新内容可能已写入剪贴板)。
+  @objc private func syncDidFinish() {
+    guard !syncRowView.isHidden else { return }
+    setStatusText(UserDefaults.hamster.clipboardSyncLastStatusText)
+    onSyncFinished?()
   }
 
   @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {

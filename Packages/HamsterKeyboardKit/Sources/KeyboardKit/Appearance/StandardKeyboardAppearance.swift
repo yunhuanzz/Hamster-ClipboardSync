@@ -279,8 +279,8 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
       swipeForegroundColor: UIColor.secondaryLabel,
       font: buttonFont(for: action),
       swipeFont: swipeFont,
-      // cornerRadius: buttonCornerRadius(for: action),
-      cornerRadius: 5,
+      // 圆角与 KeyboardLayoutConfiguration 的配置保持一致 (微信风格: 8pt 圆角)
+      cornerRadius: buttonCornerRadius(for: action),
       border: buttonBorderStyle(for: action),
       shadow: buttonShadowStyle(for: action)
     )

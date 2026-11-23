@@ -294,6 +294,14 @@ public class KeyboardContext: ObservableObject {
     // 初始键盘类型
     self.keyboardType = selectKeyboard
 
+    // 用户通过键盘内菜单切换过九宫格/26键后, 以保存的选择为准 (持久化, 下次打开键盘保持)。
+    // 仅当配置的主键盘本身就是中文主键盘 (26键/九宫格) 时才覆盖, 自定义键盘等不受影响。
+    if let isNineGrid = UserDefaults.hamster.chinesePrimaryKeyboardIsNineGrid,
+      selectKeyboard.isChinesePrimaryKeyboard || selectKeyboard.isChineseNineGrid
+    {
+      self.keyboardType = isNineGrid ? .chineseNineGrid : .chinese(.lowercased)
+    }
+
     self.handleInputModeBuilder = { [unowned controller] from, with in
       controller.handleInputModeList(from: from, with: with)
     }
@@ -490,7 +498,12 @@ public class KeyboardContext: ObservableObject {
 
   /// 划动阈值
   var distanceThreshold: CGFloat {
-    CGFloat(hamsterConfiguration?.swipe?.distanceThreshold ?? 20)
+    // 最小划动距离下限 32pt (2026-11-23): 旧默认值 20pt 时, 点按时手指轻微上飘
+    // 就会误触上滑 (误输数字); 32pt 约为 3/4 个键高, 需有意的上滑才触发。
+    // 配置中设了更大的值时以配置为准; 配置值小于 32 时按 32 执行。
+    // 注意: 应用只在首次运行时从 hamster.yaml 读配置, 老用户配置里的旧值 20
+    // 不会自动更新, 所以下限必须在代码里 enforced, 只改 YAML 不够。
+    max(32, CGFloat(hamsterConfiguration?.swipe?.distanceThreshold ?? 32))
   }
 
   /// 滑动角度正切阈值

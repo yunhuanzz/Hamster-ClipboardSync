@@ -6,6 +6,7 @@
 //
 
 import Combine
+import HamsterKit
 import HamsterUIKit
 import ProgressHUD
 import UIKit
@@ -43,6 +44,10 @@ public class SettingsRootView: NibLessView {
 
     setupView()
     combine()
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 
   func setupView() {
@@ -93,6 +98,16 @@ public class SettingsRootView: NibLessView {
         tableReload()
       }
       .store(in: &subscriptions)
+
+    // 剪贴板同步完成 (上传/下载结束) 后刷新表格, 让"上次同步"状态行实时更新
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(syncDidFinish),
+      name: ClipboardSyncService.didFinishNotification, object: nil)
+  }
+
+  /// 剪贴板同步完成 (上传/下载结束) 后刷新表格
+  @objc private func syncDidFinish() {
+    tableReload()
   }
 }
 

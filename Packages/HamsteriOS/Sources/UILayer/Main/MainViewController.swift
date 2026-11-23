@@ -21,6 +21,8 @@ protocol SubViewControllerFactory {
   func makeBackupViewController() -> BackupViewController
   func makeAboutViewController() -> AboutViewController
   func makeRimeViewController() -> RimeViewController
+  func makeCommonPhrasesViewController() -> CommonPhrasesViewController
+  func makeCustomPhrasesViewController() -> CustomPhrasesViewController
 }
 
 open class MainViewController: UISplitViewController {
@@ -57,6 +59,12 @@ open class MainViewController: UISplitViewController {
 
   private lazy var aboutViewController: AboutViewController
     = subViewControllerFactory.makeAboutViewController()
+
+  private lazy var commonPhrasesViewController: CommonPhrasesViewController
+    = subViewControllerFactory.makeCommonPhrasesViewController()
+
+  private lazy var customPhrasesViewController: CustomPhrasesViewController
+    = subViewControllerFactory.makeCustomPhrasesViewController()
 
   private lazy var primaryNavigationViewController: UINavigationController = {
     let vc = UINavigationController(rootViewController: settingsViewController)
@@ -159,6 +167,10 @@ extension MainViewController {
       presentAppleCloudViewController()
     case .about:
       presentAboutViewController()
+    case .commonPhrases:
+      presentCommonPhrasesViewController()
+    case .customPhrases:
+      presentCustomPhrasesViewController()
     case .main:
       presentMainViewController()
     default:
@@ -208,6 +220,14 @@ extension MainViewController {
 
   func presentAboutViewController() {
     presentViewController(aboutViewController)
+  }
+
+  func presentCommonPhrasesViewController() {
+    presentViewController(commonPhrasesViewController)
+  }
+
+  func presentCustomPhrasesViewController() {
+    presentViewController(customPhrasesViewController)
   }
 
   private func presentViewController(_ vc: UIViewController) {

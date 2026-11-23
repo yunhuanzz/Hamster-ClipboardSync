@@ -20,6 +20,9 @@
 //    服务器只需保存"最新一条"剪贴板内容即可, 仓库 Tools/ 下附了一个
 //    极简参考服务端 (clipboard-sync-server.py, 仅支持纯文本 PUT, 与
 //    真实 SyncClipboard 服务器协议不同, 仅供本地测试)。
+//    注意 (2026-11-23 实测): 请求地址必须是 {serverURL}/SyncClipboard.json,
+//    直接请求根路径 PUT 会返回 405, GET 根路径只返回 "Server is running."
+//    (会被误当成剪贴板内容)。syncEndpointURL(for:) 负责补全该路径。
 //
 //  注意:
 //  - 需要键盘开启"允许完全访问" (Hamster 已在 Info.plist 中声明
@@ -40,11 +43,23 @@ import Foundation
 public final class ClipboardSyncService {
   public static let shared = ClipboardSyncService()
 
+  /// 同步完成通知 (主线程发出)。剪贴板面板/工具栏监听它来刷新状态行与粘贴提示。
+  public static let didFinishNotification = Notification.Name("dev.fuxiao.app.Hamster.ClipboardSync.didFinish")
+
   /// 每次键盘弹出后最短同步间隔 (秒), 避免快速切换键盘时频繁请求
   private static let minSyncInterval: TimeInterval = 10
 
   /// 单次网络请求超时 (秒)
   private static let requestTimeout: TimeInterval = 3
+
+  /// 同步端点路径: 真实 SyncClipboard 服务器固定为 /SyncClipboard.json
+  private static let syncEndpointPath = "SyncClipboard.json"
+
+  private static let statusTimeFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm"
+    return formatter
+  }()
 
   /// 串行队列, 避免并发读写剪贴板
   private let queue = DispatchQueue(label: "dev.fuxiao.app.Hamster.ClipboardSync", qos: .utility)
@@ -69,51 +84,137 @@ public final class ClipboardSyncService {
     }
   }
 
+  /// 立即同步一次 (跳过 10 秒节流), 供剪贴板面板/菜单/设置手动触发。
+  /// 同样异步执行、失败静默, 不阻塞打字; 完成后发 didFinishNotification。
+  public func syncNow() {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      self.lastAttempt = Date()
+      self.sync()
+    }
+  }
+
+  /// 真实 SyncClipboard 服务器的剪贴板端点固定为 {base}/SyncClipboard.json。
+  /// 兼容用户输入: 末尾斜杠会被忽略; 已带 SyncClipboard.json 的地址不再重复追加。
+  static func syncEndpointURL(for baseURL: URL) -> URL {
+    if baseURL.lastPathComponent == syncEndpointPath {
+      return baseURL
+    }
+    return baseURL.appendingPathComponent(syncEndpointPath)
+  }
+
   // MARK: - 同步主流程
 
   private func sync() {
     let defaults = UserDefaults.hamster
-    guard defaults.clipboardSyncEnabled else { return }
+    guard defaults.clipboardSyncEnabled else {
+      recordStatus("未启用")
+      notifyFinished()
+      return
+    }
     guard let serverURL = URL(string: defaults.clipboardSyncServerURL.trimmingCharacters(in: .whitespacesAndNewlines)),
       serverURL.scheme == "http" || serverURL.scheme == "https"
-    else { return }
+    else {
+      recordStatus("服务器地址无效")
+      notifyFinished()
+      return
+    }
 
+    // 真实 SyncClipboard 服务器要求请求 /SyncClipboard.json, 不能直接请求根路径
+    // (根路径 PUT 返回 405, GET 只返回 "Server is running.")。
+    let endpointURL = Self.syncEndpointURL(for: serverURL)
     let username = defaults.clipboardSyncUsername
     let password = defaults.clipboardSyncPassword
     let lastHash = defaults.clipboardSyncLastHash
 
     // 1. 上传本机剪贴板 (若与上次同步内容不同)
+    var failureReason: String?
     #if canImport(UIKit)
       let localText = UIPasteboard.general.string
       if let localText = localText, !localText.isEmpty, Self.sha256(localText) != lastHash {
-        if upload(text: localText, to: serverURL, username: username, password: password) {
+        let result = upload(text: localText, to: endpointURL, username: username, password: password)
+        if result.success {
           defaults.clipboardSyncLastHash = Self.sha256(localText)
+        } else {
+          failureReason = "上传失败(\(result.shortReason))"
         }
       }
     #endif
 
     // 2. 下载服务器最新内容 (若与本机不同则写回)
-    guard let remoteText = download(from: serverURL, username: username, password: password),
-      !remoteText.isEmpty
-    else { return }
-    let remoteHash = Self.sha256(remoteText)
-    guard remoteHash != defaults.clipboardSyncLastHash else { return }
-
-    #if canImport(UIKit)
-      let currentLocal = UIPasteboard.general.string
-      if currentLocal != remoteText {
-        UIPasteboard.general.string = remoteText
+    let downloadResult = download(from: endpointURL, username: username, password: password)
+    if failureReason == nil, !downloadResult.success {
+      failureReason = "下载失败(\(downloadResult.shortReason))"
+    }
+    if let remoteText = downloadResult.text, !remoteText.isEmpty {
+      let remoteHash = Self.sha256(remoteText)
+      if remoteHash != defaults.clipboardSyncLastHash {
+        #if canImport(UIKit)
+          let currentLocal = UIPasteboard.general.string
+          if currentLocal != remoteText {
+            UIPasteboard.general.string = remoteText
+          }
+        #endif
+        defaults.clipboardSyncLastHash = remoteHash
       }
-    #endif
-    defaults.clipboardSyncLastHash = remoteHash
+    }
+
+    if let failureReason {
+      recordStatus(failureReason)
+    } else {
+      recordStatus("同步成功")
+    }
+    notifyFinished()
+  }
+
+  /// 记录最近一次同步结果 (时间 + 成功/失败 + 简短原因), 供剪贴板面板与设置页展示。
+  /// 失败只记录状态, 绝不弹框、不阻塞打字。
+  private func recordStatus(_ result: String) {
+    let time = Self.statusTimeFormatter.string(from: Date())
+    UserDefaults.hamster.clipboardSyncLastStatusText = "\(time) \(result)"
+  }
+
+  /// 同步结束 (无论成功失败) 后在主线程发通知, 供界面刷新状态行与粘贴提示。
+  private func notifyFinished() {
+    DispatchQueue.main.async {
+      NotificationCenter.default.post(name: Self.didFinishNotification, object: nil)
+    }
   }
 
   // MARK: - 网络
 
+  /// 单次网络请求的结果 (成功与否 + 文本 + 简短失败原因, 供状态行展示)。
+  private struct NetworkResult {
+    var success: Bool
+    var text: String?
+    var statusCode: Int?
+    var error: NSError?
+
+    /// 简短失败原因, 如 "HTTP 405"、"无网络"、"超时"。
+    var shortReason: String {
+      if let statusCode, !(200...299).contains(statusCode) {
+        return "HTTP \(statusCode)"
+      }
+      if let error {
+        switch error.code {
+        case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
+          return "无网络"
+        case NSURLErrorTimedOut:
+          return "超时"
+        case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost, NSURLErrorDNSLookupFailed:
+          return "找不到服务器"
+        default:
+          return "网络错误"
+        }
+      }
+      return "未知错误"
+    }
+  }
+
   /// PUT SyncClipboard.json (JSON) 到服务器, 成功返回 true。
   /// 真实 SyncClipboard 服务器只接受 JSON (纯文本会被 415 拒绝),
   /// body 格式: {"type":"Text","text":"...","hasData":false}
-  private func upload(text: String, to url: URL, username: String, password: String) -> Bool {
+  private func upload(text: String, to url: URL, username: String, password: String) -> NetworkResult {
     var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
     request.httpMethod = "PUT"
     let payload: [String: Any] = ["type": "Text", "text": text, "hasData": false]
@@ -122,37 +223,42 @@ public final class ClipboardSyncService {
     applyBasicAuth(to: &request, username: username, password: password)
 
     let semaphore = DispatchSemaphore(value: 0)
-    var succeeded = false
-    URLSession.shared.dataTask(with: request) { _, response, _ in
-      if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
-        succeeded = true
+    var result = NetworkResult(success: false, text: nil, statusCode: nil, error: nil)
+    URLSession.shared.dataTask(with: request) { _, response, error in
+      if let http = response as? HTTPURLResponse {
+        result.statusCode = http.statusCode
+        result.success = (200...299).contains(http.statusCode)
       }
+      result.error = error as NSError?
       semaphore.signal()
     }.resume()
     _ = semaphore.wait(timeout: .now() + Self.requestTimeout + 1)
-    return succeeded
+    return result
   }
 
   /// GET 服务器最新剪贴板 (纯文本, 或 {"text": "..."} JSON)
-  private func download(from url: URL, username: String, password: String) -> String? {
+  private func download(from url: URL, username: String, password: String) -> NetworkResult {
     var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
     request.httpMethod = "GET"
     applyBasicAuth(to: &request, username: username, password: password)
 
     let semaphore = DispatchSemaphore(value: 0)
-    var result: String?
-    URLSession.shared.dataTask(with: request) { data, response, _ in
+    var result = NetworkResult(success: false, text: nil, statusCode: nil, error: nil)
+    URLSession.shared.dataTask(with: request) { data, response, error in
       defer { semaphore.signal() }
-      guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-        let data = data, !data.isEmpty
-      else { return }
+      if let http = response as? HTTPURLResponse {
+        result.statusCode = http.statusCode
+        result.success = (200...299).contains(http.statusCode)
+      }
+      result.error = error as NSError?
+      guard result.success, let data = data, !data.isEmpty else { return }
       // 先尝试 JSON {"text": "..."}, 否则按纯文本处理
       if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
         let text = json["text"] as? String
       {
-        result = text
+        result.text = text
       } else {
-        result = String(data: data, encoding: .utf8)
+        result.text = String(data: data, encoding: .utf8)
       }
     }.resume()
     _ = semaphore.wait(timeout: .now() + Self.requestTimeout + 1)

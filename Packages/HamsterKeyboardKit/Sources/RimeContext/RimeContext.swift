@@ -233,6 +233,16 @@ public extension RimeContext {
       }
     }
 
+    // 自定义词组 (custom_phrase.txt) 永远保留: 部署前先从 App Group 拷回沙盒,
+    // 不受 overrideDictFiles 影响, 否则用户在"我的词组"里加的词会被部署覆盖。
+    // 文件不存在时 copyAppGroupUserDict 是空操作, 不会抛错。
+    do {
+      try FileManager.copyAppGroupUserDict(["custom_phrase[.]txt$"])
+    } catch {
+      Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
+      throw error
+    }
+
     // 判断是否需要覆盖键盘词库文件，如果为否，则先copy键盘词库文件至应用目录
     if let overrideDictFiles = configuration.rime?.overrideDictFiles, overrideDictFiles == false {
       let regex = configuration.rime?.regexOnOverrideDictFiles ?? []
@@ -346,6 +356,15 @@ public extension RimeContext {
     // 检测文件目录是否存在不存在，新建
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxSharedSupportDirectory)
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxUserDataDirectory)
+
+    // 自定义词组 (custom_phrase.txt) 永远保留, 不受 overrideDictFiles 影响。
+    // 文件不存在时 copyAppGroupUserDict 是空操作, 不会抛错。
+    do {
+      try FileManager.copyAppGroupUserDict(["custom_phrase[.]txt$"])
+    } catch {
+      Logger.statistics.error("RIME deploy error \(error.localizedDescription)")
+      throw error
+    }
 
     // 判断是否需要覆盖键盘词库文件，如果为否，则先copy键盘词库文件至应用目录
     if let overrideDictFiles = configuration.rime?.overrideDictFiles, overrideDictFiles == false {

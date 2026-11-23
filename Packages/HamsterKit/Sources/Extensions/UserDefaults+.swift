@@ -338,6 +338,69 @@ public extension UserDefaults {
     set { set(newValue, forKey: Self.clipboardSyncLastHashKey) }
   }
 
+  /// 最近一次同步结果, 如 "13:20 同步成功" / "13:20 上传失败(HTTP 405)"。
+  /// 由 ClipboardSyncService 在每次同步结束时写入, 供剪贴板面板与设置页展示,
+  /// 同步不再是"静默"的; 未同步过时为空字符串。
+  var clipboardSyncLastStatusText: String {
+    get { string(forKey: Self.clipboardSyncLastStatusTextKey) ?? "" }
+    set { set(newValue, forKey: Self.clipboardSyncLastStatusTextKey) }
+  }
+
+  // MARK: - 中文主键盘布局 (九宫格 / 26键)
+
+  /// 用户通过键盘内菜单切换过的中文主键盘布局: true=九宫格, false=26键。
+  /// nil 表示从未切换过, 此时以配置 (hamster.yaml 的 useKeyboardType) 为准。
+  /// 切换后持久化, 下次打开键盘保持上次的选择。
+  var chinesePrimaryKeyboardIsNineGrid: Bool? {
+    get {
+      if object(forKey: Self.chinesePrimaryKeyboardIsNineGridKey) != nil {
+        return bool(forKey: Self.chinesePrimaryKeyboardIsNineGridKey)
+      }
+      return nil
+    }
+    set {
+      if let newValue {
+        set(newValue, forKey: Self.chinesePrimaryKeyboardIsNineGridKey)
+      } else {
+        removeObject(forKey: Self.chinesePrimaryKeyboardIsNineGridKey)
+      }
+    }
+  }
+
+  // MARK: - 工具栏自定义 (定制工具栏)
+
+  /// 工具栏工具可见性: 存放"显示"的工具 id 集合。
+  /// 未设置过时全部显示; 工具 id: "clipboard"(剪贴板)、"phrases"(常用语)、"dismiss"(收起键盘)。
+  /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口)。
+  var toolbarVisibleTools: Set<String> {
+    get {
+      if let array = array(forKey: Self.toolbarVisibleToolsKey) as? [String] {
+        return Set(array)
+      }
+      return Set(Self.toolbarToolAllIDs)
+    }
+    set { set(Array(newValue), forKey: Self.toolbarVisibleToolsKey) }
+  }
+
+  /// 全部工具栏工具 id
+  static let toolbarToolAllIDs: [String] = ["clipboard", "phrases", "dismiss"]
+
+  /// 某个工具栏工具是否显示 (未设置过默认显示)
+  func isToolbarToolVisible(_ toolID: String) -> Bool {
+    toolbarVisibleTools.contains(toolID)
+  }
+
+  /// 设置某个工具栏工具是否显示
+  func setToolbarToolVisible(_ toolID: String, visible: Bool) {
+    var tools = toolbarVisibleTools
+    if visible {
+      tools.insert(toolID)
+    } else {
+      tools.remove(toolID)
+    }
+    toolbarVisibleTools = tools
+  }
+
   // MARK: - 剪贴板历史 (键盘内剪贴板按钮)
 
   /// 最近剪贴板文本历史, 最新在前, 最多 20 条 (只存文本)
@@ -447,6 +510,9 @@ extension UserDefaults {
   private static let clipboardSyncUsernameKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncUsername"
   private static let clipboardSyncPasswordKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncPassword"
   private static let clipboardSyncLastHashKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastHash"
+  private static let clipboardSyncLastStatusTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastStatusText"
+  private static let chinesePrimaryKeyboardIsNineGridKey = "com.ihsiao.apps.Hamster.UserDefault.keys.chinesePrimaryKeyboardIsNineGrid"
+  private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"
 
   // MARK: - 剪贴板历史 / 常用语
 

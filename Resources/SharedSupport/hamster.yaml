@@ -13,8 +13,9 @@ general:
 toolbar:
   # 是否开启工具栏
   enableToolbar: true
-  # 显示键盘 icon 按钮
-  displayAppIconButton: false
+  # 显示键盘 icon 按钮 (2026-11-23 改为 true: 该按钮现在是打开工具栏菜单的入口,
+  # 菜单里有剪贴板/常用语/收起键盘/切换 26 键/定制工具栏/立即同步/设置)
+  displayAppIconButton: true
   # 显示键盘 dissmiss 按钮
   displayKeyboardDismissButton: false
   # 工具栏总高度
@@ -196,7 +197,8 @@ rime:
   keyValueOfSwitchSimplifiedAndTraditional: traditionalization
   # RIME 重新部署时，是否覆盖词库文件
   # 如果使用自造词，需要改为 false, 否则部署时会覆盖键盘自造词文件
-  overrideDictFiles: true
+  # (用户词典学习和"我的词组"都需要保留用户词库, 所以这里是 false)
+  overrideDictFiles: false
   # 覆盖词库文件的正则表达式
   # 使用场景：
   # 在开启 overrideDictFiles 后，每次重新部署会按照正则表达式符合的条件翻盖文件
@@ -216,7 +218,9 @@ swipe:
   spaceDragSensitivity: 10
 
   # 划动距离阈值，当划动的距离大于或等于此值时，才会识别为一次划动
-  distanceThreshold: 20
+  # 2026-11-23 由 20 改为 32: 20pt 时点按轻微上飘就会误触上滑数字;
+  # 另见 KeyboardContext.distanceThreshold, 代码里另有 32pt 下限 (老用户配置不自动更新)
+  distanceThreshold: 32
 
   # 此值是正切角度的阈值，用来限制上下左右划动时的角度，如果太大容易误触
   # 默认为 15 度的正切值，即上下左右划的的角度不能超过 15 度

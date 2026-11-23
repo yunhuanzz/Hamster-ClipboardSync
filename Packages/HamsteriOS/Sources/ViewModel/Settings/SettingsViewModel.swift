@@ -154,6 +154,22 @@ public class SettingsViewModel: ObservableObject {
             self.mainViewModel.subViewSubject.send(.finder)
           }
         ),
+        .init(
+          icon: UIImage(systemName: "text.quote")!,
+          text: "常用语",
+          accessoryType: .disclosureIndicator,
+          navigationAction: { [unowned self] in
+            self.mainViewModel.subViewSubject.send(.commonPhrases)
+          }
+        ),
+        .init(
+          icon: UIImage(systemName: "book")!,
+          text: "我的词组",
+          accessoryType: .disclosureIndicator,
+          navigationAction: { [unowned self] in
+            self.mainViewModel.subViewSubject.send(.customPhrases)
+          }
+        ),
       ]),
       SettingSectionModel(title: "键盘相关", items: [
         .init(
@@ -239,6 +255,19 @@ public class SettingsViewModel: ObservableObject {
             textValue: { [unowned self] in clipboardSyncPassword },
             textHandled: { [unowned self] in
               clipboardSyncPassword = $0
+            }
+          ),
+          .init(
+            icon: UIImage(systemName: "info.circle")!,
+            text: "上次同步",
+            navigationLinkLabel: { UserDefaults.hamster.clipboardSyncLastStatusText ?? "尚未同步" }
+          ),
+          .init(
+            text: "立即同步",
+            type: .button,
+            buttonAction: {
+              ClipboardSyncService.shared.syncNow()
+              // 同步完成后 SettingsRootView 收到通知会刷新状态行
             }
           ),
         ]

@@ -36,6 +36,12 @@ public enum SettingsSubView: String {
   /// RIME 页面
   case rime
   
+  /// 常用语页面
+  case commonPhrases
+
+  /// 我的词组页面
+  case customPhrases
+
   /// 关于页面
   case about
 
