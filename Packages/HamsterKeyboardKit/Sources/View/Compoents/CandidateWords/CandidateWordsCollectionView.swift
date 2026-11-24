@@ -335,33 +335,21 @@ extension CandidateWordsCollectionView {
     let index = indexPath.item
     let text = rimeContext.suggestions[index].text
     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-    let alert = UIAlertController(title: text, message: nil, preferredStyle: .actionSheet)
-    alert.addAction(UIAlertAction(title: "忘记记忆", style: .destructive) { [weak self] _ in
-      _ = self?.rimeContext.forgetCandidateAt(index: index)
-    })
+    // 注意 (热修复 2026-11-24): UIAlertController 在键盘扩展进程里不可用,
+    // 创建即抛异常闪退, 改用键盘内的自定义菜单 (见 CandidateLongPressMenuView)。
     let pinned = rimeContext.isCandidatePinnedAt(index: index)
-    alert.addAction(UIAlertAction(title: pinned ? "取消置顶" : "置顶", style: .default) { [weak self] _ in
-      guard let self = self else { return }
-      if pinned {
-        _ = self.rimeContext.unpinCandidateAt(index: index)
-      } else {
-        _ = self.rimeContext.pinCandidateAt(index: index)
-      }
-    })
-    alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-    if let cell = self.cellForItem(at: indexPath) {
-      alert.popoverPresentationController?.sourceView = cell
-      alert.popoverPresentationController?.sourceRect = cell.bounds
-    }
-    owningViewController()?.present(alert, animated: true)
-  }
-
-  private func owningViewController() -> UIViewController? {
-    var responder: UIResponder? = self
-    while let r = responder {
-      if let vc = r as? UIViewController { return vc }
-      responder = r.next
-    }
-    return nil
+    CandidateLongPressMenuView.show(
+      from: self,
+      text: text,
+      pinned: pinned,
+      onForget: { [weak self] in _ = self?.rimeContext.forgetCandidateAt(index: index) },
+      onTogglePin: { [weak self] in
+        guard let self = self else { return }
+        if pinned {
+          _ = self.rimeContext.unpinCandidateAt(index: index)
+        } else {
+          _ = self.rimeContext.pinCandidateAt(index: index)
+        }
+      })
   }
 }
