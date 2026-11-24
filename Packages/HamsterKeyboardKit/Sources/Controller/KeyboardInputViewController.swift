@@ -34,6 +34,11 @@ import UIKit
  您可能会注意到，KeyboardKit 自己的视图使用初始化器参数而非环境对象。这是有意为之，以便更好地传达每个视图的依赖关系。
  */
 open class KeyboardInputViewController: UIInputViewController, KeyboardController {
+  /// 常用语补全点选上屏后, 文档变化会再触发一次 textDidChange:
+  /// 那一次不重算补全 (否则刚插的短语尾巴, 如邮箱的 com, 可能
+  /// 立刻又挂出另一条补全)。点选回调里置 true, 下次触发时消费掉。
+  private var phraseCompletionSuppressNextTextChange = false
+
   // MARK: - View Controller Lifecycle ViewController 生命周期
 
   override open func viewDidLoad() {
@@ -495,6 +500,32 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     if !self.textDocumentProxy.hasText {
       self.rimeContext.reset()
     }
+
+    // 常用语补全 (英文/数字键盘): 打字不走 RIME, userInputKey 为空,
+    // 按光标前连续的字母/数字串查常用语前缀, 挂进候选栏。
+    updatePhraseCompletionForDirectInput()
+  }
+
+  /// 英文/数字键盘的常用语补全触发 (textDidChange 里调用)。
+  /// 只在英文键盘 (.alphabetic) 与数字键盘 (.numeric, 123 页) 生效;
+  /// 中文键盘走 RIME syncContext, 不进这里。输入为空或无匹配时清掉
+  /// 之前挂的补全 (退格删回前缀内仍会继续显示)。
+  private func updatePhraseCompletionForDirectInput() {
+    if phraseCompletionSuppressNextTextChange {
+      phraseCompletionSuppressNextTextChange = false
+      return
+    }
+    // 有中文组字进行时候选栏归 syncContext 管, 这里不碰
+    // (如 26 键组字中切到 123 页又敲数字, 拼音候选不能丢)。
+    guard rimeContext.userInputKey.isEmpty else { return }
+    let type = keyboardContext.keyboardType
+    if type.isAlphabetic {
+      let typed = PhraseAutocomplete.trailingLetters(in: textDocumentProxy.documentContextBeforeInput ?? "")
+      rimeContext.updatePhraseCompletionForDirectInput(typedInput: typed, kind: .latin)
+    } else if type == .numeric {
+      let typed = PhraseAutocomplete.trailingDigits(in: textDocumentProxy.documentContextBeforeInput ?? "")
+      rimeContext.updatePhraseCompletionForDirectInput(typedInput: typed, kind: .digits)
+    }
   }
 
   // MARK: - Implementations KeyboardController
@@ -547,26 +578,34 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     textDocumentProxy.deleteBackward(times: times)
   }
 
-  /// 上滑回退键: 清空全部已输入内容。
-  /// 先重置 RIME (清空候选/输入状态), 光标移到文末, 再分批删除,
+  /// 上滑回退键: 删除光标前的全部文字, 光标后的文字保留,
+  /// 光标停在剩余文字的开头 (被删与保留的分界处)。
+  /// 先重置 RIME (清空候选/输入状态), 再分批删光标前的文字,
   /// 每批最多 100 字, 用 main.async 串行, 避免一次删除过长阻塞键盘。
-  open func deleteAllText() {
+  /// 光标在文末时等同于清空全部; 光标在文首时不删除任何文字。
+  open func deleteTextBeforeCursor() {
     rimeContext.reset()
-    // 光标移到文末 (若光标不在末尾, 先向前移到末尾)
-    if let after = textDocumentProxy.documentContextAfterInput, !after.isEmpty {
-      textDocumentProxy.adjustTextPosition(byCharacterOffset: after.count)
-    }
-    deleteAllTextBatch(remainingAttempts: 100)
+    deleteTextBeforeCursorBatch(remainingAttempts: 100)
   }
 
-  private func deleteAllTextBatch(remainingAttempts: Int) {
-    guard remainingAttempts > 0, textDocumentProxy.hasText else { return }
-    let beforeCount = textDocumentProxy.documentContextBeforeInput?.count ?? 0
-    // 若拿不到前文长度, 仍按一批 100 字删, 避免停滞
-    let batch = beforeCount > 0 ? min(100, beforeCount) : 100
-    textDocumentProxy.deleteBackward(times: batch)
-    DispatchQueue.main.async { [weak self] in
-      self?.deleteAllTextBatch(remainingAttempts: remainingAttempts - 1)
+  private func deleteTextBeforeCursorBatch(remainingAttempts: Int, nilFallbackUsed: Bool = false) {
+    guard remainingAttempts > 0 else { return }
+    if let before = textDocumentProxy.documentContextBeforeInput {
+      // 只以光标前是否还有文字为准: 光标后还有文字时 hasText 仍为
+      // true, 不能用它做停止条件 (否则光标后有字就一直删到 cap)。
+      guard !before.isEmpty else { return }
+      let batch = min(100, before.count)
+      textDocumentProxy.deleteBackward(times: batch)
+      DispatchQueue.main.async { [weak self] in
+        self?.deleteTextBeforeCursorBatch(remainingAttempts: remainingAttempts - 1)
+      }
+    } else if !nilFallbackUsed {
+      // 拿不到前文长度: 删一批尽力而为 (无前文时 deleteBackward 是
+      // 空操作); 若下一轮仍拿不到, 停止, 不空转。
+      textDocumentProxy.deleteBackward(times: 100)
+      DispatchQueue.main.async { [weak self] in
+        self?.deleteTextBeforeCursorBatch(remainingAttempts: remainingAttempts - 1, nilFallbackUsed: true)
+      }
     }
   }
 
@@ -580,9 +619,9 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
       // fix: 内嵌模式问题
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.001) { [weak self] in
         guard let self = self else { return }
-        // 顶码上屏
+        // 顶码上屏 (只顶引擎候选的首选; 常用语补全项只能点选, 不顶)。
         if keyboardContext.swipePaging {
-          if let firstCandidate = self.rimeContext.suggestions.first {
+          if let firstCandidate = self.rimeContext.firstEngineSuggestion {
             self.textDocumentProxy.insertText(firstCandidate.text)
           }
         } else {
@@ -1012,6 +1051,44 @@ private extension KeyboardInputViewController {
             return
           }
           self.textDocumentProxy.setMarkedText(inputText, selectedRange: NSMakeRange(inputText.utf8.count, 0))
+        }
+      }
+      .store(in: &cancellables)
+
+    // 常用语补全点选上屏: RimeContext 只决定“点了哪个”, 真正写文档走这里
+    // (它持有 textDocumentProxy)。
+    // 中文组字时输入还在 marked 区 (deleteCount == 0): 先清 marked 再插
+    // 整条短语; 英文/数字键盘输入已在文档里: 先删已输入的前缀再插。
+    // 点选瞬间光标可能已移走: 只有光标前尾巴确为当初匹配的输入时才删,
+    // 否则放弃上屏 (只清补全, 不插错地方)。
+    rimeContext.onApplyPhraseCompletion = { [weak self] phrase, deleteCount, typedInput in
+      guard let self = self else { return }
+      self.phraseCompletionSuppressNextTextChange = true
+      if deleteCount > 0 {
+        let before = self.textDocumentProxy.documentContextBeforeInput ?? ""
+        let tail = String(before.suffix(typedInput.count))
+        guard tail.count == typedInput.count,
+              tail.lowercased() == typedInput.lowercased() else {
+          self.rimeContext.clearPhraseCompletion()
+          return
+        }
+        self.textDocumentProxy.deleteBackward(times: deleteCount)
+      } else {
+        self.textDocumentProxy.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
+      }
+      // 直接插原文 (不走 insertTextPatch, 避免成对符号逻辑改写用户短语)。
+      self.textDocumentProxy.insertText(phrase)
+    }
+
+    // 切出英文/数字键盘时清掉可能残留的补全 (中文键盘的 syncContext
+    // 会在下次打字时重算, 但切键盘本身不打字, 不清会留一条 stale 的在栏里)。
+    keyboardContext.keyboardTypePublished
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] type in
+        guard let self = self else { return }
+        guard type.isAlphabetic || type == .numeric else {
+          self.rimeContext.clearPhraseCompletion()
+          return
         }
       }
       .store(in: &cancellables)

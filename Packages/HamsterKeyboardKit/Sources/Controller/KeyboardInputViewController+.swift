@@ -103,19 +103,23 @@ public extension KeyboardInputViewController {
     rimeContext.switchEnglishChinese()
   }
 
-  /// 首选候选字上屏
+  /// 首选候选字上屏 (第 1 个引擎候选; 常用语补全项占首位时跳过它,
+  /// 补全只能点选上屏, 快捷指令不碰它)。
   func selectPrimaryCandidate() {
-    rimeContext.selectCandidate(index: 0)
+    guard let index = rimeContext.displayIndexOfEngineCandidate(at: 0) else { return }
+    rimeContext.selectCandidate(index: index)
   }
 
-  /// 第二位候选字上屏
+  /// 第二位候选字上屏 (第 2 个引擎候选, 同上跳过补全项)。
   func selectSecondaryCandidate() {
-    rimeContext.selectCandidate(index: 1)
+    guard let index = rimeContext.displayIndexOfEngineCandidate(at: 1) else { return }
+    rimeContext.selectCandidate(index: index)
   }
 
-  /// 第三位候选字上屏
+  /// 第三位候选字上屏 (第 3 个引擎候选, 同上跳过补全项)。
   func selectTertiaryCandidate() {
-    rimeContext.selectCandidate(index: 2)
+    guard let index = rimeContext.displayIndexOfEngineCandidate(at: 2) else { return }
+    rimeContext.selectCandidate(index: index)
   }
 
   /// 光标移动句首

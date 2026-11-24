@@ -50,11 +50,12 @@ public protocol KeyboardController: AnyObject {
   func deleteBackward(times: Int)
 
   /**
-   Delete all input text (swipe up on backspace).
+   Delete all text before the cursor (swipe up on backspace).
+   Text after the cursor is kept.
 
-   清空全部已输入内容（上滑回退键）。
+   删除光标前的全部文字（上滑回退键）, 光标后的文字保留。
    */
-  func deleteAllText()
+  func deleteTextBeforeCursor()
 
   /**
    Dismiss the keyboard.

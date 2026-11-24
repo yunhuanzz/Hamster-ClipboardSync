@@ -88,6 +88,14 @@ public class RimeContext {
   /// 注意：只保存最近一次选择的拼音和拼音开始位置及长度
   public lazy var selectCandidatePinyin: (String, Int, Int)? = nil
 
+  /// 边栏点选用剩余输入快照 (offset, 剩余输入码): 在边栏列表生成时
+  /// (getPinyinCandidates, 唯一调用点是边栏刷新) 捕获, 因为那一刻的
+  /// preedit 是已知好的 (列表就是从它推导出来的)。点选时用这个快照,
+  /// 不再在点选时刻重读可能已失效的 cached preedit —— #42 回归就是
+  /// 点选时刻 preedit 变成 "" 或只剩已提交词, offset 算成全长、剩余
+  /// 为空, 重敲只剩被点音节, 天气整个丢了。仅当列表非空时更新。
+  var lastSidebarRemainder: (offset: Int, remainingKeys: String)?
+
   /// 字母模式
   @MainActor
   public lazy var asciiMode: Bool = false
@@ -95,6 +103,49 @@ public class RimeContext {
   /// 候选字
   @MainActor @Published
   public var suggestions: [CandidateSuggestion] = []
+
+  /// 常用语补全当前匹配到的输入 (字母/数字), 空 = 没有补全在展示。
+  /// 驱动候选栏显隐: 英文/数字键盘打字不走 RIME, userInputKey 为空,
+  /// 候选栏只认这个值才会在 123/英文键盘上出现
+  /// (见 KeyboardToolbarView.combine)。
+  public var phraseCompletionInput: String = "" {
+    didSet {
+      phraseCompletionInputSubject.send(phraseCompletionInput)
+    }
+  }
+
+  private let phraseCompletionInputSubject = PassthroughSubject<String, Never>()
+  public var phraseCompletionPublished: AnyPublisher<String, Never> {
+    phraseCompletionInputSubject.eraseToAnyPublisher()
+  }
+
+  /// 当前展示的常用语补全: 短语原文 + 已输入长度 + 点选时要删的
+  /// 文档前缀长度。中文组字时 deletePrefixCount = 0 (输入在组字区,
+  /// 不在文档里, 点选只清 marked 再插短语)。
+  public var phraseCompletion: (phrase: String, typedLength: Int, deletePrefixCount: Int)? = nil
+
+  /// 点选常用语补全后真正写文档的回调 (VC 接, 它持有 textDocumentProxy)。
+  /// 参数: 短语原文, 要删的文档前缀长度, 当初匹配的输入 (VC 校验用)。
+  public var onApplyPhraseCompletion: ((String, Int, String) -> Void)?
+
+  /// 首个引擎候选 (跳过常用语补全项): 顶字上屏/首选上屏用的都是
+  /// 引擎候选, 补全短语只能点选上屏, 不能被空格/符号/emoji 顶上去。
+  @MainActor
+  public var firstEngineSuggestion: CandidateSuggestion? {
+    suggestions.first(where: { $0.index >= 0 })
+  }
+
+  /// 第 n (0-based) 个引擎候选的显示下标, 供首选/次选/三选快捷指令用
+  /// (补全项占了首位时, 快捷指令仍要选中第 n 个引擎候选, 不能错位)。
+  @MainActor
+  public func displayIndexOfEngineCandidate(at enginePosition: Int) -> Int? {
+    var position = -1
+    for (index, suggestion) in suggestions.enumerated() where suggestion.index >= 0 {
+      position += 1
+      if position == enginePosition { return index }
+    }
+    return nil
+  }
 
   /// 前缀候选模式: 引擎对完整九宫格输入给不出候选时, 展示最长合法前缀的候选。
   /// (用户乱按的长串常常整体切不全, 但前半段是合法音节; 微信会给前缀候选,
@@ -171,6 +222,8 @@ public extension RimeContext {
     self.userInputKey = ""
     self.selectCandidatePinyin = nil
     self.suggestions.removeAll(keepingCapacity: false)
+    self.phraseCompletion = nil
+    self.phraseCompletionInput = ""
     self.isShowingPrefixCandidates = false
     self.prefixCandidateInput = ""
     self.prefixCandidateTail = ""
@@ -796,6 +849,20 @@ public extension RimeContext {
   /// 根据索引选择候选字
   @MainActor
   func selectCandidate(index: Int) {
+    // 常用语补全 (index == -1, 不在引擎菜单里): 不能按引擎下标选。
+    // 先清状态 (reset 会清掉组字/候选/补全记录), 再回调给 VC 写文档
+    // (中文: 清 marked 再插整条短语; 英文/数字: 先删已输入的前缀再插)。
+    // 只能点选触发; 空格/符号/emoji 顶字与首选快捷指令走
+    // firstEngineSuggestion / displayIndexOfEngineCandidate, 不进这里。
+    if index >= 0, index < suggestions.count,
+       suggestions[index].index == -1, let completion = phraseCompletion {
+      let phrase = completion.phrase
+      let deleteCount = completion.deletePrefixCount
+      let typedInput = phraseCompletionInput
+      reset()
+      onApplyPhraseCompletion?(phrase, deleteCount, typedInput)
+      return
+    }
     // 候选栏可能因置顶重排过显示顺序: 显示下标 -> 引擎下标 (见
     // applyPinnedCandidates; 未置顶时两者相同)。必须在序幕前算好,
     // 序幕会刷新 suggestions。
@@ -995,6 +1062,22 @@ public extension RimeContext {
     return max(0, fullKeys.count - remainingLen)
   }
 
+  /// 边栏点选用的剩余输入: 优先用列表生成时捕获的快照 (#43), 快照无效
+  /// (不存在 / offset 超出当前输入 / 不是当前输入的后缀 / 为空) 时回退
+  /// 到现算。点选扫描与替换都走这里, 两边坐标一致。
+  @MainActor
+  func sidebarRemainder() -> (offset: Int, remainingKeys: String) {
+    let fullKeys = Rime.shared.getInputKeys()
+    if let snapshot = lastSidebarRemainder,
+       snapshot.offset <= fullKeys.count,
+       !snapshot.remainingKeys.isEmpty,
+       fullKeys.hasSuffix(snapshot.remainingKeys) {
+      return snapshot
+    }
+    let offset = remainingInputOffset()
+    return (offset, String(fullKeys.dropFirst(offset)))
+  }
+
   /// 在剩余输入里替换一段 (边栏点选音节用, 替代 tryHandleReplaceInputTexts)。
   /// 旧方法对全量输入码做 clear + 重敲, 会把已提交的前缀也重敲回去, 提交
   /// 状态就丢了 (候选栏回到整句)。这里只重敲剩余部分: 已提交的词已经在
@@ -1002,16 +1085,27 @@ public extension RimeContext {
   /// tryHandleReplaceInputTexts 同单位, 但以剩余输入的开头为 0。
   @MainActor
   func tryHandleReplaceRemainingInputTexts(_ text: String, startPos: Int, count: Int) -> Bool {
-    let fullKeys = Rime.shared.getInputKeys()
-    let offset = remainingInputOffset()
-    guard offset <= fullKeys.count else { return false }
-    let remaining = String(fullKeys.dropFirst(offset))
+    // 剩余输入优先用边栏快照 (#43), 不要在点选时刻重读可能已失效的 preedit。
+    let remaining = sidebarRemainder().remainingKeys
     guard startPos >= 0, startPos <= remaining.count else { return false }
     let end = min(startPos + count, remaining.count)
     var newRemaining = remaining
     let startIdx = newRemaining.index(newRemaining.startIndex, offsetBy: startPos)
     let endIdx = newRemaining.index(startIdx, offsetBy: end - startPos)
     newRemaining.replaceSubrange(startIdx..<endIdx, with: text)
+    // 守卫 (#43): 点选必须替换一段已有的输入码。剩余输入为空、替换的段
+    // 为空 (end == startPos)、或替换后只剩被点音节而原来还有更多音节,
+    // 都说明剩余输入已丢 (陈旧快照 / 失效 preedit) —— 拒绝这次点选,
+    // 不动引擎, 把“悄悄丢词”变成一次无操作。
+    guard !remaining.isEmpty, end > startPos else {
+      Logger.statistics.warning("sidebar tap refused: empty remainder or empty span (remaining='\(remaining)', text='\(text)', startPos=\(startPos), count=\(count))")
+      return false
+    }
+    if newRemaining == text, remaining.count > count {
+      Logger.statistics.warning("sidebar tap refused: would drop tail (remaining='\(remaining)', text='\(text)')")
+      return false
+    }
+    Logger.statistics.warning("sidebar tap replace remaining='\(remaining)' -> '\(newRemaining)' (text='\(text)', startPos=\(startPos), count=\(count))")
     reset()  // 清掉组字与 selectCandidatePinyin; 已提交的词已在文档里
     for key in newRemaining {
       _ = Rime.shared.inputKey(String(key))
@@ -1087,6 +1181,18 @@ public extension RimeContext {
     // 注意赋值顺序
     self.userInputKey = userInputText
     self.commitText = commitText
+    // 常用语补全: 当前输入是某条常用语的前缀 (字母/拼音/九宫格数字码)
+    // 时, 把整条短语挂在候选栏首位 (高亮 + “常用语”角标), 与引擎
+    // 候选并列, 不替换它们。分页模式 (useContextPaging) 下候选栏
+    // 不走 suggestions, 这里也不挂。preedit 是刚读的, 不是缓存。
+    let phraseCandidate: CandidateSuggestion?
+    if useContextPaging {
+      self.phraseCompletion = nil
+      self.phraseCompletionInput = ""
+      phraseCandidate = nil
+    } else {
+      phraseCandidate = self.phraseCompletionCandidate(preedit: userInputText)
+    }
     // 九宫格前缀候选 (第 8 轮): 引擎对完整输入一个候选都不给时,
     // 试试最长合法前缀 (见 prefixCandidatesForUnsegmentableT9Input)。
     // 正常有候选时不走这条路; 任何没拿到前缀候选的情况都清掉旧的前缀状态。
@@ -1095,7 +1201,7 @@ public extension RimeContext {
       if let prefixCandidates = self.prefixCandidatesForUnsegmentableT9Input(preedit: userInputText) {
         // 前缀候选也走置顶显示重排 (只重排显示; 引擎里是完整输入、菜单为
         // 空, 高亮无处可移, 不动引擎)。
-        self.suggestions = applyPinnedCandidates(prefixCandidates, code: prefixCandidateInput, moveHighlight: false)
+        self.suggestions = self.withPhraseCandidate(phraseCandidate, prependedTo: applyPinnedCandidates(prefixCandidates, code: prefixCandidateInput, moveHighlight: false))
         return
       }
     }
@@ -1103,7 +1209,73 @@ public extension RimeContext {
     self.prefixCandidateInput = ""
     self.prefixCandidateTail = ""
     self.prefixCandidateFullInput = ""
-    self.suggestions = applyPinnedCandidates(candidates, code: Rime.shared.getInputKeys(), moveHighlight: true)
+    self.suggestions = self.withPhraseCandidate(phraseCandidate, prependedTo: applyPinnedCandidates(candidates, code: Rime.shared.getInputKeys(), moveHighlight: true))
+  }
+
+  /// 把常用语补全项挂到引擎候选前面 (没有时原样返回)。
+  /// 补全记录 (phraseCompletion / phraseCompletionInput) 由
+  /// phraseCompletionCandidate() 在算出匹配时同步, 这里只拼数组。
+  @MainActor
+  private func withPhraseCandidate(_ candidate: CandidateSuggestion?, prependedTo engineCandidates: [CandidateSuggestion]) -> [CandidateSuggestion] {
+    guard let candidate = candidate else { return engineCandidates }
+    return [candidate] + engineCandidates
+  }
+
+  /// 按当前 preedit 算常用语补全项 (中文组字用)。
+  /// 输入取 preedit 末尾的字母/数字串 (已提交的中文不在其中);
+  /// 含数字按九宫格数字码匹配, 纯字母按字面/拼音前缀匹配。
+  /// 有匹配时同步 phraseCompletion / phraseCompletionInput 记录,
+  /// 无匹配时清掉旧记录。中文组字时 deletePrefixCount = 0。
+  @MainActor
+  private func phraseCompletionCandidate(preedit: String) -> CandidateSuggestion? {
+    let typed = PhraseAutocomplete.currentTypedInput(fromPreedit: preedit)
+    guard !typed.isEmpty else {
+      self.phraseCompletion = nil
+      self.phraseCompletionInput = ""
+      return nil
+    }
+    let kind: PhraseAutocomplete.Kind = typed.contains(where: { $0.isNumber }) ? .t9Digits : .latin
+    guard let phrase = PhraseAutocomplete.completion(
+      forTypedInput: typed, kind: kind, phrases: UserDefaults.hamster.commonPhrases
+    ) else {
+      self.phraseCompletion = nil
+      self.phraseCompletionInput = ""
+      return nil
+    }
+    self.phraseCompletion = (phrase: phrase, typedLength: typed.count, deletePrefixCount: 0)
+    self.phraseCompletionInput = typed
+    return CandidateSuggestion(index: -1, label: "", text: phrase, isAutocomplete: true, subtitle: "常用语")
+  }
+
+  /// 英文/数字键盘的常用语补全 (VC 在 textDidChange 里驱动):
+  /// 打字不走 RIME, 按文档光标前连续的字母/数字串查常用语前缀。
+  /// 有匹配时 suggestions 只有补全项 (英文/数字键盘没有引擎候选);
+  /// 无匹配或输入为空时只清自己挂的补全项, 不动引擎候选。
+  /// 点选时 deletePrefixCount = 已输入长度 (输入已在文档里, 要先删掉)。
+  @MainActor
+  func updatePhraseCompletionForDirectInput(typedInput: String, kind: PhraseAutocomplete.Kind) {
+    guard !typedInput.isEmpty,
+          let phrase = PhraseAutocomplete.completion(
+            forTypedInput: typedInput, kind: kind, phrases: UserDefaults.hamster.commonPhrases
+          ) else {
+      clearPhraseCompletion()
+      return
+    }
+    self.phraseCompletion = (phrase: phrase, typedLength: typedInput.count, deletePrefixCount: typedInput.count)
+    self.phraseCompletionInput = typedInput
+    self.suggestions = [CandidateSuggestion(index: -1, label: "", text: phrase, isAutocomplete: true, subtitle: "常用语")]
+  }
+
+  /// 清掉当前展示的常用语补全 (只摘掉补全项, 引擎候选保留)。
+  /// 当前没有补全在展示时什么都不做 (不动引擎候选)。
+  @MainActor
+  func clearPhraseCompletion() {
+    guard phraseCompletion != nil else { return }
+    phraseCompletion = nil
+    phraseCompletionInput = ""
+    if let index = suggestions.firstIndex(where: { $0.index == -1 }) {
+      suggestions.remove(at: index)
+    }
   }
 
   /// 分页：下一页
@@ -1727,6 +1899,18 @@ public extension RimeContext {
         if let subList = t9ToPinyinMapping[sub] {
           pinyinList.append(contentsOf: subList)
         }
+      }
+    }
+
+    // 捕获边栏点选用快照 (#43): 列表是从当前 preedit 推导出来的, 这一刻
+    // preedit 是已知好的; 点选时用这个快照, 不要在点选时刻重读可能已
+    // 失效的 preedit。只在列表非空时更新 (空列表时边栏显示默认符号,
+    // 不会有音节点选)。
+    if !pinyinList.isEmpty {
+      let offset = remainingInputOffset()
+      let fullKeys = Rime.shared.getInputKeys()
+      if offset <= fullKeys.count {
+        lastSidebarRemainder = (offset, String(fullKeys.dropFirst(offset)))
       }
     }
 

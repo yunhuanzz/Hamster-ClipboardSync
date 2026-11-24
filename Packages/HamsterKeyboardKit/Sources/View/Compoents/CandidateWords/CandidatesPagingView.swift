@@ -256,6 +256,8 @@ extension CandidatesPagingCollectionView {
     guard let indexPath = self.indexPathForItem(at: point),
           indexPath.item < rimeContext.suggestions.count else { return }
     let index = indexPath.item
+    // 常用语补全项不在引擎菜单里, 长按不提供忘词/置顶 (那是引擎候选的操作)。
+    guard rimeContext.suggestions[index].index >= 0 else { return }
     let text = rimeContext.suggestions[index].text
     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     // 注意 (热修复 2026-11-24): UIAlertController 在键盘扩展进程里不可用,

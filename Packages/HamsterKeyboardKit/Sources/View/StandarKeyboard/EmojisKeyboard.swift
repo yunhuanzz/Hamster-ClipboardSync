@@ -318,7 +318,8 @@ class EmojisKeyboard: NibLessView {
   /// tryRegisterEmoji 会自动把该 emoji 登记到最近使用。
   private func insertEmoji(_ emoji: Emoji) {
     if !rimeContext.userInputKey.isEmpty {
-      if let first = rimeContext.suggestions.first {
+      // 只顶引擎候选的首选; 常用语补全项只能点选, 不顶。
+      if let first = rimeContext.firstEngineSuggestion {
         keyboardContext.textDocumentProxy.insertText(first.text)
       }
       rimeContext.reset()

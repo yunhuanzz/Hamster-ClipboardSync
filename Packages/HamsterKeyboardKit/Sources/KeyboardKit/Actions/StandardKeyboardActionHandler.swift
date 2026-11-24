@@ -185,9 +185,9 @@ open class StandardKeyboardActionHandler: NSObject, KeyboardActionHandler {
    您可以覆盖此函数，自定义操作的行为方式。默认情况下，使用标准动作。
    */
   open func action(for gesture: KeyboardGesture, on action: KeyboardAction) -> KeyboardAction.GestureAction? {
-    // 上滑回退键: 清空全部已输入内容 (默认开启)
+    // 上滑回退键: 删除光标前的全部文字, 光标后的保留 (默认开启)
     if case .swipeUp = gesture, action == .backspace {
-      return { $0?.deleteAllText() }
+      return { $0?.deleteTextBeforeCursor() }
     }
     if keyboardContext.keyboardType.isAlphabetic {
       return action.standardAction(for: gesture, processByRIME: false)

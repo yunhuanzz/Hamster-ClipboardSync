@@ -522,35 +522,56 @@ class KeyboardToolbarView: NibLessView {
       .receive(on: DispatchQueue.main)
       .sink { [weak self] in
         guard let self = self else { return }
-        let isEmpty = $0.isEmpty
-        self.commonFunctionBar.isHidden = !isEmpty
-        self.candidateBarView.isHidden = isEmpty
-
-        if self.candidateBarView.superview == nil {
-          candidateBarView.setStyle(self.style)
-          addSubview(candidateBarView)
-          candidateBarView.fillSuperview()
-        }
-
-        // 未输入时用缓存展示粘贴提示 (绝不读剪贴板, 打字不再弹"粘贴自xxx"横幅);
-        // 开始输入后工具栏隐藏, 提示随之隐藏。
-        if isEmpty {
-          self.showClipboardChipFromCache()
-        } else {
-          self.hideClipboardChip()
-        }
-
-        // 检测是否启用内嵌编码
-        guard !keyboardContext.enableEmbeddedInputMode else { return }
-        if self.keyboardContext.keyboardType.isChineseNineGrid {
-          // Debug
-          // self.phoneticArea.text = inputKeys + " | " + self.rimeContext.t9UserInputKey
-          candidateBarView.phoneticLabel.text = self.rimeContext.t9UserInputKey
-        } else {
-          candidateBarView.phoneticLabel.text = $0
-        }
+        self.updateCandidateBar(inputText: $0)
       }
       .store(in: &subscriptions)
+
+    // 常用语补全 (英文/数字键盘): 打字不走 RIME, userInputKey 为空,
+    // 候选栏只认 phraseCompletionInput 才会在 123/英文键盘上出现。
+    // 不需要新 UI, 复用同一条候选栏; 显隐条件与上面共用
+    // updateCandidateBar (两者谁后触发都算同一条规则, 不打架)。
+    rimeContext.phraseCompletionPublished
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        guard let self = self else { return }
+        self.updateCandidateBar(inputText: self.rimeContext.userInputKey)
+      }
+      .store(in: &subscriptions)
+  }
+
+  /// 候选栏显隐 + 拼音行: 输入为空且没有常用语补全在展示时隐藏
+  /// (同时恢复工具栏与粘贴提示); 否则显示, 拼音行显示当前输入
+  /// (补全展示时显示已输入的前缀)。
+  private func updateCandidateBar(inputText: String) {
+    let isEmpty = inputText.isEmpty && rimeContext.phraseCompletionInput.isEmpty
+    self.commonFunctionBar.isHidden = !isEmpty
+    self.candidateBarView.isHidden = isEmpty
+
+    if self.candidateBarView.superview == nil {
+      candidateBarView.setStyle(self.style)
+      addSubview(candidateBarView)
+      candidateBarView.fillSuperview()
+    }
+
+    // 未输入时用缓存展示粘贴提示 (绝不读剪贴板, 打字不再弹"粘贴自xxx"横幅);
+    // 开始输入后工具栏隐藏, 提示随之隐藏。
+    if isEmpty {
+      self.showClipboardChipFromCache()
+    } else {
+      self.hideClipboardChip()
+    }
+
+    // 检测是否启用内嵌编码
+    guard !keyboardContext.enableEmbeddedInputMode else { return }
+    if self.keyboardContext.keyboardType.isChineseNineGrid {
+      // Debug
+      // self.phoneticArea.text = inputKeys + " | " + self.rimeContext.t9UserInputKey
+      candidateBarView.phoneticLabel.text = self.rimeContext.t9UserInputKey
+    } else if !inputText.isEmpty {
+      candidateBarView.phoneticLabel.text = inputText
+    } else {
+      candidateBarView.phoneticLabel.text = rimeContext.phraseCompletionInput
+    }
   }
 
   @objc func menuButtonTouchDownAction() {

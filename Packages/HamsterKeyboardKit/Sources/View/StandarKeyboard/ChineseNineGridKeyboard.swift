@@ -330,9 +330,9 @@ public extension ChineseNineGridKeyboard {
 
     // 符号处理
     let symbol = symbolsListView.diffalbeDataSource.snapshot(for: indexPath.section).items[indexPath.item]
-    // 当 symbol 非字母数字，顶码上屏
+    // 当 symbol 非字母数字，顶码上屏 (只顶引擎候选的首选; 常用语补全项只能点选, 不顶)
     if !symbol.isMatch(regex: "\\w.*") {
-      if let first = rimeContext.suggestions.first {
+      if let first = rimeContext.firstEngineSuggestion {
         keyboardContext.textDocumentProxy.insertText(first.title)
         rimeContext.reset()
       }
@@ -351,10 +351,13 @@ public extension ChineseNineGridKeyboard {
     // (2026-11-24 边栏 jin 重现) 提交后 getInputKeys() 仍含已提交前缀,
     // 必须只在剩余输入里找, 否则会在已提交的词里命中; 替换也只重敲剩余
     // 部分, 否则提交状态就丢了 (见 tryHandleReplaceRemainingInputTexts)。
-    let fullKeys = rimeContext.getInputKeys()
-    let offset = rimeContext.remainingInputOffset()
+    // (#43) 剩余输入用边栏列表生成时捕获的快照, 不要在点选时刻重读
+    // preedit: 点选时刻 cached preedit 可能已失效 ("" 或只剩已提交词),
+    // offset 会算成全长、剩余为空, 重敲只剩被点音节, 剩余输入整个丢掉
+    // (天气没了)。快照与当前显示的列表是同一时刻的。
+    let (offset, remainingKeys) = rimeContext.sidebarRemainder()
     var startPos = 0
-    var inputKeys = String(fullKeys.dropFirst(offset))
+    var inputKeys = remainingKeys
     let inputKeysCount = inputKeys.utf8.count
 
     if let symbolT9Pinyin = pinyinToT9Mapping[symbol] {
@@ -372,6 +375,7 @@ public extension ChineseNineGridKeyboard {
       startPos = selectCandidatePinyin.1
     }
 
+    Logger.statistics.warning("sidebar tap symbol=\(symbol) offset=\(offset) remaining='\(remainingKeys)' startPos=\(startPos) count=\(symbol.utf8.count)")
     let handle = rimeContext.tryHandleReplaceRemainingInputTexts(symbol, startPos: startPos, count: symbol.utf8.count)
     Logger.statistics.warning("change input text handle = \(handle)")
   }
