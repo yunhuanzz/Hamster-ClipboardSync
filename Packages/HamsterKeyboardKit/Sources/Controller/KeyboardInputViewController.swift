@@ -506,8 +506,27 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     updatePhraseCompletionForDirectInput()
   }
 
+  /// 直输键盘判定: 字母/数字不进 RIME 组字、直接上屏的键盘,
+  /// 常用语补全只能走 textDidChange 直输路 (不走 syncContext)。
+  /// 补全触发与切键盘清理共用同一判定, 否则两边口径不一。
+  /// 覆盖三种情况:
+  /// - .alphabetic 英文键盘 (字母直接上屏);
+  /// - 数字键盘 (type.isNumber: .numeric / .chineseNumeric /
+  ///   .numericNineGrid; 123 页是 .chineseNumeric, 不是 .numeric);
+  /// - 中/英切换后的 asciiMode: hamster.yaml 里
+  ///   displayChineseEnglishSwitchButton: false, layout 的中英切换键
+  ///   是关的, 中英切换是空格上滑 shortcut (#中英切换), 只切
+  ///   asciiMode 不切键盘类型 (类型仍是 .chinese / .chineseNineGrid),
+  ///   字母经 RIME 直接上屏、不组字。#43 只认 .alphabetic/.numeric,
+  ///   所以英文直输完全没进过补全, 这就是 Bug B 英文不触发的原因。
+  private func isDirectInputKeyboard(_ type: KeyboardType) -> Bool {
+    type.isAlphabetic || type.isNumber || rimeContext.asciiMode
+  }
+
   /// 英文/数字键盘的常用语补全触发 (textDidChange 里调用)。
-  /// 只在英文键盘 (.alphabetic) 与数字键盘 (.numeric, 123 页) 生效;
+  /// 数字键盘 (123 页 = .chineseNumeric, 不是 .numeric) 按光标前
+  /// 连续数字查; 英文直输 (.alphabetic, 或中文键盘中/英切换后的
+  /// asciiMode) 按光标前连续字母查 (字面或拼音前缀)。
   /// 中文键盘走 RIME syncContext, 不进这里。输入为空或无匹配时清掉
   /// 之前挂的补全 (退格删回前缀内仍会继续显示)。
   private func updatePhraseCompletionForDirectInput() {
@@ -519,12 +538,12 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     // (如 26 键组字中切到 123 页又敲数字, 拼音候选不能丢)。
     guard rimeContext.userInputKey.isEmpty else { return }
     let type = keyboardContext.keyboardType
-    if type.isAlphabetic {
-      let typed = PhraseAutocomplete.trailingLetters(in: textDocumentProxy.documentContextBeforeInput ?? "")
-      rimeContext.updatePhraseCompletionForDirectInput(typedInput: typed, kind: .latin)
-    } else if type == .numeric {
+    if type.isNumber {
       let typed = PhraseAutocomplete.trailingDigits(in: textDocumentProxy.documentContextBeforeInput ?? "")
       rimeContext.updatePhraseCompletionForDirectInput(typedInput: typed, kind: .digits)
+    } else if isDirectInputKeyboard(type) {
+      let typed = PhraseAutocomplete.trailingLetters(in: textDocumentProxy.documentContextBeforeInput ?? "")
+      rimeContext.updatePhraseCompletionForDirectInput(typedInput: typed, kind: .latin)
     }
   }
 
@@ -657,6 +676,31 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
       insertTextPatch(text)
       return
     }
+  }
+
+  /// 面板粘贴上屏 (剪贴板条目 / 常用语 / 粘贴提示行 / 分段粘贴):
+  /// 整段文本直接写入文档, 不走 insertText 的单字符按键漏斗。
+  /// 根因 (Bug C): insertText 在中文键盘下把文本交给
+  /// rimeContext.tryHandleInputText → Rime.shared.inputKey →
+  /// irime_api.processKey, 而 processKey 只取字符串的首字节
+  /// ([keyCode UTF8String][0]) 当一次按键处理: 首字符是字母/数字/
+  /// 符号时被引擎当成拼音按键或选词键吃掉 (syncContext 再把引擎
+  /// 候选挂进候选栏, 于是出现一个奇怪的数字/符号候选词), 其余
+  /// 字符全部丢掉, 剪贴板文本根本没进文档; 只有首字符是非 ASCII
+  /// (如纯中文) 时 processKey 返回 false 才回退到 insertTextPatch
+  /// 全文上屏。所以含字母/数字/符号的剪贴板内容点按必现此 bug。
+  /// 修复与 pasteCommand / 常用语补全点选同一路: 先清未提交的组字
+  /// 状态 (内嵌模式下 marked 区的 preedit 一并清掉, 避免粘贴后
+  /// 残留组字态继续拼进下一键), 再 textDocumentProxy.insertText
+  /// 直接插原文——不走 insertTextPatch, 避免成对符号逻辑改写
+  /// 用户粘贴的文本。
+  open func insertPastedText(_ text: String) {
+    guard !text.isEmpty else { return }
+    if !rimeContext.userInputKey.isEmpty {
+      textDocumentProxy.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
+      rimeContext.reset()
+    }
+    textDocumentProxy.insertText(text)
   }
 
   open func selectNextKeyboard() {
@@ -1080,13 +1124,27 @@ private extension KeyboardInputViewController {
       self.textDocumentProxy.insertText(phrase)
     }
 
-    // 切出英文/数字键盘时清掉可能残留的补全 (中文键盘的 syncContext
+    // 边栏点选替换前落盘已选文字 (Bug A): 部分选词不产生引擎 commit,
+    // 选定的词只在 preedit 里, 边栏替换的 reset() 会把它清掉; 替换前
+    // 先把这段文字插进文档。同步执行 (RimeContext 在 reset() 前回调,
+    // 插完才清组字)。与上屏 commit 同款: 先清 marked (内嵌模式下
+    // preedit 正在 field 里), 再直接插原文 (不走 insertTextPatch,
+    // 避免成对符号逻辑改写中文)。
+    rimeContext.onFlushCommittedTextBeforeSidebarReplace = { [weak self] text in
+      guard let self = self else { return }
+      self.textDocumentProxy.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
+      self.textDocumentProxy.insertText(text)
+    }
+
+    // 切出直输键盘 (英文/数字, 含 asciiMode 英文与 123 页
+    // .chineseNumeric) 时清掉可能残留的补全 (中文键盘的 syncContext
     // 会在下次打字时重算, 但切键盘本身不打字, 不清会留一条 stale 的在栏里)。
+    // 判定与补全触发共用 isDirectInputKeyboard, 口径必须一致。
     keyboardContext.keyboardTypePublished
       .receive(on: DispatchQueue.main)
       .sink { [weak self] type in
         guard let self = self else { return }
-        guard type.isAlphabetic || type == .numeric else {
+        guard self.isDirectInputKeyboard(type) else {
           self.rimeContext.clearPhraseCompletion()
           return
         }

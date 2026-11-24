@@ -78,6 +78,17 @@ public protocol KeyboardController: AnyObject {
    */
   func insertText(_ text: String)
 
+  /**
+   Insert a whole pasted text (clipboard item, phrase, paste row/segment)
+   directly into the document, bypassing the RIME engine.
+
+   整段粘贴文本 (剪贴板条目、常用语、粘贴提示行/分段) 直接写入文档,
+   不走 RIME 引擎。insertText 是单字符按键入口: 整段文本走它会被
+   当成一次按键喂给引擎 (processKey 只取字符串首字节), 其余丢掉,
+   候选栏还会出现引擎的残余候选。
+   */
+  func insertPastedText(_ text: String)
+
   /// 插入符号
   func insertSymbol(_ symbol: Symbol)
 

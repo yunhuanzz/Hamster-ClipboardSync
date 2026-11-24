@@ -128,6 +128,18 @@ public class RimeContext {
   /// 参数: 短语原文, 要删的文档前缀长度, 当初匹配的输入 (VC 校验用)。
   public var onApplyPhraseCompletion: ((String, Int, String) -> Void)?
 
+  /// 边栏点选替换前, 把已选定的词先写入文档的回调 (VC 接, 它持有
+  /// textDocumentProxy)。参数: preedit 里已选定的前导文字。
+  /// 部分选词不产生引擎 commit: librime 的 OnSelect 只 Close 段,
+  /// 不调 CommitText, 所以 selectCandidate 后 getCommitText() 为空,
+  /// 选定的词只存在于 composition preedit 里, 从未进文档; 边栏替换
+  /// 的 reset()+重敲剩余输入会把这段 preedit 一起销毁, 点一次边栏
+  /// 就丢一段已选的词 (Bug A: 点 今天 再点边栏 tian, 今天就没了)。
+  /// 替换真正执行前 (守卫通过后、reset() 前) 调一次, 把这段文字落
+  /// 到文档里; 重敲的剩余输入只补后面的词, 整句才完整。无已选文字
+  /// 时不调用 (空串不回调)。
+  public var onFlushCommittedTextBeforeSidebarReplace: ((String) -> Void)?
+
   /// 首个引擎候选 (跳过常用语补全项): 顶字上屏/首选上屏用的都是
   /// 引擎候选, 补全短语只能点选上屏, 不能被空格/符号/emoji 顶上去。
   @MainActor
@@ -221,6 +233,10 @@ public extension RimeContext {
     self.pageIndex = 0
     self.userInputKey = ""
     self.selectCandidatePinyin = nil
+    // 组字没了, 边栏快照也随之失效 (下次列表生成时重捕); 不清会留一
+    // 个过期快照, 点选校验只看 get_input 后缀 (提交后仍返回完整原始
+    // 串), 拦不住它 (Bug A 的另一半)。
+    self.lastSidebarRemainder = nil
     self.suggestions.removeAll(keepingCapacity: false)
     self.phraseCompletion = nil
     self.phraseCompletionInput = ""
@@ -1078,6 +1094,26 @@ public extension RimeContext {
     return (offset, String(fullKeys.dropFirst(offset)))
   }
 
+  /// 当前 preedit 里已选定的前导文字 (closed 段的中文), 没有返回 ""。
+  /// 算法与 remainingInputOffset() 同款: 从末尾往前找连续的输入码
+  /// (数字/小写字母/空格), 它前面的就是已选定的文字。
+  /// 例: "今天天气9436 426" -> "今天天气"; "tian 74 9436 426" -> ""。
+  @MainActor
+  func committedPrefixText() -> String {
+    let preedit = rimeContext?.composition.preedit ?? ""
+    var start = preedit.endIndex
+    while start > preedit.startIndex {
+      let prev = preedit.index(before: start)
+      let ch = preedit[prev]
+      if ch.isNumber || ch.isLowercase || ch == " " {
+        start = prev
+      } else {
+        break
+      }
+    }
+    return String(preedit[..<start])
+  }
+
   /// 在剩余输入里替换一段 (边栏点选音节用, 替代 tryHandleReplaceInputTexts)。
   /// 旧方法对全量输入码做 clear + 重敲, 会把已提交的前缀也重敲回去, 提交
   /// 状态就丢了 (候选栏回到整句)。这里只重敲剩余部分: 已提交的词已经在
@@ -1106,7 +1142,18 @@ public extension RimeContext {
       return false
     }
     Logger.statistics.warning("sidebar tap replace remaining='\(remaining)' -> '\(newRemaining)' (text='\(text)', startPos=\(startPos), count=\(count))")
-    reset()  // 清掉组字与 selectCandidatePinyin; 已提交的词已在文档里
+    // (Bug A) 先把已选定的词落到文档里, 再 reset: 部分选词不产生引擎
+    // commit, 选定的词只在 preedit 里, reset() 会把它和组字一起清掉,
+    // 而重敲的只是剩余输入 —— 不先落盘, 点一次边栏就丢一段已选的词
+    // (今天 -> 点边栏 tian, 今天就是这么没的; 旧注释“已提交的词已在
+    // 文档里了”是错的, 只有整句提交时 getCommitText() 才非空)。
+    // 回调同步插文档 (VC 直接 insertText), 插完再清组字, 顺序不能反。
+    let committedPrefix = committedPrefixText()
+    if !committedPrefix.isEmpty {
+      Logger.statistics.warning("sidebar tap flush committed prefix='\(committedPrefix)' to document before replace")
+      onFlushCommittedTextBeforeSidebarReplace?(committedPrefix)
+    }
+    reset()  // 清掉组字与 selectCandidatePinyin; 已选的词上面已落盘
     for key in newRemaining {
       _ = Rime.shared.inputKey(String(key))
     }
@@ -1181,6 +1228,20 @@ public extension RimeContext {
     // 注意赋值顺序
     self.userInputKey = userInputText
     self.commitText = commitText
+    // 边栏快照保鲜 (Bug A 的另一半): 每次同步都用刚读的 preedit 重算
+    // 剩余输入。只在列表生成时捕获 (#43) 不够: 两次点选之间的一次选词
+    // 提交会让快照过期, 而 get_input 仍返回完整原始串,
+    // sidebarRemainder() 的后缀校验拦不住过期快照, 边栏点选就会把
+    // 已提交的音节当成剩余输入重敲。剩余为空时不覆盖 (保留 #43 的
+    // 失效恢复: preedit 失效时仍可用旧快照重敲)。
+    let sidebarFullKeys = Rime.shared.getInputKeys()
+    let sidebarOffset = remainingInputOffset()
+    if sidebarOffset <= sidebarFullKeys.count {
+      let sidebarRemaining = String(sidebarFullKeys.dropFirst(sidebarOffset))
+      if !sidebarRemaining.isEmpty {
+        lastSidebarRemainder = (sidebarOffset, sidebarRemaining)
+      }
+    }
     // 常用语补全: 当前输入是某条常用语的前缀 (字母/拼音/九宫格数字码)
     // 时, 把整条短语挂在候选栏首位 (高亮 + “常用语”角标), 与引擎
     // 候选并列, 不替换它们。分页模式 (useContextPaging) 下候选栏

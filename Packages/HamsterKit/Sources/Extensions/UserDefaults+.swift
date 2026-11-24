@@ -866,8 +866,11 @@ public extension UserDefaults {
 
   // MARK: - 常用语 (键盘内常用语按钮)
 
-  /// 内置常用语 (首次使用、未自定义时返回)
-  static let builtinCommonPhrases: [String] = [
+  /// 2026-11-24 (B2) 之前内置的 10 条默认常用语, 已全部下线,
+  /// 不再作为默认值返回。仅供 migrateCommonPhrasesRemoveBuiltinsIfNeeded()
+  /// 用: 已存列表里若混有这些句子就整句删掉 (精确匹配), 用户自己
+  /// 加的短语一律保留。
+  static let legacyBuiltinCommonPhrases: [String] = [
     "好的",
     "收到",
     "谢谢",
@@ -880,7 +883,28 @@ public extension UserDefaults {
     "好的，谢谢",
   ]
 
-  /// 常用语列表。未设置过时返回内置列表; 设置过后返回保存的值
+  /// 一次性迁移 (2026-11-24 B2): 用户说“默认常用语全部删掉, 我不需要”。
+  /// 已存常用语里若混有旧内置 10 条就整句删掉 (精确匹配, 只删这 10 条);
+  /// 用户自己加的短语 (如邮箱/手机号/你好) 一律保留; 从未存过值时
+  /// getter 已返回空, 无事可做。幂等: 标记 key 保证只跑一次,
+  /// 跑完后列表里不再有旧内置句子, 再调也不会重复触发。
+  /// 注意: 显式 public——调用方在 HamsterKeyboardKit 模块与主 App
+  /// (跨模块, build #23 就是死在跨模块 internal 上)。
+  /// 调用点: App 启动时 + 键盘工具栏初始化时 (与 toolbar 迁移同处)。
+  public func migrateCommonPhrasesRemoveBuiltinsIfNeeded() {
+    guard object(forKey: Self.commonPhrasesBuiltinsRemovedMigrationKey) == nil else { return }
+    set(true, forKey: Self.commonPhrasesBuiltinsRemovedMigrationKey)
+    guard object(forKey: Self.commonPhrasesKey) != nil else { return }
+    var phrases = array(forKey: Self.commonPhrasesKey) as? [String] ?? []
+    let beforeCount = phrases.count
+    phrases.removeAll { Self.legacyBuiltinCommonPhrases.contains($0) }
+    guard phrases.count != beforeCount else { return }
+    set(phrases, forKey: Self.commonPhrasesKey)
+    Logger.statistics.info("common phrases migrated: removed \(beforeCount - phrases.count) builtin defaults, kept \(phrases.count) user phrases")
+  }
+
+  /// 常用语列表。未设置过时返回空 (2026-11-24 B2: 默认常用语全部
+  /// 下线, 不再内置任何句子); 设置过后返回保存的值
   /// (即使删空也返回保存的空数组, 不会重置回内置)。
   /// App 设置页可通过此属性增删; 键盘内长按可删除单条。
   var commonPhrases: [String] {
@@ -888,7 +912,7 @@ public extension UserDefaults {
       if object(forKey: Self.commonPhrasesKey) != nil {
         return array(forKey: Self.commonPhrasesKey) as? [String] ?? []
       }
-      return Self.builtinCommonPhrases
+      return []
     }
     set { set(newValue, forKey: Self.commonPhrasesKey) }
   }
@@ -980,6 +1004,7 @@ extension UserDefaults {
   private static let clipboardHistoryKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardHistory"
   private static let clipboardHistoryMaxCount = 20
   private static let commonPhrasesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.commonPhrases"
+  private static let commonPhrasesBuiltinsRemovedMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.commonPhrasesBuiltinsRemoved"
 
   // MARK: - 补丁
 

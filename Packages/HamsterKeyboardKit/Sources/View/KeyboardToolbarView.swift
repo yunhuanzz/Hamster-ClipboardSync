@@ -954,6 +954,9 @@ class KeyboardToolbarView: NibLessView {
     UserDefaults.hamster.migrateToolbarToolsOrderFromZonesIfNeeded()
     // 一次性迁移 (第 12 轮): 默认工具误记进"亲手加上去"集合的清掉 (只跑一次)。
     UserDefaults.hamster.migrateToolbarUserAddedDefaultsIfNeeded()
+    // 一次性迁移 (2026-11-24 B2): 已存常用语里混有的旧内置 10 条默认
+    // 短语删掉, 用户自己加的短语保留 (只跑一次)。
+    UserDefaults.hamster.migrateCommonPhrasesRemoveBuiltinsIfNeeded()
     setupToolsStackLayoutIfNeeded()
     // 退出定制态: 晃动停掉, ⊖ 标记清掉 (重建后位置/归属可能已变)。
     exitToolbarCustomizeMode()
@@ -1713,13 +1716,16 @@ class KeyboardToolbarView: NibLessView {
 
   // MARK: - 文本列表面板 (剪贴板 / 常用语)
 
-  /// 把面板文本输入到当前输入框。优先走 KeyboardController.insertText,
+  /// 把面板文本输入到当前输入框。优先走 KeyboardController.insertPastedText,
   /// 拿不到 controller 时直接写 documentProxy。失败静默。
+  /// 注意: 不能走 controller.insertText——那是单字符按键入口, 中文键盘下会
+  /// 把整段文本当一次按键喂给 RIME (processKey 只取首字节), 剪贴板文本进不了
+  /// 文档, 候选栏反而出现一个奇怪的数字/符号候选 (Bug C)。
   private func insertPanelText(_ text: String) {
     guard !text.isEmpty else { return }
     if let handler = actionHandler as? StandardKeyboardActionHandler,
        let controller = handler.keyboardController {
-      controller.insertText(text)
+      controller.insertPastedText(text)
       return
     }
     keyboardContext.textDocumentProxy.insertText(text)

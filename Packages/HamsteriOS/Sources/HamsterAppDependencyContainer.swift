@@ -116,6 +116,10 @@ open class HamsterAppDependencyContainer {
     // 幂等, 存的不是旧 BWG 地址时什么都不做。
     UserDefaults.hamster.migrateClipboardSyncServerFromBWGToLAN()
 
+    // (2026-11-24 B2) App 启动先跑一次性迁移: 已存常用语里混有的
+    // 旧内置 10 条默认短语删掉, 用户自己加的短语保留; 幂等。
+    UserDefaults.hamster.migrateCommonPhrasesRemoveBuiltinsIfNeeded()
+
     // 创建 long-lived 属性
     self.rimeContext = RimeContext()
     self.mainViewModel = MainViewModel()

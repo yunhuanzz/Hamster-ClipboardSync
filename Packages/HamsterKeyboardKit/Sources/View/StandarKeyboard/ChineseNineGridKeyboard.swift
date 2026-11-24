@@ -135,19 +135,27 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
     rimeContext.userInputKeyPublished
       .receive(on: DispatchQueue.main)
       .sink { [unowned self] in
-        var pinyinList = keyboardContext.symbolsOfChineseNineGridKeyboard
-        if !$0.isEmpty {
-          let candidatePinyinList = rimeContext.getPinyinCandidates()
-          if !candidatePinyinList.isEmpty {
-            pinyinList = candidatePinyinList
-          }
-        }
-        var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(pinyinList, toSection: 0)
-        symbolsListView.diffalbeDataSource.apply(snapshot, animatingDifferences: false)
+        self.refreshSidebarSymbols(userInputKey: $0)
       }
       .store(in: &subscriptions)
+  }
+
+  /// 按当前输入重算边栏列表并应用 (列表为空时回落到默认符号)。
+  /// 点选被拒绝时也直接调它自愈: 列表可能是旧的 (快照过期), 同步重算
+  /// 一次, 免得用户对着一个点不动的旧音节反复点 (Bug A: 点 天气 后
+  /// 边栏仍显示 tian)。逻辑与原来 sink 里的一致, 只是抽出来复用。
+  private func refreshSidebarSymbols(userInputKey: String) {
+    var pinyinList = keyboardContext.symbolsOfChineseNineGridKeyboard
+    if !userInputKey.isEmpty {
+      let candidatePinyinList = rimeContext.getPinyinCandidates()
+      if !candidatePinyinList.isEmpty {
+        pinyinList = candidatePinyinList
+      }
+    }
+    var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
+    snapshot.appendSections([0])
+    snapshot.appendItems(pinyinList, toSection: 0)
+    symbolsListView.diffalbeDataSource.apply(snapshot, animatingDifferences: false)
   }
 
   // MARK: - Layout
@@ -378,5 +386,10 @@ public extension ChineseNineGridKeyboard {
     Logger.statistics.warning("sidebar tap symbol=\(symbol) offset=\(offset) remaining='\(remainingKeys)' startPos=\(startPos) count=\(symbol.utf8.count)")
     let handle = rimeContext.tryHandleReplaceRemainingInputTexts(symbol, startPos: startPos, count: symbol.utf8.count)
     Logger.statistics.warning("change input text handle = \(handle)")
+    if !handle {
+      // 点选被拒绝 (剩余输入已变 / 快照过期): 列表是旧的, 按当前 preedit
+      // 同步重算一次自愈, 免得用户对着一个点不动的旧音节反复点。
+      refreshSidebarSymbols(userInputKey: rimeContext.userInputKey)
+    }
   }
 }
