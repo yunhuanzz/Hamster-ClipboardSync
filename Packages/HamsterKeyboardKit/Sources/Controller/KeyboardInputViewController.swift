@@ -523,10 +523,16 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     type.isAlphabetic || type.isNumber || rimeContext.asciiMode
   }
 
-  /// 英文/数字键盘的常用语补全触发 (textDidChange 里调用)。
-  /// 数字键盘 (123 页 = .chineseNumeric, 不是 .numeric) 按光标前
-  /// 连续数字查; 英文直输 (.alphabetic, 或中文键盘中/英切换后的
-  /// asciiMode) 按光标前连续字母查 (字面或拼音前缀)。
+  /// 英文/数字键盘的常用语补全触发。调用点有四处, 互为备份 (幂等):
+  /// textDidChange、insertTextPatch 末尾 (数字键 insertSymbol 与
+  /// 英文 asciiMode 提交都走这里)、insertText 的 .alphabetic 分支、
+  /// deleteBackward 无组字分支。只靠 textDidChange 在真机上不触发
+  /// (build #44 回归: 类型判定修对了, 但补全始终出不来; 九宫格拼音
+  /// 走 RIME syncContext 不受影响), 所以插入/删除后同步触发一次,
+  /// 直接读刚写完的文档, 不依赖 textDidChange 是否回调。
+  /// 数字键盘 (123 页 = .chineseNumeric / .numericNineGrid, 不是
+  /// .numeric) 按光标前连续数字查; 英文直输 (.alphabetic, 或中文键盘
+  /// 中/英切换后的 asciiMode) 按光标前连续字母查 (字面或拼音前缀)。
   /// 中文键盘走 RIME syncContext, 不进这里。输入为空或无匹配时清掉
   /// 之前挂的补全 (退格删回前缀内仍会继续显示)。
   private func updatePhraseCompletionForDirectInput() {
@@ -574,6 +580,9 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
       if deletedLastCommit {
         _ = rimeContext.undoLastCommit()
       }
+      // 退格后直输补全也要同步重算 (与 textDidChange 互为备份,
+      // 否则只靠 textDidChange 时退格进前缀内补全不更新)。
+      updatePhraseCompletionForDirectInput()
       return
     }
 
@@ -660,6 +669,11 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
   open func insertText(_ text: String) {
     if keyboardContext.keyboardType.isAlphabetic {
       textDocumentProxy.insertText(text)
+      // 英文键盘直输不走 RIME, 补全不能只靠 textDidChange:
+      // build #44 只修了类型判定, 但真机上 textDidChange 仍没把补全
+      // 带出来 (英文/123 始终不触发, 九宫格拼音走 RIME 路却正常)。
+      // 插入后同步触发一次 (与 textDidChange 互为备份, 幂等重算)。
+      updatePhraseCompletionForDirectInput()
       return
     }
 
@@ -1241,6 +1255,15 @@ private extension KeyboardInputViewController {
     if returnToPrimaryKeyboard {
       keyboardContext.setKeyboardType(keyboardContext.returnKeyboardType())
     }
+
+    // 直输补全同步触发 (build #44 回归): 数字键 (insertSymbol) 与
+    // 英文 asciiMode 提交 (commit sink) 都走这里直接写文档, 只靠
+    // textDidChange 的话真机上不触发; 插入后立即按当前文档重算一次
+    // 补全 (与 textDidChange 互为备份, 幂等)。中文组字时 userInputKey
+    // 非空, 触发里的 guard 会直接返回, 不干扰 syncContext 的补全;
+    // 中文选词提交后类型是 .chinese 且 asciiMode 关, 类型判定不命中,
+    // 也不产生补全。
+    updatePhraseCompletionForDirectInput()
   }
 }
 

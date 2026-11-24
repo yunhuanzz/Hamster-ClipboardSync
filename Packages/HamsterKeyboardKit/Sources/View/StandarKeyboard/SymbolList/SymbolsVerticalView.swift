@@ -100,6 +100,14 @@ class SymbolsVerticalView: NibLessView {
     setupAppearance()
   }
 
+  /// 选完拼音后把列表滚回顶部: 下一个音节的列表从头看, 不用用户自己滑回去。
+  /// 立即复位 (不动画): 列表重建后立刻在顶部, 快速连续点选也不会停在半路。
+  /// 先 layoutIfNeeded() 保证新内容尺寸已算好, 再置 contentOffset。
+  func resetScrollToTop() {
+    symbolsVerticalListView.layoutIfNeeded()
+    symbolsVerticalListView.setContentOffset(.zero, animated: false)
+  }
+
   /// 底部深色样式路径
   var underPath: UIBezierPath {
     CAShapeLayer.underPath(size: CGSize(width: frame.size.width, height: frame.size.height + 1), cornerRadius: style.cornerRadius)

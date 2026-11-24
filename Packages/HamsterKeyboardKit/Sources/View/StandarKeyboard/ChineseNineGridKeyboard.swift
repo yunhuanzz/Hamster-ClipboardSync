@@ -156,6 +156,8 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
     snapshot.appendSections([0])
     snapshot.appendItems(pinyinList, toSection: 0)
     symbolsListView.diffalbeDataSource.apply(snapshot, animatingDifferences: false)
+    // 选完拼音后列表重建 (下一音节): 滚回顶部, 从头看, 不用手动滑回去。
+    symbolsListView.resetScrollToTop()
   }
 
   // MARK: - Layout
