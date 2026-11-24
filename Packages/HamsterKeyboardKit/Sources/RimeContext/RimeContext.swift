@@ -1191,7 +1191,14 @@ public extension RimeContext {
       syncContext()
       return false
     }
-    return forgetCandidateInCurrentMenu(text: commit.text, code: commit.code, fullInput: commit.code)
+    // 忘掉成功后必须清掉为找词而重敲的输入码: forget 内部的 restoreInput
+    // 会把原输入码敲回去 (长按忘词时需要, 用户还在打字); 但退格删词后
+    // 键盘应回到无组字状态, 否则候选栏又弹出来, 再按退格就只能一个一个
+    // 拼音往回删 (热修复 2026-11-24)。reset 会清掉输入码、候选与组字。
+    let forgot = forgetCandidateInCurrentMenu(text: commit.text, code: commit.code, fullInput: commit.code)
+    reset()
+    syncContext()
+    return forgot
   }
 
   /// 长按候选词 -> 置顶 (c): 把 (当前输入码, 该候选) 记进置顶列表
