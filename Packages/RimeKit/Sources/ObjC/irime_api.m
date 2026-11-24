@@ -493,7 +493,15 @@ static RimeLeversApi *get_levers() {
 }
 
 - (BOOL)deleteCandidate:(RimeSessionId)session andIndex:(int)index {
-  return rime_get_api()->delete_candidate(session, index);
+  // (第 14 轮第 5 项): delete_candidate 在 RimeApi 结构体尾部附近,
+  // 与 2023 年缺失的 get_state_label_abbreviated / replace_input 同一
+  // 类风险。amorphobia 库实测有该符号, 但仍守卫: 指针不存在时返回 NO,
+  // 绝不直接调用一个可能为空的函数指针。
+  RimeApi *api = rime_get_api();
+  if (!RIME_API_AVAILABLE(api, delete_candidate)) {
+    return NO;
+  }
+  return api->delete_candidate(session, index);
 }
 
 - (NSString *)getInput:(RimeSessionId)session {

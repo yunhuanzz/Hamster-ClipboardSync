@@ -20,12 +20,18 @@ import UIKit
 
  工具栏左侧菜单 (点左上角图标打开, 仿微信输入法):
  4 列宫格面板, 含剪贴板 / 常用语 / 切换26键·九宫格 /
- 定制工具栏 / 立即同步 / 设置 / 常用语管理 (共 7 格)。
+ 定制工具栏 / 设置 (共 5 格)。
  格子图标是开关: 点一下打开菜单, 再点一下关闭; 打开时有 0.2s
  淡入 + 上滑动画。⌄ 按钮只负责收起键盘。
- 工具栏按钮: 6 个菜单功能 (除"定制工具栏"本身和"收起键盘")
- 都可上栏, 通过"定制工具栏"自由拖动排序、⊖ 拿掉 (回工具池)、
- 点按加入; 顺序存在共享 UserDefaults (toolbarToolsOrder)。
+ 工具栏按钮: 6 个工具 (剪贴板 / 常用语 / 切换26键·九宫格 /
+ 立即同步 / 设置 / 常用语管理) 都可上栏, 通过"定制工具栏"
+ 自由拖动排序、⊖ 拿掉 (回工具池)、点按加入; 顺序存在共享
+ UserDefaults (toolbarToolsOrder)。
+ 第 14 轮起"立即同步剪贴板"和"常用语管理"不在菜单宫格里
+ (剪贴板面板里本来就有立即同步药丸按钮, 常用语面板里本来就
+ 能编辑/删除/添加), 但仍是可上栏的工具 (工具池里还在),
+ 工具栏按钮与菜单格子是两套注册表, 见 menuTiles() /
+ toolbarToolDefinitions()。
  每个工具还有一侧属性 (左/右, toolbarToolSides, 第 9 轮):
  长按拖到工具栏左半区进左侧、右半区进右侧, 松手保存;
  格子图标钉死最左、收起键盘 (⌄) 钉死最右。
@@ -267,6 +273,14 @@ class KeyboardToolbarView: NibLessView {
   private var toolbarDraggedToolID: String?
   private var toolbarDragStartX: CGFloat = 0
   private var toolbarDragMoved = false
+  /// 工具栏长按拖动的浮层快照 (跟手指走, 第 14 轮): .began 时从被拖按钮
+  /// 拍一张, 原按钮 alpha 0 留在栈里当"活占位坑" (其余按钮随手指实时
+  /// 换位), 快照中心 = 手指位置 - 抓起偏移 (不跳变); 松手时飞回按钮
+  /// 落点再消失。之前没有快照, 图标只在原位放大 1.15×、不跟手指,
+  /// y 还钉在行中心线上, 用户感觉"手指在哪图标不在哪"。
+  private var toolbarDragSnapshot: UIView?
+  /// 抓起瞬间手指相对快照中心的偏移 (拖动全程带着, 快照不跳到手指中心)。
+  private var toolbarDragGrabOffset: CGPoint = .zero
   /// 定制态 (晃动 + ⊖) 是否开着。
   private var isToolbarCustomizeMode = false
   /// 定制态无操作自动退出定时器 (3 秒)。
@@ -634,9 +648,12 @@ class KeyboardToolbarView: NibLessView {
 
   // MARK: - 左上角菜单 (宫格面板, 仿微信输入法)
 
-  /// 菜单宫格: 与旧版 UIMenu 同样的功能项, 另加"常用语管理"。
+  /// 菜单宫格: 5 格 (第 14 轮: "立即同步剪贴板"和"常用语管理"
+  /// 已拿掉——剪贴板面板里本来就有立即同步药丸按钮, 常用语面板里
+  /// 本来就能编辑/删除, 还在分段面板里加了键盘内添加入口;
+  /// 这两个功能仍是可上栏的工具, 见 toolbarToolDefinitions())。
   /// 切换 26 键/九宫格的标题随当前中文主键盘布局而变, 面板每次打开时现算。
-  /// 共 7 格, 没有"收起键盘" (第 7 轮移出菜单: 它只保留在工具栏最右的
+  /// 共 5 格, 没有"收起键盘" (第 7 轮移出菜单: 它只保留在工具栏最右的
   /// 固定 ⌄ 按钮上, 放菜单里毫无意义)。
   private func menuTiles() -> [(id: String, title: String, systemImage: String)] {
     let layoutTitle = currentChineseLayoutIsNineGrid ? "切换26键" : "切换九宫格"
@@ -645,14 +662,12 @@ class KeyboardToolbarView: NibLessView {
       (id: "phrases", title: "常用语", systemImage: "quote.bubble"),
       (id: "switchLayout", title: layoutTitle, systemImage: "keyboard"),
       (id: "customize", title: "定制工具栏", systemImage: "slider.horizontal.3"),
-      (id: "syncNow", title: "立即同步剪贴板", systemImage: "arrow.triangle.2.circlepath"),
       (id: "settings", title: "设置", systemImage: "gear"),
-      (id: "managePhrases", title: "常用语管理", systemImage: "square.and.pencil"),
     ]
   }
 
   /// 打开功能菜单宫格面板 (覆盖在键盘根视图上, 工具栏下方)。
-  /// 7 个格子永远全部显示 (第 10 轮: 菜单格子开关已删, 不再过滤)。
+  /// 5 个格子永远全部显示 (第 10 轮: 菜单格子开关已删, 不再过滤)。
   /// 面板本身透明: 打开前先把下面的按键容器隐藏, 露出键盘根视图
   /// 自身的底色 (与键盘本体同一块系统底色, 不可能有色差); 关闭时恢复。
   /// 面板顶贴工具栏底边、不盖住工具栏 (透明面板盖住工具栏会让标题
@@ -738,7 +753,9 @@ class KeyboardToolbarView: NibLessView {
       || view is KeyboardPasteSegmentsPanelView
   }
 
-  /// 点宫格后的动作 (与旧版 UIMenu 的各项一一对应)。
+  /// 点宫格后的动作。
+  /// "syncNow" / "managePhrases" 不在菜单宫格里了 (第 14 轮),
+  /// 但仍是工具栏按钮的 id, 点工具栏上的同步/常用语管理按钮还走这里。
   /// 没有 "dismiss": 收起键盘不在菜单里, 只在工具栏最右的固定 ⌄ 按钮上。
   private func handleMenuSelection(_ tileID: String) {
     switch tileID {
@@ -753,7 +770,10 @@ class KeyboardToolbarView: NibLessView {
     case "syncNow":
       ClipboardSyncService.shared.syncNow()
     case "settings":
-      actionHandler.handle(.release, on: .url(URL(string: "hamster://dev.fuxiao.app.hamster/main"), id: "openHamster"))
+      // 跳回主 App 设置首页: HamsterConstants.appURL 与 Info.plist
+      // 里注册的 hamster scheme 一致 (不要手写 scheme 字符串);
+      // /main 由 SceneDelegate 接住后 navigation(.main) 回到设置首页。
+      actionHandler.handle(.release, on: .url(URL(string: HamsterConstants.appURL + "/main"), id: "openHamster"))
     case "managePhrases":
       showCommonPhrasesEditorPanel()
     default:
@@ -783,7 +803,7 @@ class KeyboardToolbarView: NibLessView {
     panel.onOpenApp = { [weak self] in
       guard let self else { return }
       self.dismissPhrasesEditorPanel()
-      self.actionHandler.handle(.release, on: .url(URL(string: "hamster://dev.fuxiao.app.hamster/main"), id: "openHamster"))
+      self.actionHandler.handle(.release, on: .url(URL(string: HamsterConstants.appURL + "/main"), id: "openHamster"))
     }
     panel.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(panel)
@@ -992,6 +1012,11 @@ class KeyboardToolbarView: NibLessView {
   }
 
   /// 工具栏长按: 拖动换位/换侧, 或原地长按进定制态 (晃动 + ⊖)。
+  /// 拖动时快照跟手指走 (x 和 y 都跟, 不钉在行中心线; 抓起偏移一直
+  /// 带着, 快照不跳变), 原按钮 alpha 0 留在栈里当"活占位坑",
+  /// 其余按钮随手指实时换位; 松手时快照飞回按钮落点再消失,
+  /// 落点按"其余按钮中点为界" (中线分侧, 见 toolbarInsertionTarget,
+  /// 即离哪侧近进哪侧)。
   /// 拖动时按手指 x 实时换位并写盘 (侧 + 顺序), 松手即保存并退出定制态;
   /// 手指在工具栏左半区 → 左侧容器, 右半区 → 右侧容器 (第 9 轮);
   /// 组内位置按“去掉被拖按钮后的其余按钮中点”为界, 不会错一位。
@@ -1003,7 +1028,7 @@ class KeyboardToolbarView: NibLessView {
           let toolID = toolID(for: button) else { return }
     switch recognizer.state {
     case .began:
-      // 开始拖动: 进定制态 (晃动 + 全部 ⊖) + 震动一下 + 图标微微放大
+      // 开始拖动: 进定制态 (晃动 + 全部 ⊖) + 震动一下 + 提起快照
       // 表示“拎起来了”; touchDown 留下的按压底色要清掉, 否则松手后按钮一直亮着。
       enterToolbarCustomizeMode()
       toolbarDraggedToolID = toolID
@@ -1012,12 +1037,47 @@ class KeyboardToolbarView: NibLessView {
       toolbarDragSnappedRight = nil
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
       button.backgroundColor = style.toolbarButtonBackgroundColor
-      UIView.animate(withDuration: 0.15) {
-        button.transform = CGAffineTransform(scaleX: 1.15, y: 1.15)
-        button.alpha = 0.85
+      // 上一次拖动的快照若还在飞 (0.15s 落下动画没跑完就又抓起来),
+      // 先拿掉, 免得两个快照叠在一起 (旧动画的 completion 里有
+      // toolbarDraggedToolID 守卫, 不会把这次的按钮 alpha 改回去)。
+      toolbarDragSnapshot?.removeFromSuperview()
+      toolbarDragSnapshot = nil
+      toolbarDragGrabOffset = .zero
+      // 提起快照跟手指走 (第 14 轮, 与池子贴纸同款 1.15× + 阴影):
+      // 先藏起被拖按钮自己的 ⊖ 再拍, 否则 ⊖ 会跟着快照一起飞;
+      // 原按钮 alpha 0 留在栈里当"活占位坑"。
+      toolbarDeleteBadges[toolID]?.isHidden = true
+      if let snapshot = button.snapshotView(afterScreenUpdates: true) {
+        snapshot.frame = button.convert(button.bounds, to: commonFunctionBar)
+        snapshot.isUserInteractionEnabled = false
+        snapshot.layer.shadowColor = UIColor.black.cgColor
+        snapshot.layer.shadowOpacity = 0.25
+        snapshot.layer.shadowRadius = 8
+        snapshot.layer.shadowOffset = CGSize(width: 0, height: 4)
+        snapshot.transform = CGAffineTransform(scaleX: 1.15, y: 1.15)
+        commonFunctionBar.addSubview(snapshot)
+        toolbarDragSnapshot = snapshot
+        let finger = recognizer.location(in: commonFunctionBar)
+        toolbarDragGrabOffset = CGPoint(x: finger.x - snapshot.center.x, y: finger.y - snapshot.center.y)
+        button.alpha = 0
+      } else {
+        // 快照失败时回退到旧行为: 原按钮放大表示拎起来了。
+        UIView.animate(withDuration: 0.15) {
+          button.transform = CGAffineTransform(scaleX: 1.15, y: 1.15)
+          button.alpha = 0.85
+        }
       }
     case .changed:
       guard toolbarDraggedToolID == toolID else { return }
+      // 快照跟手指走 (x 和 y 都跟, 不钉在行中心线): 抓起偏移一直带着;
+      // y 夹在工具栏上下各 12pt 内, 手指甩出栏外图标不飞走。
+      // 放在 12pt 移动阈值判断之前: 没开始换位时图标也要跟着手指微动。
+      if let snapshot = toolbarDragSnapshot {
+        let finger = recognizer.location(in: commonFunctionBar)
+        var center = CGPoint(x: finger.x - toolbarDragGrabOffset.x, y: finger.y - toolbarDragGrabOffset.y)
+        center.y = min(max(center.y, commonFunctionBar.bounds.minY - 12), commonFunctionBar.bounds.maxY + 12)
+        snapshot.center = center
+      }
       let x = recognizer.location(in: commonFunctionBar).x
       if abs(x - toolbarDragStartX) > 12 { toolbarDragMoved = true }
       guard toolbarDragMoved else { return }
@@ -1059,9 +1119,33 @@ class KeyboardToolbarView: NibLessView {
       guard toolbarDraggedToolID == toolID else { return }
       toolbarDraggedToolID = nil
       toolbarDragSnappedRight = nil
-      UIView.animate(withDuration: 0.15) {
-        button.transform = .identity
-        button.alpha = 1.0
+      // 恢复被拖按钮自己的 ⊖ (快照时藏起来了, 不然会跟着快照飞)。
+      toolbarDeleteBadges[toolID]?.isHidden = false
+      // 快照飞回按钮落点、缩回原大、淡出后消失, 原按钮恢复显示
+      // (快照是按钮的替身, 松手时两者重合, 不闪一下);
+      // completion 里只在"当前没有新拖动"时恢复 alpha——
+      // 若 0.15s 内又抓起同一按钮, 新拖动拥有该按钮的 alpha。
+      // 没快照 (创建失败回退到旧行为) 时直接恢复原按钮。
+      if let snapshot = toolbarDragSnapshot {
+        toolbarDragSnapshot = nil
+        toolbarDragGrabOffset = .zero
+        let targetFrame = button.convert(button.bounds, to: commonFunctionBar)
+        let targetCenter = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
+        UIView.animate(withDuration: 0.15, animations: {
+          snapshot.center = targetCenter
+          snapshot.transform = .identity
+          snapshot.alpha = 0
+        }, completion: { [weak self] _ in
+          snapshot.removeFromSuperview()
+          if self?.toolbarDraggedToolID == nil {
+            button.alpha = 1.0
+          }
+        })
+      } else {
+        UIView.animate(withDuration: 0.15) {
+          button.transform = .identity
+          button.alpha = 1.0
+        }
       }
       // 拖动过: 位置已实时保存, 松手退出定制态。
       // 没拖动过 (原地长按松手): 留在定制态 (晃动 + ⊖), 3 秒无操作自动退出;
@@ -1156,9 +1240,13 @@ class KeyboardToolbarView: NibLessView {
   }
 
   /// 定制态下每个工具图标右上角的小红 ⊖ (点它删除该工具)。
-  /// 第 6 条: ⊖ 按图标比例缩小——旧的是 22pt 标记配 20pt 符号,
-  /// 在 ~30pt 的工具按钮上盖住大半个图标 (用户图8); 现在 13pt 符号,
-  /// 放在 20pt 的轻触区里 (视觉小、还能点中), 偏移也收小到 -4/+4。
+  /// 第 9 轮已缩过一次 (22pt 标记配 20pt 符号 -> 13pt 符号配 20pt 轻触区);
+  /// 但 build #36 实测仍显大: 反馈图里红圆直径约 39px ≈ 11.5pt,
+  /// 占 ~30pt 工具图标近四成, 视觉上压住了图标。
+  /// 第 14 轮再小一档: 11pt 符号 (渲染红圆约 9.7pt),
+  /// 轻触区保持 20×20pt (还能点中), 偏移保持 -4/+4。
+  /// 定制面板里和键盘主界面长按编辑时共用这一处实现 (都是工具栏本体的
+  /// 编辑态), 改一处两处都生效。
   private func showToolbarDeleteBadges() {
     hideToolbarDeleteBadges()
     for button in toolbarToolButtons {
@@ -1166,7 +1254,7 @@ class KeyboardToolbarView: NibLessView {
       let badge = UIButton(type: .custom)
       badge.translatesAutoresizingMaskIntoConstraints = false
       badge.setImage(UIImage(systemName: "minus.circle.fill"), for: .normal)
-      badge.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 13), scale: .default), forImageIn: .normal)
+      badge.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 11), scale: .default), forImageIn: .normal)
       badge.tintColor = .systemRed
       badge.backgroundColor = .clear
       badge.accessibilityIdentifier = toolID
@@ -1189,8 +1277,14 @@ class KeyboardToolbarView: NibLessView {
 
   @objc private func toolbarDeleteBadgeTapped(_ sender: UIButton) {
     guard let toolID = sender.accessibilityIdentifier, !toolID.isEmpty else { return }
-    // 与定制面板的 ⊖ 同一效果: 从顺序里拿掉 + 隐藏, 回工具池。
-    // 留在定制态 (可连续删几个), 重新计时 3 秒自动退出。
+    removeToolbarToolFromBar(toolID)
+  }
+
+  /// 从工具栏拿掉一个工具 (⊖ / 池子绿贴纸点按关掉共用, 同一语义):
+  /// 顺序里删掉 + 隐藏 (回工具池) + 清掉"亲手加上去"标记。
+  /// 留在定制态 (可连续删几个), 重新计时 3 秒自动退出;
+  /// 定制面板开着时被删的工具回池, 池子里它的绿底跟着去掉。
+  private func removeToolbarToolFromBar(_ toolID: String) {
     var order = UserDefaults.hamster.toolbarToolsOrder
     order.removeAll { $0 == toolID }
     UserDefaults.hamster.toolbarToolsOrder = order
@@ -1207,12 +1301,23 @@ class KeyboardToolbarView: NibLessView {
     }
   }
 
-  /// 统一工具注册表: 全部 6 个可上工具栏的工具 (id, 标题, 图标),
-  /// 即菜单宫格的 7 个格子减去"定制工具栏"本身 (它是入口, 不上栏;
-  /// "收起键盘"是固定按钮, 也不在内)。
-  /// 标题/图标复用 menuTiles(), 切换 26 键/九宫格的标题随当前布局而变。
+  /// 统一工具注册表: 全部 6 个可上工具栏的工具 (id, 标题, 图标)。
+  /// 第 14 轮起不再从 menuTiles() 派生: 菜单宫格只有 5 格
+  /// (立即同步 / 常用语管理已从菜单拿掉), 但这两个仍是可上栏的工具
+  /// (工具池里还在、工具栏按钮还在), 注册表必须保持 6 个,
+  /// 与 UserDefaults.toolbarToolAllIDs 一一对应。
+  /// "定制工具栏"本身是入口, 不上栏; "收起键盘"是固定按钮, 也不在内。
+  /// 标题/图标与 menuTiles() 同一套, 切换 26 键/九宫格的标题随当前布局而变。
   private func toolbarToolDefinitions() -> [(id: String, title: String, systemImage: String)] {
-    menuTiles().filter { $0.id != "customize" }
+    let layoutTitle = currentChineseLayoutIsNineGrid ? "切换26键" : "切换九宫格"
+    return [
+      (id: "clipboard", title: "剪贴板", systemImage: "list.clipboard"),
+      (id: "phrases", title: "常用语", systemImage: "quote.bubble"),
+      (id: "switchLayout", title: layoutTitle, systemImage: "keyboard"),
+      (id: "syncNow", title: "立即同步剪贴板", systemImage: "arrow.triangle.2.circlepath"),
+      (id: "settings", title: "设置", systemImage: "gear"),
+      (id: "managePhrases", title: "常用语管理", systemImage: "square.and.pencil"),
+    ]
   }
 
   /// 当前在工具栏上的工具 (按保存的顺序, 只含实际在栏上的工具)。
@@ -1278,6 +1383,11 @@ class KeyboardToolbarView: NibLessView {
       self?.customizePanel?.reload(
         allTools: self?.customizeAllTools() ?? [],
         onToolbarIDs: self?.customizeOnToolbarIDs() ?? [])
+    }
+    // 点按已在栏上的绿贴纸: 开关的"关"——从工具栏拿掉
+    // (与 ⊖ 同一语义, 见 removeToolbarToolFromBar)。
+    panel.onRemoveTool = { [weak self] toolID in
+      self?.removeToolbarToolFromBar(toolID)
     }
     // 池子贴纸拖到真实工具栏上: 悬停时在栏上插占位坑并返回坑中心
     // (容器坐标系), 供面板的快照落下动画用; 手指不在工具栏上时
@@ -1622,6 +1732,14 @@ class KeyboardToolbarView: NibLessView {
       var phrases = UserDefaults.hamster.commonPhrases
       guard phrases.indices.contains(index) else { return }
       phrases.remove(at: index)
+      UserDefaults.hamster.commonPhrases = phrases
+      self?.refreshClipboardPhrasesPanel()
+    }
+    /// 常用语页底部添加行: 追加进 commonPhrases (与常用语管理面板、
+    /// 主 App 设置页同一条保存路径), 列表刷新、面板保持打开。
+    panel.onAddPhrase = { [weak self] text in
+      var phrases = UserDefaults.hamster.commonPhrases
+      phrases.append(text)
       UserDefaults.hamster.commonPhrases = phrases
       self?.refreshClipboardPhrasesPanel()
     }

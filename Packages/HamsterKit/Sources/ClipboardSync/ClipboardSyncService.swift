@@ -127,6 +127,10 @@ public final class ClipboardSyncService {
 
   private func sync() {
     let defaults = UserDefaults.hamster
+    // (第 14 轮第 7 项) 每次同步先跑一次性迁移: 存着旧 BWG 地址的设备
+    // 换成本地局域网值, 否则只改默认值、他的键盘永远不会换过去。
+    // 幂等, 存的不是旧 BWG 地址时什么都不做。
+    defaults.migrateClipboardSyncServerFromBWGToLAN()
     guard defaults.clipboardSyncEnabled else {
       recordStatus("未启用")
       notifyFinished()

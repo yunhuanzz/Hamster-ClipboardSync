@@ -111,6 +111,11 @@ open class HamsterAppDependencyContainer {
   }
 
   private init() {
+    // (第 14 轮第 7 项) App 启动先跑一次性迁移: 存着旧 BWG 同步地址的
+    // 设备换成本地局域网值, 保证设置页在同步跑起来之前就显示本地值。
+    // 幂等, 存的不是旧 BWG 地址时什么都不做。
+    UserDefaults.hamster.migrateClipboardSyncServerFromBWGToLAN()
+
     // 创建 long-lived 属性
     self.rimeContext = RimeContext()
     self.mainViewModel = MainViewModel()

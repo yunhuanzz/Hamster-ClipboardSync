@@ -6,7 +6,7 @@
 //  蓝色"关闭"文字按钮已去掉, 关闭入口是 ⌃ / 格子图标开关)。
 //  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上。
 //  第 7 轮: 格子加到 8 个一页、横向分页 (UIPageControl, 多页时才显示圆点;
-//  目前 7 个格子只有 1 页, 圆点隐藏); 格子加高到 68pt、图标 26pt、
+//  目前 5 个格子只有 1 页, 圆点隐藏); 格子加高到 68pt、图标 26pt、
 //  文字 13pt, 比原来更接近微信功能面板。打开动画 (0.2s 淡入+上滑)
 //  在调用方 KeyboardToolbarView.showMenuPanel 里做, 不在这里。
 //  第 9 轮: 格子再放大 (76pt, 图标 28pt, 圆角 12pt, 更接近微信的大白格子);
@@ -100,7 +100,7 @@ class KeyboardToolbarMenuPanelView: NibLessView {
     return stack
   }()
 
-  /// 页点: 只有多页时显示 (目前 7 个格子 = 1 页, 隐藏)。
+  /// 页点: 只有多页时显示 (目前 5 个格子 = 1 页, 隐藏)。
   /// 单页时高度压到 0 (不留 20pt 空位, 给放大的格子腾地方);
   /// 多页时恢复 20pt。
   private lazy var pageControl: UIPageControl = {

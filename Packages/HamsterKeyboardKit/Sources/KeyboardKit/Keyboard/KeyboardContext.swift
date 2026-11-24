@@ -309,6 +309,23 @@ public class KeyboardContext: ObservableObject {
     sync(with: controller)
   }
 
+  /// 重新读取 App Group 里 build/hamster.plist 的配置 (与 init 同一路)。
+  /// 用途 (第 14 轮第 2 项): hamsterConfiguration 只在 init 时读一次;
+  /// 若键盘在部署换 plist 的瞬间启动、读失败, 它会一直是 nil, 震动
+  /// 设置就被永久缓存为 .noFeedback, 直到扩展进程被杀掉重起。返回
+  /// 是否读成功; 失败时保留旧值 (不把已有的配置清掉)。
+  @discardableResult
+  func reloadHamsterConfiguration() -> Bool {
+    do {
+      let data = try Data(contentsOf: FileManager.appGroupUserDataDirectoryURL.appendingPathComponent("/build/hamster.plist"))
+      self.hamsterConfiguration = try PropertyListDecoder().decode(HamsterConfiguration.self, from: data)
+      return true
+    } catch {
+      Logger.statistics.error("reload build/hamster.plist error: \(error.localizedDescription)")
+      return false
+    }
+  }
+
   var handleInputModeBuilder: ((_ from: UIView, _ with: UIEvent) -> Void)?
   @objc func handleInputModeListFromView(from: UIView, with: UIEvent) {
     handleInputModeBuilder?(from, with)

@@ -368,14 +368,38 @@ public extension UserDefaults {
 
   // MARK: - 剪贴板同步 (ClipboardSync)
 
-  /// 内置剪贴板同步服务器 (用户自己的 SyncClipboard 服务器, 跑在他自己的 BWG 上)。
+  /// 内置剪贴板同步服务器 (用户家里的 SyncClipboard 服务器, 局域网地址,
+  /// 仅在家里 WiFi 下可达; 公司电脑在别的网络上够不着它)。
   /// 仅作为"无已存值时"的默认值: 读不到已存值 (或已存值为空) 时返回这里;
   /// 一旦用户在设置页改过 (非空), 永远读改过的值, 启动时绝不覆盖, 改密码不会被重置。
   /// 注意: 仓库与 Release 是公开的, 这三项会随源码/IPA 公开, 任何人下载都能看到;
-  /// 用户本人知情并接受 ("反正是我自己用")。
-  private static let defaultClipboardSyncServerURL = "https://95-181-188-70.sslip.io:8444"
+  /// 用户本人知情并接受 (2026-11-24 "公开也无所谓了")。
+  /// 历史: 2026-11-22 起默认值是 BWG 服务器 https://95-181-188-70.sslip.io:8444,
+  /// 2026-11-24 用户改走局域网同步、BWG 服务器已拆除, 默认值随之改成本地值;
+  /// 已存了旧 BWG 地址的设备由 migrateClipboardSyncServerFromBWGToLAN() 一次性迁移。
+  private static let defaultClipboardSyncServerURL = "http://192.168.50.29:5033"
   private static let defaultClipboardSyncUsername = "yunhuan"
-  private static let defaultClipboardSyncPassword = "qXpFxE30ym3RAd2"
+  private static let defaultClipboardSyncPassword = "qwe130308"
+
+  /// 旧的 BWG 同步服务器地址 (第 14 轮第 7 项迁移用): 2026-11-24 用户改
+  /// 走局域网同步, BWG 服务器已拆除。仅用于判断“存着的还是旧地址”。
+  private static let legacyClipboardSyncServerURL = "https://95-181-188-70.sslip.io:8444"
+
+  /// 一次性迁移 (第 14 轮第 7 项): 存着的服务器地址恰好是旧 BWG 地址时,
+  /// 把地址、用户名、密码三个存值都换成本地局域网值; 存的是别的地址
+  /// (用户自己改过) 时一律不动; 从未存过值时也不动 (getter 已返回新默认值)。
+  /// 幂等: 迁完后存值不再是旧 BWG 地址, 再调也不会重复触发。
+  /// 调用点: 每次同步主流程开头 (App 与键盘都走这里) + App 启动时,
+  /// 保证设置页在同步跑起来之前就显示本地值。
+  public func migrateClipboardSyncServerFromBWGToLAN() {
+    guard let stored = string(forKey: Self.clipboardSyncServerURLKey) else { return }
+    let normalizedStored = stored.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard normalizedStored == Self.legacyClipboardSyncServerURL else { return }
+    clipboardSyncServerURL = Self.defaultClipboardSyncServerURL
+    clipboardSyncUsername = Self.defaultClipboardSyncUsername
+    clipboardSyncPassword = Self.defaultClipboardSyncPassword
+    Logger.statistics.info("clipboard sync server migrated from BWG to LAN defaults")
+  }
 
   /// 是否启用剪贴板同步 (默认关闭)
   var clipboardSyncEnabled: Bool {
@@ -459,6 +483,52 @@ public extension UserDefaults {
   func isClipboardChipDismissed(hash: String, changeCount: Int) -> Bool {
     guard !hash.isEmpty, changeCount == clipboardChipDismissedChangeCount else { return false }
     return clipboardChipDismissedHashes.contains(hash)
+  }
+
+  // MARK: - 置顶候选 (第 14 轮第 5 项 c)
+
+  /// 一条置顶记录: code 是原始输入键 (九宫格数字串 / 全键盘字母串, 与
+  /// userdb 的学习键一致), text 是候选文字。列表按最近置顶在前。
+  /// 置顶只在显示层生效 (syncContext 里把列表里有的候选挪到前面),
+  /// 不动 userdb、不写学习, 所以重装/换设备后置顶还在 (UserDefaults
+  /// 在 App Group 里), 忘掉 (b) 时同 (code, text) 的置顶一并清除。
+  public struct PinnedCandidate: Codable, Equatable {
+    var code: String
+    var text: String
+  }
+
+  /// 置顶候选列表, 最多保留 50 条 (最近置顶在前)。
+  public var pinnedCandidates: [PinnedCandidate] {
+    get {
+      if let data = data(forKey: Self.pinnedCandidatesKey),
+         let array = try? JSONDecoder().decode([PinnedCandidate].self, from: data) {
+        return array
+      }
+      return []
+    }
+    set {
+      if let data = try? JSONEncoder().encode(Array(newValue.prefix(Self.pinnedCandidatesMaxCount))) {
+        set(data, forKey: Self.pinnedCandidatesKey)
+      }
+    }
+  }
+
+  /// 置顶 (code, text): 已在列表里的移到最前, 否则插到最前。
+  public func pinCandidate(code: String, text: String) {
+    guard !code.isEmpty, !text.isEmpty else { return }
+    var list = pinnedCandidates.filter { !($0.code == code && $0.text == text) }
+    list.insert(PinnedCandidate(code: code, text: text), at: 0)
+    pinnedCandidates = list
+  }
+
+  /// 取消置顶 (code, text)。
+  public func unpinCandidate(code: String, text: String) {
+    pinnedCandidates = pinnedCandidates.filter { !($0.code == code && $0.text == text) }
+  }
+
+  /// (code, text) 是否已置顶。
+  public func isCandidatePinned(code: String, text: String) -> Bool {
+    pinnedCandidates.contains { $0.code == code && $0.text == text }
   }
 
   // MARK: - 中文主键盘布局 (九宫格 / 26键)
@@ -654,7 +724,7 @@ public extension UserDefaults {
   }
 
   /// 恢复默认顺序并全部显示 (工具栏工具恢复默认; 菜单格子开关
-  /// 第 10 轮已删, 7 个格子永远全显, 这里不再管菜单格子)。
+  /// 第 10 轮已删, 5 个格子永远全显, 这里不再管菜单格子)。
   /// 默认两工具 (剪贴板/常用语) 不是亲手加的, 亲手加的集合也清空。
   func resetToolbarToolsOrder() {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
@@ -893,6 +963,8 @@ extension UserDefaults {
   private static let clipboardSyncLastStatusTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastStatusText"
   private static let clipboardChipDismissedHashesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedHashes"
   private static let clipboardChipDismissedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedChangeCount"
+  private static let pinnedCandidatesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.pinnedCandidates"
+  private static let pinnedCandidatesMaxCount = 50
   private static let clipboardChipDismissedMaxCount = 20
   private static let chinesePrimaryKeyboardIsNineGridKey = "com.ihsiao.apps.Hamster.UserDefault.keys.chinesePrimaryKeyboardIsNineGrid"
   private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"

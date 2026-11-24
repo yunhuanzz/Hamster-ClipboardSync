@@ -12,8 +12,10 @@
 //  贴纸按行优先排布 (每行 4 列), 列宽 84pt, 内容比可视区宽半列,
 //  下一列露半边、提示可以左滑; 显示全部 6 个工具, 已在栏上的带绿底
 //  (绿 = 在栏上, 与菜单绿格的"亲手加上去"不是同一回事)。
-//  池子点按加入 (进左侧末尾, 可再拖); 点按已在栏上的绿贴纸只给一个
-//  轻微缩放反馈, 不重复加入、不写标记集合。
+//  池子点按加入 (进左侧末尾, 可再拖); 点按已在栏上的绿贴纸是开关
+//  (第 14 轮): 点一下从工具栏拿掉 (与 ⊖ 同一语义, 同时清掉
+//  "亲手加上去"标记), 再点一下重新加入 (与点按加入同一入口 onAddTool)。
+//  之前点绿的只给一个轻微缩放反馈, 没有实现开关。
 //  池子贴纸也可以长按拿起、拖到真实工具栏上放下 (落点由调用方在栏上
 //  插占位坑表示, 见 onPoolDragHover/onPoolDragDrop)。
 //  "恢复默认"与 ✓ 同排放在面板顶行右侧, 省出纵向空间给两行池子
@@ -24,7 +26,7 @@
 //  工具注册表共 6 个 (剪贴板/常用语/切换26键·九宫格/立即同步剪贴板/
 //  设置/常用语管理; "定制工具栏"本身是入口、不上栏, "收起键盘"是固定按钮、
 //  也不上栏), 由调用方 (KeyboardToolbarView) 传入; 面板不自己决定有哪些工具。
-//  菜单格子开关 (第 10 轮已删): 7 个菜单格子永远全部显示, 面板里不再有
+//  菜单格子开关 (第 10 轮已删): 5 个菜单格子永远全部显示, 面板里不再有
 //  开关, reload 也没有 tiles 参数。
 //  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上 (顶贴工具栏底边)。
 //
@@ -53,8 +55,12 @@ import UIKit
 /// 键盘工具栏 (晃动 + ⊖), 不在面板里。
 class KeyboardToolbarCustomizePanelView: NibLessView {
   /// 某一池中工具被点按加入时的回调 (toolID), 由调用方加进顺序并重建工具栏。
-  /// 已在栏上的绿贴纸点按不走这里 (只给缩放反馈, 见 PoolToolView.tapped)。
+  /// 灰贴纸点按走这里 (与拖入同一入口, 标记为亲手加上去)。
   var onAddTool: ((String) -> Void)?
+  /// 已在栏上的绿贴纸被点按时的回调 (toolID): 开关的"关"——
+  /// 由调用方从工具栏拿掉 (与 ⊖ 同一语义: 顺序里删掉 + 隐藏 +
+  /// 清掉"亲手加上去"标记), 池子绿底跟着去掉。灰贴纸不走这里。
+  var onRemoveTool: ((String) -> Void)?
   /// 点"恢复默认"时的回调 (由调用方恢复默认顺序并全部显示, 再刷新列表)。
   var onReset: (() -> Void)?
   /// 关闭按钮回调
@@ -203,6 +209,9 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
 
   /// 池子长按拖出的贴纸快照 (提起动画), 跟手指走; 原格子 alpha 0.35。
   private var poolDragSnapshot: UIView?
+  /// 抓起瞬间手指相对快照中心的偏移 (第 14 轮: 拖动全程带着,
+  /// 快照不跳到手指中心; 之前没有偏移, 第一次移动时快照会跳变)。
+  private var poolDragGrabOffset: CGPoint = .zero
   /// 本次池子拖动拿起的工具。
   private var poolDragTool: Tool?
   /// 本次池子拖动的源格子 (取消时飞回 / 恢复透明用)。
@@ -322,7 +331,8 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   /// 没放进工具栏则飞回源格子, 什么都不改。
   /// 拖动时关掉池子横滑滚动; 手指直接滑动时滚动手势先走, 长按因
   /// 移动超限自动失败, 所以“滑动浏览”和“按住拿起”不会打架。
-  /// 已在栏上的绿贴纸拿不起来 (点按/长按都只给反馈, 不重复加入)。
+  /// 已在栏上的绿贴纸拿不起来 (拖进工具栏没有意义); 点按是开关的"关"
+  /// (见 PoolToolView.tapped -> onToggleOff -> onRemoveTool)。
   @objc private func handlePoolLongPress(_ gesture: UILongPressGestureRecognizer) {
     switch gesture.state {
     case .began:
@@ -336,9 +346,11 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       poolDragSourceTile = tile
       poolDropLandingCenter = nil
       poolScrollView.isScrollEnabled = false
-      // 提起动画: 原格子半透明, 快照放大 + 阴影浮起来跟手指走。
+      // 提起动画: 原格子半透明, 快照放大 + 阴影浮起来跟手指走;
+      // 抓起偏移一直带着, 快照不跳到手指中心。
       tile.alpha = 0.35
       snapshot.frame = convert(tile.bounds, from: tile)
+      snapshot.isUserInteractionEnabled = false
       snapshot.layer.shadowColor = UIColor.black.cgColor
       snapshot.layer.shadowOpacity = 0.25
       snapshot.layer.shadowRadius = 8
@@ -346,11 +358,14 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       snapshot.transform = CGAffineTransform(scaleX: 1.12, y: 1.12)
       addSubview(snapshot)
       poolDragSnapshot = snapshot
+      let fingerInSelf = gesture.location(in: self)
+      poolDragGrabOffset = CGPoint(x: fingerInSelf.x - snapshot.center.x, y: fingerInSelf.y - snapshot.center.y)
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     case .changed:
       guard let snapshot = poolDragSnapshot, poolDragTool != nil else { return }
       let pointInSelf = gesture.location(in: self)
-      snapshot.center = pointInSelf
+      // 快照跟手指走 (x 和 y 都跟, 抓起偏移一直带着, 不跳变)。
+      snapshot.center = CGPoint(x: pointInSelf.x - poolDragGrabOffset.x, y: pointInSelf.y - poolDragGrabOffset.y)
       // 手指在容器坐标系里的位置 -> 调用方在真实工具栏上插占位坑,
       // 返回坑中心 (容器坐标系); 不在工具栏上时返回 nil (坑已拿掉)。
       // 注意: onPoolDragHover 返回的是 CGPoint? (坑中心), 而闭包本身
@@ -369,6 +384,7 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       poolDragTool = nil
       poolDragSourceTile = nil
       poolDropLandingCenter = nil
+      poolDragGrabOffset = .zero
       poolScrollView.isScrollEnabled = true
       poolDragEndedAt = Date().timeIntervalSince1970
       if ended, let landingCenter {
@@ -470,6 +486,13 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       if Date().timeIntervalSince1970 - self.poolDragEndedAt < 0.5 { return }
       self.onAddTool?(tool.id)
     }
+    tile.onToggleOff = { [weak self] in
+      guard let self else { return }
+      // 与加入同一道守卫: 刚结束拖动 0.5 秒内的点按忽略, 免得
+      // 长按松手把刚拖过的绿贴纸又关掉。
+      if Date().timeIntervalSince1970 - self.poolDragEndedAt < 0.5 { return }
+      self.onRemoveTool?(tool.id)
+    }
     return tile
   }
 }
@@ -487,17 +510,20 @@ extension KeyboardToolbarCustomizePanelView: UIGestureRecognizerDelegate {
 
 // MARK: - 工具池格子
 
-/// 工具池格子: 小圆图标 + 名称 (微信式), 点按加入。
+/// 工具池格子: 小圆图标 + 名称 (微信式), 点按加入 / 点绿拿掉。
 /// 圆底在白容器里用浅灰 (浅色) / 半透明白 (深色) 才看得出;
 /// 已在栏上的带绿底 + 绿图标 (只表示在栏上)。
 /// 微信的池子里没有 + 标记, 点按即加入, 这里也不加。
 private class PoolToolView: UIView {
   let tool: (id: String, title: String, systemImage: String)
 
-  /// 是否已在工具栏上: 是则绿底, 点按/长按都不再加入 (只给反馈)。
+  /// 是否已在工具栏上: 是则绿底, 点按 = 开关关掉 (onToggleOff),
+  /// 长按不拿起 (已在栏上, 拖进工具栏没有意义)。
   let isOnToolbar: Bool
 
   var onTap: (() -> Void)?
+  /// 已在栏上的绿贴纸被点按时的回调 (开关关掉, 见面板的 onRemoveTool)。
+  var onToggleOff: (() -> Void)?
 
   /// 圆图标底。
   private let circleView: UIView = {
@@ -566,7 +592,11 @@ private class PoolToolView: UIView {
       titleLabel.topAnchor.constraint(equalTo: circleView.bottomAnchor, constant: 4),
       titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
       titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-      titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -2),
+      // 第 14 轮: 底边留 6pt (原来 -2pt): 面板矮时格高被压缩
+      // (格高约束是 defaultHigh), 文字底边会被压到离白框底边只剩
+      // 约 1.5pt (build #36 实测); -6pt 保证压缩后文字与底框
+      // 仍有 6pt 间隔, 不贴边。未压缩时文字位置由 top 锚定, 不变。
+      titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -6),
     ])
     titleLabel.text = tool.title
     iconImageView.image = UIImage(
@@ -582,15 +612,10 @@ private class PoolToolView: UIView {
 
   @objc private func tapped() {
     if isOnToolbar {
-      // 已在栏上: 点按不是加入, 只给一个轻微缩放反馈,
-      // 不调 onTap、不写标记集合、不重复加入。
-      UIView.animate(withDuration: 0.08, animations: {
-        self.circleView.transform = CGAffineTransform(scaleX: 0.92, y: 0.92)
-      }, completion: { _ in
-        UIView.animate(withDuration: 0.12) {
-          self.circleView.transform = .identity
-        }
-      })
+      // 已在栏上: 点按是开关的"关"——从工具栏拿掉 (调用方走
+      // onRemoveTool, 与 ⊖ 同一语义 + 清掉"亲手加上去"标记);
+      // 拿掉后池子重建, 这格变回灰色 (反馈就是颜色本身)。
+      onToggleOff?()
       return
     }
     onTap?()

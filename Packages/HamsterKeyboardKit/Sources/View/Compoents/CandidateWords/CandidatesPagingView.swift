@@ -70,6 +70,11 @@ class CandidatesPagingCollectionView: UICollectionView {
     self.alwaysBounceHorizontal = false
     self.alwaysBounceVertical = false
 
+    // 长按候选词: 忘掉记忆 / 置顶 (第 14 轮第 5 项 b/c)。
+    let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCandidateLongPress(_:)))
+    longPress.minimumPressDuration = 0.5
+    self.addGestureRecognizer(longPress)
+
     combine()
   }
 
@@ -240,5 +245,46 @@ extension CandidatesPagingCollectionView: UICollectionViewDelegateFlowLayout {
       width: isVerticalLayout ? min(width, maxWidth) : width,
       height: heightOfToolbar
     )
+  }
+}
+
+// MARK: - 长按候选词 (第 14 轮第 5 项 b/c)
+extension CandidatesPagingCollectionView {
+  @objc private func handleCandidateLongPress(_ gesture: UILongPressGestureRecognizer) {
+    guard gesture.state == .began else { return }
+    let point = gesture.location(in: self)
+    guard let indexPath = self.indexPathForItem(at: point),
+          indexPath.item < rimeContext.suggestions.count else { return }
+    let index = indexPath.item
+    let text = rimeContext.suggestions[index].text
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    let alert = UIAlertController(title: text, message: nil, preferredStyle: .actionSheet)
+    alert.addAction(UIAlertAction(title: "忘记记忆", style: .destructive) { [weak self] _ in
+      _ = self?.rimeContext.forgetCandidateAt(index: index)
+    })
+    let pinned = rimeContext.isCandidatePinnedAt(index: index)
+    alert.addAction(UIAlertAction(title: pinned ? "取消置顶" : "置顶", style: .default) { [weak self] _ in
+      guard let self = self else { return }
+      if pinned {
+        _ = self.rimeContext.unpinCandidateAt(index: index)
+      } else {
+        _ = self.rimeContext.pinCandidateAt(index: index)
+      }
+    })
+    alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+    if let cell = self.cellForItem(at: indexPath) {
+      alert.popoverPresentationController?.sourceView = cell
+      alert.popoverPresentationController?.sourceRect = cell.bounds
+    }
+    owningViewController()?.present(alert, animated: true)
+  }
+
+  private func owningViewController() -> UIViewController? {
+    var responder: UIResponder? = self
+    while let r = responder {
+      if let vc = r as? UIViewController { return vc }
+      responder = r.next
+    }
+    return nil
   }
 }

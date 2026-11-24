@@ -48,6 +48,10 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
   override open func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     setupRIME()
+    // 震动/声音设置刷新 (第 14 轮第 2 项): 若启动瞬间 plist 没读到,
+    // 设置会被缓存为 .noFeedback 且永不重试; 每次弹出时重算一次,
+    // 配置就位后震动随下次弹出恢复。无变化时零影响。
+    refreshKeyboardFeedbackSettings()
     viewWillSetupKeyboard()
     viewWillSyncWithContext()
 
@@ -260,11 +264,19 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
 
    该属性用作键盘反馈（如音频和触觉反馈）的全局配置。
    */
-  public lazy var keyboardFeedbackSettings: KeyboardFeedbackSettings = {
+  public lazy var keyboardFeedbackSettings: KeyboardFeedbackSettings = buildKeyboardFeedbackSettings()
+
+  /// 按当前 hamsterConfiguration 算出震动/声音设置 (与旧 lazy 闭包同一算法)。
+  /// (第 14 轮第 2 项: 抽出来, 供 viewWillAppear 的刷新复用, 并打日志;
+  /// 震动失效时, 下次出现可从日志直接看出是配置没读到、开关关了、还是
+  /// 开着却不震。)
+  func buildKeyboardFeedbackSettings() -> KeyboardFeedbackSettings {
+    let configMissing = keyboardContext.hamsterConfiguration == nil
     let enableAudio = keyboardContext.hamsterConfiguration?.keyboard?.enableKeySounds ?? false
     let enableHaptic = keyboardContext.hamsterConfiguration?.keyboard?.enableHapticFeedback ?? false
     let hapticFeedbackIntensity = keyboardContext.hamsterConfiguration?.keyboard?.hapticFeedbackIntensity ?? 2
     let hapticFeedback = HapticIntensity(rawValue: hapticFeedbackIntensity)?.hapticFeedback() ?? .mediumImpact
+    Logger.statistics.info("keyboard feedback settings: configMissing \(configMissing), enableAudio \(enableAudio), enableHaptic \(enableHaptic), intensity \(hapticFeedbackIntensity)")
     return KeyboardFeedbackSettings(
       audioConfiguration: enableAudio ? .enabled : .noFeedback,
       hapticConfiguration: enableHaptic ? .init(
@@ -275,7 +287,27 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
         repeat: .selectionChanged
       ) : .noFeedback
     )
-  }()
+  }
+
+  /// 每次键盘出现时刷新震动/声音设置 (第 14 轮第 2 项)。
+  /// 机制: keyboardFeedbackSettings 是 class (ObservableObject), 反馈
+  /// handler 持有同一对象, 原地改 @Published 配置立即生效, 不用重建
+  /// handler。只在配置确实变了时才写, 平时零影响。
+  /// 触发场景: 扩展进程启动瞬间 plist 还没就位 (部署换文件窗口期) 时
+  /// 配置读不到, 设置被缓存为 .noFeedback 且永不重试——这次刷新会先
+  /// 重读 plist, 再把算出来的设置写回去, 震动随键盘下次弹出恢复。
+  func refreshKeyboardFeedbackSettings() {
+    if keyboardContext.hamsterConfiguration == nil {
+      keyboardContext.reloadHamsterConfiguration()
+    }
+    let fresh = buildKeyboardFeedbackSettings()
+    if keyboardFeedbackSettings.hapticConfiguration != fresh.hapticConfiguration
+      || keyboardFeedbackSettings.audioConfiguration != fresh.audioConfiguration {
+      Logger.statistics.info("keyboard feedback settings changed, refreshing in place")
+      keyboardFeedbackSettings.hapticConfiguration = fresh.hapticConfiguration
+      keyboardFeedbackSettings.audioConfiguration = fresh.audioConfiguration
+    }
+  }
 
   /**
    The default, observable keyboard text context.
@@ -476,6 +508,11 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
       // 获取光标前后上下文，用于删除需要光标居中的符号
       let beforeInput = self.textDocumentProxy.documentContextBeforeInput ?? ""
       let afterInput = self.textDocumentProxy.documentContextAfterInput ?? ""
+      // (第 14 轮第 5 项 a) 刚提交的词又被退格删掉, 就撤销它那次学习:
+      // 先看光标前是不是正好是上次提交的文字, 删完文档后再撤销。
+      // 只看“刚提交、还没输别的”那一次 (lastCommit), 且必须整段匹配,
+      // 删一半不算 (undoLastCommit 找不到整词时只清记录)。
+      let deletedLastCommit = rimeContext.lastCommit.map { beforeInput.hasSuffix($0.text) } ?? false
       let text = String(beforeInput.suffix(1) + afterInput.prefix(1))
       // 光标可以居中的符号，需要成对删除
       if keyboardContext.cursorBackOfSymbols(key: text) {
@@ -483,6 +520,9 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
         self.textDocumentProxy.deleteBackward(times: 2)
       } else {
         textDocumentProxy.deleteBackward(range: keyboardBehavior.backspaceRange)
+      }
+      if deletedLastCommit {
+        _ = rimeContext.undoLastCommit()
       }
       return
     }
@@ -611,13 +651,45 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     keyboardContext.setKeyboardType(.alphabetic(casing))
   }
 
+  /// 打开 URL (如点"设置"格子跳回主 App)。
+  /// 键盘扩展里没有 UIApplication, 不能走 UIApplication.shared.open:
+  /// 优先用扩展上下文打开 (系统给扩展的开 URL 入口); 扩展上下文为空
+  /// 或系统拒绝 (如无完全访问权限时) 再回退到响应链 openURL: 旧招;
+  /// 两路都失败就记日志, 不静默。
+  /// 根因 (第 14 轮): 之前只有响应链一路, 在本机侧载环境下链上
+  /// 没有响应 openURL: 的对象, 点按直接静默失败; App 侧链路本身
+  /// 是通的 (Info.plist 注册了 hamster scheme,
+  /// SceneDelegate.openURLContexts 接住后 navigation(.main) 回到设置首页)。
   open func openUrl(_ url: URL?) {
+    guard let url else { return }
+    if let extensionContext {
+      extensionContext.open(url) { [weak self] success in
+        if success {
+          Logger.statistics.info("openUrl: extensionContext 打开成功: \(url.absoluteString)")
+        } else {
+          Logger.statistics.error("openUrl: extensionContext 打开失败, 回退响应链: \(url.absoluteString)")
+          self?.openURLViaResponderChain(url)
+        }
+      }
+      return
+    }
+    Logger.statistics.error("openUrl: extensionContext 为空, 走响应链: \(url.absoluteString)")
+    openURLViaResponderChain(url)
+  }
+
+  /// 响应链 openURL: 旧招 (沿 next 找响应 openURL: 的对象再 perform)。
+  /// 找不到时记日志, 不静默失败。
+  private func openURLViaResponderChain(_ url: URL) {
     let selector = sel_registerName("openURL:")
     var responder = self as UIResponder?
     while let r = responder, !r.responds(to: selector) {
       responder = r.next
     }
-    _ = responder?.perform(selector, with: url)
+    guard let responder else {
+      Logger.statistics.error("openUrl: 响应链上没有响应 openURL: 的对象: \(url.absoluteString)")
+      return
+    }
+    _ = responder.perform(selector, with: url)
   }
 
   open func resetInputEngine() {

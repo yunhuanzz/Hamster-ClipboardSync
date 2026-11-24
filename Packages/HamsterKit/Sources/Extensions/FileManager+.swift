@@ -450,7 +450,9 @@ public extension FileManager {
   /// 安全阀: 源目录或目标目录不存在时什么都不删; 只删文件, 目录 (含删空
   /// 后剩下的空目录) 一律保留; 相对路径按“去掉各自根目录前缀”对齐, 与
   /// incrementalCopy 的算法一致。
-  private static func removeStaleFiles(src: URL, dst: URL) throws {
+  /// preserveUserDB: 为 true 时, 名字含 ".userdb" 的文件一律保留 (第 14 轮
+  /// 第 1 项: 部署/同步永不删 App Group 里的学习库, 哪怕沙盒里没有它)。
+  private static func removeStaleFiles(src: URL, dst: URL, preserveUserDB: Bool = false) throws {
     let fm = FileManager.default
     guard fm.fileExists(atPath: src.path), fm.fileExists(atPath: dst.path) else { return }
     guard let srcFiles = fm.enumerator(at: src, includingPropertiesForKeys: [.isDirectoryKey]),
@@ -468,6 +470,7 @@ public extension FileManager {
     while let file = dstFiles.nextObject() as? URL {
       let isDirectory = (try? file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
       if isDirectory { continue }
+      if preserveUserDB, file.path.contains(".userdb") { continue }
       let relativePath = file.path.hasPrefix(dstPrefix) ? file.path.replacingOccurrences(of: dstPrefix, with: "") : file.path.replacingOccurrences(of: "/private" + dstPrefix, with: "")
       if !srcPaths.contains(relativePath) {
         Logger.statistics.debug("removeStaleFiles remove stale file: \(file.path)")
@@ -496,11 +499,25 @@ public extension FileManager {
 
   // 同步 Sandbox 目录下 UserData 目录至 AppGroup 目录
   // (第 13 轮第 4 项, 语义同上: 增量拷回 + 只删文件的陈旧清理, 永不删目录。)
-  static func syncSandboxUserDataDirectoryToAppGroup() throws {
-    Logger.statistics.info("rime syncSandboxUserDataDirectoryToApGroup")
+  // (第 14 轮第 1 项: 默认 includeUserDB = false——部署/同步永不把沙盒里
+  // 的 *.userdb 拷回 App Group, 也永不把 App Group 里 *.userdb 当陈旧文
+  // 件删掉。根因: 沙盒那份 userdb 是上次部署的快照; 部署时键盘进程可能
+  // 正开着 App Group 的 userdb, 拷回会替换它正在写的文件, 学习写进已删
+  // 除 inode、重启后丢失; 且部署后在旧键盘进程里学到的新词也会被下一轮
+  // 拷回的陈旧快照覆盖。App Group 的 userdb 是唯一的学习真相来源, 沙盒
+  // 到 App Group 的方向永远不碰它; 反方向 (App Group -> 沙盒) 的拷回
+  // 不受影响。显式重置 (restRime) 才传 includeUserDB = true, 保留“重置
+  // 清空学习”的语义。)
+  static func syncSandboxUserDataDirectoryToAppGroup(includeUserDB: Bool = false) throws {
+    Logger.statistics.info("rime syncSandboxUserDataDirectoryToApGroup includeUserDB: \(includeUserDB)")
     try FileManager.createDirectory(override: false, dst: appGroupUserDataDirectoryURL)
-    try FileManager.incrementalCopy(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL)
-    try FileManager.removeStaleFiles(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL)
+    if includeUserDB {
+      try FileManager.incrementalCopy(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL)
+      try FileManager.removeStaleFiles(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL)
+    } else {
+      try FileManager.incrementalCopy(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL, filterRegex: ["[.]userdb"], filterMatchBreak: true)
+      try FileManager.removeStaleFiles(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL, preserveUserDB: true)
+    }
   }
 
   /// 拷贝 Sandbox 下 SharedSupport 目录至 AppGroup 下 SharedSupport 目录

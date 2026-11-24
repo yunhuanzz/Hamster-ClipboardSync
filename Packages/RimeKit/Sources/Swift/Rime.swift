@@ -183,6 +183,17 @@ public class Rime {
     return rimeAPI.selectCandidate(session, andIndex: Int32(index))
   }
 
+  /// 删除当前高亮的候选词在 userdb 里的学习记录 (第 14 轮第 5 项)。
+  /// 注意 librime 语义: delete_candidate 删的是当前高亮 (selected_index)
+  /// 的候选, 不是 index 参数本身; 调用前须先用 Down 键把高亮移到目标
+  /// 候选上 (见 RimeContext.forgetCandidate)。底层 ObjC 已用
+  /// RIME_API_AVAILABLE 守卫函数指针, 不存在时返回 false。
+  /// 删完须调 flushUserDictionary() 落盘, 否则还在进行中的事务会把它
+  /// 吞掉; 删掉后要 reset + 重输原输入码才能恢复打字状态。
+  public func deleteCandidate(index: Int) -> Bool {
+    return rimeAPI.deleteCandidate(session, andIndex: Int32(index))
+  }
+
   // index: 指candidates索引, 从0开始
   // count: 指每次获取的总数量
   // 注意: 举例每页10个候选字

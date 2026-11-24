@@ -116,6 +116,17 @@ public class RimeContext {
   @MainActor
   private var prefixCandidateFullInput = ""
 
+  /// 最近一次提交 (第 14 轮第 5 项 a): (提交时的原始输入码, 提交的文字)。
+  /// 仅在“刚提交、还没输别的”期间有效; 退格删掉这段文字时用来撤销学习。
+  @MainActor
+  public var lastCommit: (code: String, text: String)?
+
+  /// 本次引擎操作开始前的原始输入码 (提交归属用): tryHandleInputText /
+  /// tryHandleInputCode / selectCandidate 在调引擎前快照, syncContext 在
+  /// 出现 commitText 时把它和文字一起记进 lastCommit。
+  @MainActor
+  private var pendingCommitCode = ""
+
   @MainActor @Published
   public var rimeContext: IRimeContext? = nil
 
@@ -716,8 +727,10 @@ public extension RimeContext {
     }
 
     // 部署后将方案copy至AppGroup下供keyboard使用
+    // (第 14 轮第 1 项: 重置是显式清空学习的操作, 传 includeUserDB: true
+    // 保留“重置清空学习”的语义; deployment/syncRime 走默认 false。)
     try FileManager.syncSandboxSharedSupportDirectoryToAppGroup()
-    try FileManager.syncSandboxUserDataDirectoryToAppGroup()
+    try FileManager.syncSandboxUserDataDirectoryToAppGroup(includeUserDB: true)
   }
 
   var isRunning: Bool {
@@ -783,6 +796,16 @@ public extension RimeContext {
   /// 根据索引选择候选字
   @MainActor
   func selectCandidate(index: Int) {
+    // 候选栏可能因置顶重排过显示顺序: 显示下标 -> 引擎下标 (见
+    // applyPinnedCandidates; 未置顶时两者相同)。必须在序幕前算好,
+    // 序幕会刷新 suggestions。
+    let engineIndex = engineIndexForDisplayIndex(index)
+    // 刚提交的归属: 选词前快照输入码并清掉旧的 lastCommit (新操作开始)。
+    // 前缀模式下快照的是前缀码 (序幕换回前缀之后, 见下)。
+    if !isShowingPrefixCandidates {
+      pendingCommitCode = Rime.shared.getInputKeys()
+      lastCommit = nil
+    }
     // 前缀候选模式: 屏幕上显示的是最长合法前缀的候选, 引擎里却是完整输入
     // (菜单为空)。先把引擎换回前缀, 选词上屏, 再把尾巴数字重新敲回去当新输入
     // (微信行为: 选了前缀词, 剩下的数字继续拼)。
@@ -801,7 +824,9 @@ public extension RimeContext {
         return
       }
       syncContext()
-      _ = Rime.shared.selectCandidate(index: index)
+      pendingCommitCode = Rime.shared.getInputKeys()
+      lastCommit = nil
+      _ = Rime.shared.selectCandidate(index: engineIndex)
       syncContext()
       for digit in tail {
         _ = Rime.shared.inputKey(String(digit))
@@ -809,7 +834,7 @@ public extension RimeContext {
       syncContext()
       return
     }
-    _ = Rime.shared.selectCandidate(index: index)
+    _ = Rime.shared.selectCandidate(index: engineIndex)
     syncContext()
   }
 
@@ -914,6 +939,10 @@ public extension RimeContext {
    */
   @MainActor
   func tryHandleInputText(_ text: String) -> Bool {
+    // 刚提交的归属 (第 14 轮第 5 项 a): 先快照输入码、清掉旧的 lastCommit,
+    // 再让引擎处理; 这次按键若提交, syncContext 会用快照记下 (码, 词)。
+    pendingCommitCode = Rime.shared.getInputKeys()
+    lastCommit = nil
     // 由rime处理全部符号
     let handled = Rime.shared.inputKey(text)
 
@@ -942,6 +971,8 @@ public extension RimeContext {
    */
   @MainActor
   func tryHandleInputCode(_ code: Int32, modifier: Int32 = 0) -> Bool {
+    pendingCommitCode = Rime.shared.getInputKeys()
+    lastCommit = nil
     // 由rime处理全部符号
     let handled = Rime.shared.inputKeyCode(code, modifier: modifier)
     // 处理失败则返回 inputText
@@ -984,6 +1015,10 @@ public extension RimeContext {
       // 注意 getCommitText() 读一次就清 (RimeGetCommit 会 ResetCommitText),
       // 所以 commitText 非空只会在刚提交的这一次同步里出现, 不会重复落盘。
       if !commitText.isEmpty {
+        // (第 14 轮第 5 项 a) 记下这次提交的 (输入码, 文字), 供退格撤销学习用。
+        if !pendingCommitCode.isEmpty {
+          lastCommit = (pendingCommitCode, commitText)
+        }
         flushUserDictionary()
       }
       self.reset()
@@ -999,7 +1034,9 @@ public extension RimeContext {
     // useContextPaging 模式下候选栏不走 suggestions, 这里也不跑。
     if !useContextPaging, candidates.isEmpty {
       if let prefixCandidates = self.prefixCandidatesForUnsegmentableT9Input(preedit: userInputText) {
-        self.suggestions = prefixCandidates
+        // 前缀候选也走置顶显示重排 (只重排显示; 引擎里是完整输入、菜单为
+        // 空, 高亮无处可移, 不动引擎)。
+        self.suggestions = applyPinnedCandidates(prefixCandidates, code: prefixCandidateInput, moveHighlight: false)
         return
       }
     }
@@ -1007,7 +1044,7 @@ public extension RimeContext {
     self.prefixCandidateInput = ""
     self.prefixCandidateTail = ""
     self.prefixCandidateFullInput = ""
-    self.suggestions = candidates
+    self.suggestions = applyPinnedCandidates(candidates, code: Rime.shared.getInputKeys(), moveHighlight: true)
   }
 
   /// 分页：下一页
@@ -1079,6 +1116,216 @@ public extension RimeContext {
   @MainActor
   func getContext() -> IRimeContext {
     Rime.shared.context()
+  }
+}
+
+// MARK: - 记忆管理 (第 14 轮第 5 项)
+
+public extension RimeContext {
+  /// 当前显示的候选对应的原始输入码: 前缀候选模式用 prefixCandidateInput,
+  /// 否则用引擎当前输入键 (原始键串, 不是分段后的 preedit)。
+  @MainActor
+  var effectiveCandidateCode: String {
+    isShowingPrefixCandidates ? prefixCandidateInput : Rime.shared.getInputKeys()
+  }
+
+  /// 显示下标 -> 引擎下标: 候选栏可能因置顶重排过显示顺序, 点选时必须用
+  /// 每个候选自带的 engine index (CandidateSuggestion.index) 去选引擎,
+  /// 否则点到的是另一个词。未置顶时两者相同。
+  @MainActor
+  func engineIndexForDisplayIndex(_ displayIndex: Int) -> Int {
+    guard displayIndex >= 0, displayIndex < suggestions.count else { return displayIndex }
+    return suggestions[displayIndex].index
+  }
+
+  /// 长按候选词 -> 忘掉 (b): 删掉 text 在 userdb 里的学习记录。
+  /// index 是当前 suggestions 里的显示下标。成功返回 true。
+  /// 语义 (librime 源码 + 活验证): delete_candidate 删的是当前高亮
+  /// (selected_index) 的候选, 不是 index 参数本身——所以先用 Down 键
+  /// 把高亮移到目标上 (Down 只改 selected_index, 不提交、不学习),
+  /// 再双重核对 (绝对下标 + 文字) 无误后才删; 删完 F24 落盘, 再 reset +
+  /// 重输原输入码恢复打字状态。删的是 userdb 里的学习分, 词典原词不受
+  /// 影响 (如 好的 的 #1 来自词典 + derive 规则, 忘不掉它); 忘掉后
+  /// 再选一次同一词会重新学回来。
+  @MainActor
+  func forgetCandidateAt(index: Int) -> Bool {
+    guard index >= 0, index < suggestions.count else { return false }
+    let text = suggestions[index].text
+    let code = effectiveCandidateCode
+    let fullInput = isShowingPrefixCandidates ? prefixCandidateFullInput : Rime.shared.getInputKeys()
+    // 前缀候选模式: 屏幕上的候选属于前缀, 引擎里却是完整输入 (菜单为空)。
+    // 先把引擎换回前缀 (与 selectCandidate 同款序幕), 再在前缀菜单里忘。
+    if isShowingPrefixCandidates {
+      let prefix = prefixCandidateInput
+      let fullLength = prefixCandidateFullInput.count
+      isShowingPrefixCandidates = false
+      prefixCandidateInput = ""
+      prefixCandidateTail = ""
+      prefixCandidateFullInput = ""
+      guard Rime.shared.replaceInputKeys(prefix, startPos: 0, count: fullLength) else {
+        syncContext()
+        return false
+      }
+      syncContext()
+    }
+    return forgetCandidateInCurrentMenu(text: text, code: code, fullInput: fullInput)
+  }
+
+  /// 退格撤销上次提交的学习 (a): 刚提交的词又被退格删掉时调用。
+  /// 把提交时的输入码重新敲进引擎, 找到刚提交的文字, 走忘掉流程。
+  /// 找不到 (如多段提交拼不出单条候选) 就只清记录, 不报错。成功返回 true。
+  /// 注意: 调用方 (退格键) 须先确认文档里刚删掉的正是 lastCommit.text,
+  /// 这里只负责引擎侧的撤销。
+  @MainActor
+  func undoLastCommit() -> Bool {
+    guard let commit = lastCommit else { return false }
+    lastCommit = nil
+    reset()
+    for key in commit.code {
+      _ = Rime.shared.inputKey(String(key))
+    }
+    syncContext()
+    guard suggestions.contains(where: { $0.text == commit.text }) else {
+      Logger.statistics.info("undoLastCommit: '\(commit.text)' not in menu for code '\(commit.code)', only cleared record")
+      reset()
+      syncContext()
+      return false
+    }
+    return forgetCandidateInCurrentMenu(text: commit.text, code: commit.code, fullInput: commit.code)
+  }
+
+  /// 长按候选词 -> 置顶 (c): 把 (当前输入码, 该候选) 记进置顶列表
+  /// (最近置顶在前), 下次同步时它排到候选最前面。只影响显示, 不动
+  /// userdb、不写学习。成功返回 true。
+  @MainActor
+  func pinCandidateAt(index: Int) -> Bool {
+    guard index >= 0, index < suggestions.count else { return false }
+    let text = suggestions[index].text
+    UserDefaults.hamster.pinCandidate(code: effectiveCandidateCode, text: text)
+    syncContext()
+    return true
+  }
+
+  /// 取消置顶 (c): 把 (当前输入码, 该候选) 从置顶列表去掉, 候选恢复
+  /// 引擎原顺序。成功返回 true。
+  @MainActor
+  func unpinCandidateAt(index: Int) -> Bool {
+    guard index >= 0, index < suggestions.count else { return false }
+    let text = suggestions[index].text
+    UserDefaults.hamster.unpinCandidate(code: effectiveCandidateCode, text: text)
+    syncContext()
+    return true
+  }
+
+  /// 该显示下标的候选当前是否已置顶 (供长按菜单显示“置顶/取消置顶”)。
+  @MainActor
+  func isCandidatePinnedAt(index: Int) -> Bool {
+    guard index >= 0, index < suggestions.count else { return false }
+    return UserDefaults.hamster.isCandidatePinned(code: effectiveCandidateCode, text: suggestions[index].text)
+  }
+
+  /// 在当前菜单里忘掉 text 的学习记录 (核心流程, 调用前引擎须已显示
+  /// 该 text 所在的菜单)。fullInput 是忘完后要重输恢复的完整输入码。
+  @MainActor
+  private func forgetCandidateInCurrentMenu(text: String, code: String, fullInput: String) -> Bool {
+    // 在当前菜单里找到 text 的下标 (前缀序幕后菜单变了, 下标可能变)。
+    guard let displayIndex = suggestions.firstIndex(where: { $0.text == text }) else {
+      Logger.statistics.info("forgetCandidate: '\(text)' not in current menu, nothing to forget")
+      restoreInput(fullInput)
+      return false
+    }
+    // delete_candidate 删的是高亮候选: 把高亮绝对移到目标的引擎下标上。
+    // 注意显示下标 ≠ 引擎下标 (置顶会重排显示), 目标用候选自带的 engine index。
+    let targetEngineIndex = suggestions[displayIndex].index
+    let landed = moveEngineHighlightTo(targetEngineIndex)
+    // 双重核对: 高亮绝对下标 + 高亮文字都对得上才删, 绝不删错词。
+    let highlightedText: String? = landed >= 0 ? Rime.shared.candidateListWithIndex(index: landed, andCount: 1).first?.text : nil
+    guard landed == targetEngineIndex, highlightedText == text else {
+      Logger.statistics.info("forgetCandidate: highlight mismatch (want \(targetEngineIndex) '\(text)', got \(landed) '\(highlightedText ?? "")'), abort")
+      restoreInput(fullInput)
+      return false
+    }
+    guard Rime.shared.deleteCandidate(index: targetEngineIndex) else {
+      Logger.statistics.info("forgetCandidate: delete_candidate unavailable or failed for '\(text)'")
+      restoreInput(fullInput)
+      return false
+    }
+    // 删除写进同一批事务, 不 F24 会被下一批吞掉/丢掉; 同 (code, text)
+    // 的置顶一并清除 (忘掉的词不应还置顶)。
+    flushUserDictionary()
+    UserDefaults.hamster.unpinCandidate(code: code, text: text)
+    restoreInput(fullInput)
+    Logger.statistics.info("forgetCandidate: forgot '\(text)' for code '\(code)'")
+    return true
+  }
+
+  /// 忘/删操作后恢复打字状态: 清掉当前组字, 把原输入码重新敲回去, 同步一次。
+  @MainActor
+  private func restoreInput(_ fullInput: String) {
+    reset()
+    for key in fullInput {
+      _ = Rime.shared.inputKey(String(key))
+    }
+    syncContext()
+  }
+
+  /// 置顶只在显示层生效: 把当前候选里属于同一输入码的置顶词按最近置顶
+  /// 在前挪到最前面, 其余顺序不动。
+  /// moveHighlight 为 true 时 (正常候选栏), 还会把引擎高亮绝对移到
+  /// 置顶词上 (Home 回 0 再 Down, 见 moveEngineHighlightTo), 这样空
+  /// 格上屏的也是置顶词 (只改高亮, 不提交、不学习)。没置顶时原样返回,
+  /// 不碰引擎。
+  /// 前缀候选模式传 moveHighlight: false: 引擎里是完整输入、菜单为空,
+  /// 高亮无处可移。
+  @MainActor
+  private func applyPinnedCandidates(_ candidates: [CandidateSuggestion], code: String, moveHighlight: Bool) -> [CandidateSuggestion] {
+    guard !code.isEmpty, !candidates.isEmpty else { return candidates }
+    let pinnedTexts = UserDefaults.hamster.pinnedCandidates.filter { $0.code == code }.map { $0.text }
+    guard !pinnedTexts.isEmpty else { return candidates }
+    var rest = candidates
+    var pinned: [CandidateSuggestion] = []
+    for text in pinnedTexts {
+      if let i = rest.firstIndex(where: { $0.text == text }) {
+        pinned.append(rest.remove(at: i))
+      }
+    }
+    guard !pinned.isEmpty else { return candidates }
+    var ordered = pinned + rest
+    if moveHighlight {
+      let target = ordered[0].index
+      if target != 0 {
+        let landed = moveEngineHighlightTo(target)
+        if landed == target {
+          // 高亮标志按移动后的结果重算 (原来按旧高亮算的已经过期)。
+          ordered = ordered.map { suggestion in
+            var s = suggestion
+            s.isAutocomplete = (s.index == target)
+            return s
+          }
+        } else {
+          Logger.statistics.info("pin: highlight move to \(target) failed (landed \(landed)), display reordered only")
+        }
+      }
+    }
+    return ordered
+  }
+
+  /// 把引擎高亮绝对移到 target (只改高亮, 不提交、不学习):
+  /// 高亮不在 0 时先按 Home 回 0 (Home 在高亮已是 0 时会落到导航器去动
+  /// 光标, 所以高亮已是 0 时不按), 再按 Down×target。
+  /// 返回移动后的高亮绝对下标 (读不到菜单时 -1)。
+  @MainActor
+  private func moveEngineHighlightTo(_ target: Int) -> Int {
+    let menu = Rime.shared.context().menu
+    let current = menu.map { Int($0.pageSize * $0.pageNo + $0.highlightedCandidateIndex) } ?? -1
+    if current != 0, current >= 0 {
+      _ = Rime.shared.inputKeyCode(XK_Home)
+    }
+    for _ in 0..<target {
+      _ = Rime.shared.inputKeyCode(XK_Down)
+    }
+    let landedMenu = Rime.shared.context().menu
+    return landedMenu.map { Int($0.pageSize * $0.pageNo + $0.highlightedCandidateIndex) } ?? -1
   }
 }
 
