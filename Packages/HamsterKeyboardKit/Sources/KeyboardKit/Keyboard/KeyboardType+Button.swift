@@ -20,7 +20,15 @@ public extension KeyboardType {
     case .emojis: return HamsterUIImage.shared.keyboardEmoji
     case .images: return HamsterUIImage.shared.keyboardImages
     case .alphabetic: return HamsterUIImage.shared.keyboardStateChinese
-    case .chinese: return HamsterUIImage.shared.keyboardStateEnglish
+    // 英文侧返回主键盘的键 (iPhoneKeyboardLayoutProvider.bottomActions
+    // 里是 .keyboardType(selectKeyboard)): 主键盘是中文 26 键时是
+    // .chinese, 是九宫格/自定义中文键盘时是 .chineseNineGrid/.custom,
+    // 都要显示中/英切换形式的 englishState 图标 (大"英"+小"中"),
+    // 不能只显示纯文本"中" (第 11 轮第 5 条: 之前 .chineseNineGrid /
+    // .custom 没有映射, standardButtonImage 返回 nil, 按键回退到
+    // standardButtonText 的"中")。9 键/26 键中文侧的键是
+    // .keyboardType(.alphabetic) -> chineseState, 不动。
+    case .chinese, .chineseNineGrid, .custom: return HamsterUIImage.shared.keyboardStateEnglish
     default: return nil
     }
   }

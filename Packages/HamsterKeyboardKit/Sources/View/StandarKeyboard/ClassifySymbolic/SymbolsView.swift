@@ -24,7 +24,9 @@ class SymbolsView: UICollectionView {
     self.viewModel = viewModel
 
     let layout = {
-      let layout = SeparatorCollectionViewFlowLayout()
+      // 普通 flow layout: 白键网格不要行分隔线 (微信符号菜单也没有),
+      // 旧 SeparatorCollectionViewFlowLayout 会在每行下面画一条横线。
+      let layout = UICollectionViewFlowLayout()
       layout.scrollDirection = .vertical
       return layout
     }()

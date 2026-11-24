@@ -85,7 +85,10 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
         pressedForegroundColor: foregroundColor,
         borderColor: hamsterColor.borderColor,
         shadowColor: hamsterUIColor.standardButtonShadow,
-        cornerRadius: hamsterColor.cornerRadius
+        cornerRadius: hamsterColor.cornerRadius,
+        // 符号格白键: 自定义配色用方案自己的按键底色/按下底色。
+        keyBackgroundColor: hamsterColor.buttonBackColor,
+        keyPressedBackgroundColor: hamsterColor.buttonPressedBackColor
       )
     }
 
@@ -97,7 +100,10 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
       pressedForegroundColor: foregroundColor,
       borderColor: .clear,
       shadowColor: hamsterUIColor.standardButtonShadow,
-      cornerRadius: keyboardLayoutConfiguration.buttonCornerRadius
+      cornerRadius: keyboardLayoutConfiguration.buttonCornerRadius,
+      // 符号格白键: 标准配色用输入键底色 (白/深灰, 含深浅模式 bug 修正)。
+      keyBackgroundColor: hamsterUIColor.standardButtonBackground(for: keyboardContext),
+      keyPressedBackgroundColor: hamsterUIColor.standardDarkButtonBackground(for: keyboardContext)
     )
   }
 
@@ -632,6 +638,15 @@ extension KeyboardAction {
 
   /// 按键空闲状态的背景颜色
   func buttonBackgroundColorForIdleState(for context: KeyboardContext) -> UIColor {
+    // 九宫格底行 123 / 中/英 (第 11 轮第 4 条): 与输入键同色 (白底),
+    // 与两边的按键对称。只在九宫格上: 26 键的 123/中/英仍是系统灰
+    // (微信 26 键也是灰的)。中/英 action (.keyboardType(.alphabetic))
+    // 在 26 键和九宫格上是同一个, 所以必须用 keyboardType 区分,
+    // 不能只看 action; 符号/换行不动。
+    if context.keyboardType == .chineseNineGrid,
+       self == .keyboardType(.numericNineGrid) || self == .keyboardType(.alphabetic(.lowercased)) {
+      return HamsterUIColor.shared.standardButtonBackground(for: context)
+    }
     if isUppercasedShiftAction { return buttonBackgroundColorForPressedState(for: context) }
     if isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
       return HamsterUIColor.shared.standardDarkButtonBackground(for: context)
@@ -643,6 +658,13 @@ extension KeyboardAction {
 
   /// 按键按下状态的背景颜色
   func buttonBackgroundColorForPressedState(for context: KeyboardContext) -> UIColor {
+    // 九宫格底行 123 / 中/英 (第 11 轮第 4 条): 空闲是白底, 按下就该
+    // 是白键的按下色 (深灰), 不能走系统键的按下分支 (浅色会变白,
+    // 按下去没有反馈)。
+    if context.keyboardType == .chineseNineGrid,
+       self == .keyboardType(.numericNineGrid) || self == .keyboardType(.alphabetic(.lowercased)) {
+      return HamsterUIColor.shared.standardDarkButtonBackground(for: context)
+    }
     if isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
       return context.hasDarkColorScheme ? HamsterUIColor.shared.standardButtonBackground(for: context) : .white
     }

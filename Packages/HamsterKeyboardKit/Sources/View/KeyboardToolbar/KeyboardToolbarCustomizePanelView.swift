@@ -2,13 +2,12 @@
 //
 //  KeyboardToolbarCustomizePanelView.swift
 //
-//  键盘内"定制工具栏"面板 (仿微信输入法, 第 10 轮重写为微信式):
-//  顶部: 标题 + 绿色 ✓ 关闭 (微信的 ✓ 是绿的)。
-//  上半: 当前工具栏——一排小图标 (左侧组 + 分隔线 + 右侧组),
-//    每个右上角带 ⊖ 红色删除标记, 点按拿掉回池里;
-//    长按拖动图标自由排序, 也可拖过中线换到另一侧 (第 9 轮左右分区保留)。
-//  下半: 可选工具池——小图标宫格, 4 列, 左右翻页滑动 (UIPageControl 页点),
-//    点按加入工具栏 (进左侧末尾)。
+//  键盘内"定制工具栏"面板 (仿微信输入法, 第 11 轮按微信重画):
+//  顶部一排: 左侧绿色 ✓ 圆钮 + 当前工具栏——小圆图标 (白底圆,
+//  右上角灰色 ⊖), 点 ⊖ 拿掉回池; 长按拖动图标自由排序, 也可拖过
+//  中线换到另一侧 (第 9 轮左右分区保留)。
+//  下半: 白色圆角容器里的可选工具池——小圆图标 + 名称, 4 列,
+//  左右翻页滑动 (UIPageControl 页点), 点按加入工具栏 (进左侧末尾)。
 //  底部: "恢复默认"。
 //  没有上下滚动: 内容按行排布, 工具池按页高自适应 (1 行/2 行);
 //  面板矮时 (小屏/横屏) 池高约束可压缩, 不报无法满足约束的警告
@@ -35,9 +34,9 @@
 import HamsterUIKit
 import UIKit
 
-/// 定制工具栏面板: 标题 + 绿色 ✓ 关闭 + 当前工具栏小图标行
-/// (⊖ 删除/长按拖拽排序/拖过中线换侧) + 可选工具池小图标宫格
-/// (左右翻页 + 页点, 点按加入) + 恢复默认。
+/// 定制工具栏面板: 绿色 ✓ 圆钮 + 当前工具栏小圆图标行
+/// (灰 ⊖ 删除/长按拖拽排序/拖过中线换侧) + 白色圆角容器里的
+/// 可选工具池小圆图标宫格 (左右翻页 + 页点, 点按加入) + 恢复默认。
 class KeyboardToolbarCustomizePanelView: NibLessView {
   /// 某一工具被 ⊖ 拿掉时的回调 (toolID), 由调用方从顺序里删掉并重建工具栏。
   var onRemoveTool: ((String) -> Void)?
@@ -78,36 +77,61 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   private static let poolToolsPerPage = 8
   /// 每页每行格子数。
   private static let poolColumns = 4
-  /// 小图标格高 (当前工具栏格子与工具池格子同高)。
+  /// 顶部一排的格高 (圆图标 56pt + 上下余量)。
   private static let toolCellHeight: CGFloat = 62
+  /// 顶部圆图标直径 (微信式小圆按钮)。
+  private static let topRowIconDiameter: CGFloat = 56
+  /// 工具池格高: 圆图标 52pt + 名称一行 (两行名称时可压缩, defaultHigh)。
+  private static let poolCellHeight: CGFloat = 76
+  /// 工具池圆图标直径。
+  private static let poolCircleDiameter: CGFloat = 52
+  /// 工具池容器圆角 (微信式白色大圆角容器)。
+  private static let poolContainerCornerRadius: CGFloat = 16
+  /// 工具池容器内边距。
+  private static let poolContainerPadding: CGFloat = 12
 
-  private lazy var titleLabel: UILabel = {
-    let label = UILabel()
-    label.text = "定制工具栏"
-    label.font = .systemFont(ofSize: 15, weight: .semibold)
-    label.textColor = .label
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
-  }()
+  /// 工具池容器底色: 浅色纯白, 深色半透明白 (≈深灰), 与菜单格子一致。
+  static let poolContainerBackgroundColor = UIColor { trait in
+    trait.userInterfaceStyle == .dark
+      ? UIColor.white.withAlphaComponent(0.22)
+      : UIColor.white
+  }
 
-  /// ✓ 关闭: 微信的 ✓ 是绿的, 这里也用绿色 (第 10 轮)。
-  private lazy var closeButton: UIButton = {
+  /// 工具池圆图标底色: 白容器里要有对比——浅色用浅灰, 深色用更亮的半透明白。
+  static let poolCircleBackgroundColor = UIColor { trait in
+    trait.userInterfaceStyle == .dark
+      ? UIColor.white.withAlphaComponent(0.30)
+      : UIColor.systemGray6
+  }
+
+  /// 顶部一排圆图标底色: 灰色面板底上用白圆 (与菜单格子一致)。
+  static let topRowCircleBackgroundColor = UIColor { trait in
+    trait.userInterfaceStyle == .dark
+      ? UIColor.white.withAlphaComponent(0.22)
+      : UIColor.white
+  }
+
+  /// ✓ 关闭圆钮: 微信定制面板左上角的绿色实心圆 + 白色 ✓。
+  private lazy var checkmarkCircleButton: UIButton = {
     let button = UIButton(type: .system)
     button.setImage(UIImage(systemName: "checkmark"), for: .normal)
-    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18, weight: .semibold), scale: .default), forImageIn: .normal)
-    button.tintColor = .systemGreen
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 22, weight: .bold), scale: .default), forImageIn: .normal)
+    button.tintColor = .white
+    button.backgroundColor = .systemGreen
+    button.layer.cornerRadius = Self.topRowIconDiameter / 2
     button.translatesAutoresizingMaskIntoConstraints = false
     button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
     return button
   }()
 
-  private lazy var toolbarSectionLabel: UILabel = {
-    let label = UILabel()
-    label.text = "工具栏"
-    label.font = .systemFont(ofSize: 13, weight: .semibold)
-    label.textColor = .secondaryLabel
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
+  /// 工具池白色圆角容器 (微信式)。
+  private lazy var poolContainerView: UIView = {
+    let view = UIView()
+    view.backgroundColor = Self.poolContainerBackgroundColor
+    view.layer.cornerRadius = Self.poolContainerCornerRadius
+    view.clipsToBounds = true
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
   }()
 
   /// 当前工具栏横向滚动容器 (6 个工具一排正好放下, 超宽时可横滑)。
@@ -157,15 +181,6 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     return view
   }()
 
-  private lazy var poolSectionLabel: UILabel = {
-    let label = UILabel()
-    label.text = "可选工具"
-    label.font = .systemFont(ofSize: 13, weight: .semibold)
-    label.textColor = .secondaryLabel
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
-  }()
-
   /// 工具池分页滚动容器: 每页一个 4 列宫格, 横向滑动换页。
   private lazy var pagingScrollView: UIScrollView = {
     let scrollView = UIScrollView()
@@ -209,6 +224,7 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   }()
 
   private var poolHeightConstraint: NSLayoutConstraint?
+  private var containerHeightConstraint: NSLayoutConstraint?
   private var poolEmptyHeightConstraint: NSLayoutConstraint?
   private var pageControlHeightConstraint: NSLayoutConstraint?
 
@@ -236,16 +252,14 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   }
 
   override func constructViewHierarchy() {
-    addSubview(titleLabel)
-    addSubview(closeButton)
-    addSubview(toolbarSectionLabel)
+    addSubview(checkmarkCircleButton)
     addSubview(currentScrollView)
     currentScrollView.addSubview(currentStackView)
     currentStackView.addArrangedSubview(leftStackView)
     currentStackView.addArrangedSubview(sideDividerView)
     currentStackView.addArrangedSubview(rightStackView)
-    addSubview(poolSectionLabel)
-    addSubview(pagingScrollView)
+    addSubview(poolContainerView)
+    poolContainerView.addSubview(pagingScrollView)
     pagingScrollView.addSubview(pagesStackView)
     addSubview(poolEmptyLabel)
     addSubview(pageControl)
@@ -256,26 +270,22 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   }
 
   override func activateViewConstraints() {
-    poolHeightConstraint = pagingScrollView.heightAnchor.constraint(equalToConstant: Self.toolCellHeight)
+    poolHeightConstraint = pagingScrollView.heightAnchor.constraint(equalToConstant: Self.poolCellHeight)
     // 面板矮时池高可压缩 (defaultHigh), 不报无法满足约束的警告;
     // 压掉的是第二行格子的高度, 第一行不受影响。
     poolHeightConstraint?.priority = .defaultHigh
+    containerHeightConstraint = poolContainerView.heightAnchor.constraint(equalToConstant: Self.poolCellHeight + Self.poolContainerPadding * 2)
+    containerHeightConstraint?.priority = .defaultHigh
     poolEmptyHeightConstraint = poolEmptyLabel.heightAnchor.constraint(equalToConstant: 0)
     pageControlHeightConstraint = pageControl.heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
-      titleLabel.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
-      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      checkmarkCircleButton.centerYAnchor.constraint(equalTo: currentScrollView.centerYAnchor),
+      checkmarkCircleButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      checkmarkCircleButton.widthAnchor.constraint(equalToConstant: Self.topRowIconDiameter),
+      checkmarkCircleButton.heightAnchor.constraint(equalToConstant: Self.topRowIconDiameter),
 
-      closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-      closeButton.widthAnchor.constraint(equalToConstant: 44),
-      closeButton.heightAnchor.constraint(equalToConstant: 44),
-
-      toolbarSectionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
-      toolbarSectionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-
-      currentScrollView.topAnchor.constraint(equalTo: toolbarSectionLabel.bottomAnchor, constant: 6),
-      currentScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      currentScrollView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 12),
+      currentScrollView.leadingAnchor.constraint(equalTo: checkmarkCircleButton.trailingAnchor, constant: 12),
       currentScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       currentScrollView.heightAnchor.constraint(equalToConstant: Self.toolCellHeight),
 
@@ -290,15 +300,17 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       sideDividerView.widthAnchor.constraint(equalToConstant: 1),
       sideDividerView.heightAnchor.constraint(equalToConstant: 40),
 
-      poolSectionLabel.topAnchor.constraint(equalTo: currentScrollView.bottomAnchor, constant: 10),
-      poolSectionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      poolContainerView.topAnchor.constraint(equalTo: currentScrollView.bottomAnchor, constant: 12),
+      poolContainerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      poolContainerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      containerHeightConstraint!,
 
-      pagingScrollView.topAnchor.constraint(equalTo: poolSectionLabel.bottomAnchor, constant: 6),
-      pagingScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-      pagingScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      pagingScrollView.topAnchor.constraint(equalTo: poolContainerView.topAnchor, constant: Self.poolContainerPadding),
+      pagingScrollView.leadingAnchor.constraint(equalTo: poolContainerView.leadingAnchor, constant: Self.poolContainerPadding),
+      pagingScrollView.trailingAnchor.constraint(equalTo: poolContainerView.trailingAnchor, constant: -Self.poolContainerPadding),
       poolHeightConstraint!,
 
-      poolEmptyLabel.topAnchor.constraint(equalTo: pagingScrollView.bottomAnchor),
+      poolEmptyLabel.topAnchor.constraint(equalTo: poolContainerView.bottomAnchor),
       poolEmptyLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       poolEmptyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       poolEmptyHeightConstraint!,
@@ -521,8 +533,8 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
 
   // MARK: - 可选工具池 (下半: 小图标宫格, 横向翻页)
 
-  /// 按 poolTools 重建分页宫格。页高自适应: 池里 ≤4 个工具时一排 (62pt),
-  /// 5~8 个时两排 (134pt); 池空时分页容器收起, 只显示提示文字。
+  /// 按 poolTools 重建分页宫格。页高自适应: 池里 ≤4 个工具时一排 (76pt),
+  /// 5~8 个时两排 (162pt); 池空时分页容器收起, 只显示提示文字。
   private func rebuildPoolPages() {
     // 旧页必须先从 arrangedSubviews 里摘掉再移出层级: 只调
     // removeFromSuperview 不会把它从 arrangedSubviews 摘掉, 旧页的约束
@@ -534,8 +546,10 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     }
     if poolTools.isEmpty {
       pagingScrollView.isHidden = true
+      poolContainerView.isHidden = true
       poolEmptyLabel.isHidden = false
       poolHeightConstraint?.constant = 0
+      containerHeightConstraint?.constant = 0
       poolEmptyHeightConstraint?.constant = 40
       pageControl.numberOfPages = 1
       pageControl.isHidden = true
@@ -544,6 +558,7 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       return
     }
     pagingScrollView.isHidden = false
+    poolContainerView.isHidden = false
     poolEmptyLabel.isHidden = true
     poolEmptyHeightConstraint?.constant = 0
     var pageTools: [Tool] = []
@@ -560,10 +575,12 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       addPoolPage(with: pageTools)
       maxToolsOnPage = max(maxToolsOnPage, pageTools.count)
     }
-    // 一排 62pt, 两排 62*2+10=134pt。
-    poolHeightConstraint?.constant = maxToolsOnPage > Self.poolColumns
-      ? Self.toolCellHeight * 2 + 10
-      : Self.toolCellHeight
+    // 一排 76pt, 两排 76*2+10=162pt; 容器再加上下各 12pt 内边距。
+    let poolHeight = maxToolsOnPage > Self.poolColumns
+      ? Self.poolCellHeight * 2 + 10
+      : Self.poolCellHeight
+    poolHeightConstraint?.constant = poolHeight
+    containerHeightConstraint?.constant = poolHeight + Self.poolContainerPadding * 2
     let pageCount = max(pagesStackView.arrangedSubviews.count, 1)
     pageControl.numberOfPages = pageCount
     // 只有多页时显示圆点; 单页时隐藏并把高度压到 0 (不留空位)。
@@ -641,14 +658,22 @@ extension KeyboardToolbarCustomizePanelView: UIScrollViewDelegate {
   }
 }
 
-// MARK: - 小图标格子
+// MARK: - 小圆图标格子
 
-/// 当前工具栏格子: 图标 + 名称, 右上角 ⊖ (红色实心减号, 微信式)。
+/// 当前工具栏格子: 白底小圆图标 + 右上角灰色 ⊖ (微信式)。
 /// 点 ⊖ 拿掉回池; 长按拖动排序 (手势在 currentScrollView 上, 不在格子上)。
 private class CurrentToolView: UIView {
   let tool: (id: String, title: String, systemImage: String)
 
   var onRemove: (() -> Void)?
+
+  /// 白底圆 (微信式小圆按钮)。
+  private let circleView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = KeyboardToolbarCustomizePanelView.topRowCircleBackgroundColor
+    return view
+  }()
 
   private let iconImageView: UIImageView = {
     let imageView = UIImageView()
@@ -658,22 +683,12 @@ private class CurrentToolView: UIView {
     return imageView
   }()
 
-  private let titleLabel: UILabel = {
-    let label = UILabel()
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 11)
-    label.textColor = .label
-    label.textAlignment = .center
-    // 56pt 格子放不下 7 字工具名 ("立即同步剪贴板"), 允许折两行。
-    label.numberOfLines = 2
-    return label
-  }()
-
   private lazy var removeButton: UIButton = {
     let button = UIButton(type: .system)
     button.setImage(UIImage(systemName: "minus.circle.fill"), for: .normal)
     button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
-    button.tintColor = .systemRed
+    // 微信的 ⊖ 是灰的, 不是红的。
+    button.tintColor = .systemGray
     button.translatesAutoresizingMaskIntoConstraints = false
     button.addTarget(self, action: #selector(removeTapped), for: .touchUpInside)
     return button
@@ -683,30 +698,30 @@ private class CurrentToolView: UIView {
     self.tool = tool
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = false
-    addSubview(iconImageView)
-    addSubview(titleLabel)
+    addSubview(circleView)
+    circleView.addSubview(iconImageView)
     addSubview(removeButton)
     NSLayoutConstraint.activate([
       widthAnchor.constraint(equalToConstant: 56),
-      heightAnchor.constraint(equalToConstant: 62),
+      heightAnchor.constraint(equalToConstant: 56),
 
-      iconImageView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-      iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      circleView.topAnchor.constraint(equalTo: topAnchor),
+      circleView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      circleView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      circleView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      iconImageView.centerXAnchor.constraint(equalTo: circleView.centerXAnchor),
+      iconImageView.centerYAnchor.constraint(equalTo: circleView.centerYAnchor),
       iconImageView.heightAnchor.constraint(equalToConstant: 26),
       iconImageView.widthAnchor.constraint(equalToConstant: 26),
 
-      titleLabel.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 2),
-      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-      titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
-      titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -2),
-
-      // ⊖ 钉在格子右上角, 半压在图标角上 (微信式)。
+      // ⊖ 钉在格子右上角, 半压在圆角上 (微信式)。
       removeButton.topAnchor.constraint(equalTo: topAnchor, constant: -2),
       removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 2),
       removeButton.widthAnchor.constraint(equalToConstant: 20),
       removeButton.heightAnchor.constraint(equalToConstant: 20),
     ])
-    titleLabel.text = tool.title
+    circleView.layer.cornerRadius = 28
     iconImageView.image = UIImage(
       systemName: tool.systemImage,
       withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 24)))
@@ -721,19 +736,22 @@ private class CurrentToolView: UIView {
   }
 }
 
-/// 工具池格子: 白色圆角底 + 图标 + 名称 + 右上角绿色 + 标记 (点按加入)。
-/// 底色随深浅模式自动切换 (与菜单格子 MenuTileButton 同一套颜色)。
+/// 工具池格子: 小圆图标 + 名称 (微信式), 点按加入。
+/// 圆底在白容器里用浅灰 (浅色) / 半透明白 (深色) 才看得出;
+/// 微信的池子里没有 + 标记, 点按即加入, 这里也不加。
 private class PoolToolView: UIView {
   let tool: (id: String, title: String, systemImage: String)
 
   var onTap: (() -> Void)?
 
-  /// 格子底色: 浅色纯白, 深色半透明白 (≈深灰), 与菜单格子一致。
-  private static let tileBackgroundColor = UIColor { trait in
-    trait.userInterfaceStyle == .dark
-      ? UIColor.white.withAlphaComponent(0.22)
-      : UIColor.white
-  }
+  /// 圆图标底。
+  private let circleView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = KeyboardToolbarCustomizePanelView.poolCircleBackgroundColor
+    view.layer.cornerRadius = 26
+    return view
+  }()
 
   private let iconImageView: UIImageView = {
     let imageView = UIImageView()
@@ -754,52 +772,39 @@ private class PoolToolView: UIView {
     return label
   }()
 
-  private let addBadgeImageView: UIImageView = {
-    let imageView = UIImageView(image: UIImage(systemName: "plus.circle.fill"))
-    imageView.translatesAutoresizingMaskIntoConstraints = false
-    imageView.contentMode = .scaleAspectFit
-    imageView.tintColor = .systemGreen
-    return imageView
-  }()
-
   init(tool: (id: String, title: String, systemImage: String)) {
     self.tool = tool
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = false
-    layer.cornerRadius = 10
-    clipsToBounds = true
-    backgroundColor = Self.tileBackgroundColor
     // 关键: UIStackView 默认可交互, 会盖住整个格子并在 hit-test 时抢走触摸,
     // 点按手势挂在格子自己身上时子视图必须关掉交互 (菜单面板同款注释)。
     isUserInteractionEnabled = true
-    addSubview(iconImageView)
+    addSubview(circleView)
+    circleView.addSubview(iconImageView)
     addSubview(titleLabel)
-    addSubview(addBadgeImageView)
     iconImageView.isUserInteractionEnabled = false
     titleLabel.isUserInteractionEnabled = false
-    addBadgeImageView.isUserInteractionEnabled = false
-    // 格子高 62pt 是期望值, 不是硬性: 面板矮时 (小屏/横屏) 可压缩,
+    // 格子高 76pt 是期望值, 不是硬性: 面板矮时 (小屏/横屏) 可压缩,
     // 避免“无法同时满足约束”的警告 (菜单面板 MenuTileButton 同款)。
-    let tileHeightConstraint = heightAnchor.constraint(equalToConstant: 62)
+    let tileHeightConstraint = heightAnchor.constraint(equalToConstant: 76)
     tileHeightConstraint.priority = .defaultHigh
     NSLayoutConstraint.activate([
       tileHeightConstraint,
 
-      iconImageView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-      iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      circleView.topAnchor.constraint(equalTo: topAnchor),
+      circleView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      circleView.widthAnchor.constraint(equalToConstant: 52),
+      circleView.heightAnchor.constraint(equalToConstant: 52),
+
+      iconImageView.centerXAnchor.constraint(equalTo: circleView.centerXAnchor),
+      iconImageView.centerYAnchor.constraint(equalTo: circleView.centerYAnchor),
       iconImageView.heightAnchor.constraint(equalToConstant: 26),
       iconImageView.widthAnchor.constraint(equalToConstant: 26),
 
-      titleLabel.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 2),
+      titleLabel.topAnchor.constraint(equalTo: circleView.bottomAnchor, constant: 4),
       titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
       titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-      titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -4),
-
-      // + 标记钉在格子右上角。
-      addBadgeImageView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-      addBadgeImageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-      addBadgeImageView.widthAnchor.constraint(equalToConstant: 16),
-      addBadgeImageView.heightAnchor.constraint(equalToConstant: 16),
+      titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -2),
     ])
     titleLabel.text = tool.title
     iconImageView.image = UIImage(

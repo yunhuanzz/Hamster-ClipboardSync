@@ -30,6 +30,14 @@ public struct NonStandardKeyboardStyle {
   /// 圆角半径
   public var cornerRadius: CGFloat
 
+  /// 符号格白键底色 (第 11 轮第 3 条: 微信符号菜单的键是白色圆角键,
+  /// 不是扁平文字; 旧 backgroundColor 是功能键灰, 不能复用)。
+  /// nil 时 SymbolCell 回退到 backgroundColor。
+  public var keyBackgroundColor: UIColor?
+
+  /// 符号格白键按下时的底色。nil 时回退到 pressedBackgroundColor。
+  public var keyPressedBackgroundColor: UIColor?
+
   init(
     backgroundColor: UIColor? = nil,
     pressedBackgroundColor: UIColor? = nil,
@@ -37,7 +45,9 @@ public struct NonStandardKeyboardStyle {
     pressedForegroundColor: UIColor,
     borderColor: UIColor? = nil,
     shadowColor: UIColor,
-    cornerRadius: CGFloat
+    cornerRadius: CGFloat,
+    keyBackgroundColor: UIColor? = nil,
+    keyPressedBackgroundColor: UIColor? = nil
   ) {
     self.backgroundColor = backgroundColor
     self.pressedBackgroundColor = pressedBackgroundColor
@@ -46,5 +56,7 @@ public struct NonStandardKeyboardStyle {
     self.borderColor = borderColor
     self.shadowColor = shadowColor
     self.cornerRadius = cornerRadius
+    self.keyBackgroundColor = keyBackgroundColor
+    self.keyPressedBackgroundColor = keyPressedBackgroundColor
   }
 }

@@ -29,6 +29,14 @@ class SymbolCell: UICollectionViewListCell {
   public var symbol: String? = nil
   private var style: NonStandardKeyboardStyle? = nil
 
+  /// 白色圆角键底 (第 11 轮第 3 条: 微信符号菜单的键是白色圆角键,
+  /// 不是扁平文字)。格子 40x40, 键底内缩 2pt, 圆角与按键一致。
+  private let keyBackgroundView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   var symbolLabel: UILabel = {
     let label = UILabel()
     label.textAlignment = .center
@@ -60,11 +68,17 @@ class SymbolCell: UICollectionViewListCell {
   }
 
   func constructViewHierarchy() {
+    contentView.addSubview(keyBackgroundView)
     contentView.addSubview(symbolLabel)
   }
 
   func activateViewConstraints() {
     NSLayoutConstraint.activate([
+      keyBackgroundView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
+      keyBackgroundView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2),
+      keyBackgroundView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 2),
+      keyBackgroundView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -2),
+
       symbolLabel.topAnchor.constraint(equalToSystemSpacingBelow: contentView.topAnchor, multiplier: 1.0),
       contentView.bottomAnchor.constraint(equalToSystemSpacingBelow: symbolLabel.bottomAnchor, multiplier: 1.0),
       symbolLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -79,6 +93,8 @@ class SymbolCell: UICollectionViewListCell {
   ) {
     self.symbol = symbol
     self.style = style
+    // 键底圆角与键盘按键一致; 圆角只裁自己的底色, 不裁子视图。
+    keyBackgroundView.layer.cornerRadius = style.cornerRadius
 
     setNeedsUpdateConfiguration()
   }
@@ -91,18 +107,18 @@ class SymbolCell: UICollectionViewListCell {
     // symbolLabel.textAlignment = .center
     // symbolLabel.adjustsFontSizeToFitWidth = true
 
-    var backgroundConfig = UIBackgroundConfiguration.listGroupedCell()
+    // 格子本身透明, 白色圆角键底由 keyBackgroundView 画。
+    var backgroundConfig = UIBackgroundConfiguration.clear()
+    backgroundConfig.backgroundColor = .clear
+    self.backgroundConfiguration = backgroundConfig
 
     if state.isHighlighted || state.isSelected {
-      backgroundConfig.backgroundColor = style?.pressedBackgroundColor
+      keyBackgroundView.backgroundColor = style?.keyPressedBackgroundColor ?? style?.pressedBackgroundColor
       symbolLabel.textColor = style?.pressedForegroundColor
     } else {
-      // backgroundConfig.backgroundColor = style?.backgroundColor
-      backgroundConfig.backgroundColor = .clear
+      keyBackgroundView.backgroundColor = style?.keyBackgroundColor ?? style?.backgroundColor
       symbolLabel.textColor = style?.foregroundColor
     }
-
-    self.backgroundConfiguration = backgroundConfig
   }
 
   override func prepareForReuse() {
