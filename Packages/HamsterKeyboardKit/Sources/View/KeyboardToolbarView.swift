@@ -1371,8 +1371,8 @@ class KeyboardToolbarView: NibLessView {
   func poolDragDrop(toolID: String) {
     guard let target = poolDropTarget else { return }
     removePoolDropPlaceholder()
-    var leftIDs = leftToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { toolID(for: $0) } }
-    var rightIDs = rightToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { toolID(for: $0) } }
+    var leftIDs = leftToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { self.toolID(for: $0) } }
+    var rightIDs = rightToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { self.toolID(for: $0) } }
     if target.isRight {
       rightIDs.insert(toolID, at: min(target.index, rightIDs.count))
     } else {
