@@ -493,8 +493,8 @@ public extension UserDefaults {
   /// 不动 userdb、不写学习, 所以重装/换设备后置顶还在 (UserDefaults
   /// 在 App Group 里), 忘掉 (b) 时同 (code, text) 的置顶一并清除。
   public struct PinnedCandidate: Codable, Equatable {
-    var code: String
-    var text: String
+    public var code: String
+    public var text: String
   }
 
   /// 置顶候选列表, 最多保留 50 条 (最近置顶在前)。
