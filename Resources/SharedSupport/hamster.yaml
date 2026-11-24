@@ -222,6 +222,12 @@ swipe:
   # 另见 KeyboardContext.distanceThreshold, 代码里另有 32pt 下限 (老用户配置不自动更新)
   distanceThreshold: 32
 
+  # 上滑专用的向上距离阈值 (热修复 2026-11-24): 只看向上分量。32pt 时
+  # 点按抬手的轻微上飘仍会误触上滑, 所以上滑另要 48pt (约 0.85 个键高),
+  # 需有意地向上划满将近一个键高才触发; 下滑/左滑/右滑不受影响。
+  # 另见 KeyboardContext.swipeUpDistanceThreshold, 代码里另有 32pt 下限
+  swipeUpDistanceThreshold: 48
+
   # 此值是正切角度的阈值，用来限制上下左右划动时的角度，如果太大容易误触
   # 默认为 15 度的正切值，即上下左右划的的角度不能超过 15 度
   # tan(10º) ≈ 0.176, tan(15º) ≈ 0.268, tan(30º) ≈ 0.577, tan(45º) = 1, tan(60º) ≈ 1.732

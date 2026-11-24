@@ -71,6 +71,11 @@ public class KeyboardButton: UIControl {
   /// 轻扫手势处理
   var swipeGestureHandle: (() -> Void)?
 
+  /// 是否正在显示上滑气泡 (上滑触发时气泡显示上滑字符, 与点按气泡不同)。
+  /// 识别窗口过期导致上滑取消时靠它收掉气泡; 松手/取消时 removeInputCallout
+  /// 会一并把它清掉。
+  var isShowingSwipeCallout = false
+
   /// 拖动开始位置
   var dragStartLocation: CGPoint? = nil
 
@@ -341,8 +346,30 @@ extension KeyboardButton {
     inputCalloutView.setNeedsLayout()
   }
 
+  /// 上滑已触发时, 把按键气泡换成上滑字符 (如九宫格 ABC 上滑的 "2"), 让用户
+  /// 看到松手后会输入什么。九宫格默认不显示点按气泡 (displayButtonBubbles
+  /// 在九宫格上是 false, 且九宫格按键的 showKeyBubble 也是 false), 所以
+  /// 这里不走点按气泡的开关——上滑触发时一定显示; 松手/取消时由
+  /// updateButtonStyle(isPressed: false) 里的 removeInputCallout 收掉。
+  /// 无字符可显示的上滑 (如回退键上滑) 不弹气泡。
+  func showSwipeUpCallout() {
+    guard keyboardContext.interfaceOrientation.isPortrait else { return }
+    guard let swipe = item.swipes.first(where: { $0.direction == .up }) else { return }
+    let text = swipe.action.inputCalloutText ?? appearance.buttonText(for: swipe.action) ?? ""
+    guard !text.isEmpty else { return }
+    if inputCalloutView.superview == nil {
+      let insets = item.insets
+      inputCalloutView.frame = self.frame.inset(by: insets)
+      self.superview?.addSubview(inputCalloutView)
+      inputCalloutView.setNeedsLayout()
+    }
+    inputCalloutView.setText(text)
+    isShowingSwipeCallout = true
+  }
+
   /// 删除 input 按键气泡
   func removeInputCallout() {
+    isShowingSwipeCallout = false
     if inputCalloutView.superview != nil {
       inputCalloutView.removeFromSuperview()
     }

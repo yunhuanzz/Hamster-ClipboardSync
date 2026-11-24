@@ -142,10 +142,22 @@ public extension KeyboardButton {
         if let actionHandler = actionHandler as? StandardKeyboardActionHandler, !actionHandler.isSpaceDragGestureActive {
           // 获取划动方向
           if let direction = SwipeDirection.direction(distanceX: distanceX, distanceY: distanceY, tangentThreshold: tangentThreshold) {
+            // 上滑另有更大的距离要求 (热修复 2026-11-24): 只看向上分量,
+            // 必须划满 swipeUpDistanceThreshold (默认 48pt, 约 0.85 个
+            // 键高) 才算上滑; 点按抬手的轻微上飘不再误触。没划满时不设置
+            // handle, 等手指继续上划再判; 下滑/左滑/右滑不受影响。
+            if direction == .up, -distanceY < keyboardContext.swipeUpDistanceThreshold {
+              return
+            }
             // 生成划动手势处理函数，函数会在 touch 释放时触发
             swipeGestureHandle = { [weak self] in
               guard let self = self else { return }
               swipeAction(direction: direction)
+            }
+            // 上滑已触发: 气泡改显示上滑字符 (如九宫格 ABC 上滑的 "2"),
+            // 让用户看到松手后会输入什么; 松手/取消时气泡自动收掉。
+            if direction == .up {
+              showSwipeUpCallout()
             }
             return
           }
@@ -155,6 +167,11 @@ public extension KeyboardButton {
     }
     // TODO: 其他划动处理
     swipeGestureHandle = nil
+    // 识别窗口已过, 上滑取消: 若上滑气泡还在显示, 收掉它 (否则气泡
+    // 显示的字符与松手后实际输入的点按字符不一致)。
+    if isShowingSwipeCallout {
+      removeInputCallout()
+    }
     dragAction(start: startLocation, current: currentPoint)
   }
 

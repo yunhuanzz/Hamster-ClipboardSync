@@ -17,6 +17,12 @@ public struct KeyboardSwipeConfiguration: Codable, Hashable {
   /// 划动距离阈值，当划动的距离大于或等于此值时，才会识别为一次划动
   public var distanceThreshold: Int?
 
+  /// 上滑专用的向上距离阈值 (热修复 2026-11-24): 只看向上分量, 必须大于
+  /// 等于此值才算一次上滑。32pt 时点按抬手的轻微上飘仍会误触上滑数字,
+  /// 所以上滑另要一个更大的值 (默认 48pt, 约 0.85 个键高)。下限同
+  /// distanceThreshold, 代码里按 32 执行 (老用户配置不自动更新)。
+  public var swipeUpDistanceThreshold: Int?
+
   // 此值是正切角度的阈值，用来限制上下左右划动时的角度，如果太大容易误触
   // 默认为 15 度的正切值，即上下左右划的的角度不能超过 15 度
   // tan(10º) ≈ 0.176, tan(15º) ≈ 0.268, tan(30º) ≈ 0.577, tan(45º) = 1, tan(60º) ≈ 1.732
@@ -31,9 +37,10 @@ public struct KeyboardSwipeConfiguration: Codable, Hashable {
   /// 内置键盘滑动配置
   public private(set) var keyboardSwipeMapping: [KeyboardType: KeySwipeMapping] = [:]
 
-  public init(spaceDragSensitivity: Int? = nil, distanceThreshold: Int? = nil, tangentThreshold: CGFloat? = nil, longPressDelay: Double? = nil, keyboardSwipe: [KeyboardSwipe]? = nil) {
+  public init(spaceDragSensitivity: Int? = nil, distanceThreshold: Int? = nil, swipeUpDistanceThreshold: Int? = nil, tangentThreshold: CGFloat? = nil, longPressDelay: Double? = nil, keyboardSwipe: [KeyboardSwipe]? = nil) {
     self.spaceDragSensitivity = spaceDragSensitivity
     self.distanceThreshold = distanceThreshold
+    self.swipeUpDistanceThreshold = swipeUpDistanceThreshold
     self.tangentThreshold = tangentThreshold
     self.longPressDelay = longPressDelay
     self.keyboardSwipe = keyboardSwipe
@@ -44,6 +51,7 @@ public struct KeyboardSwipeConfiguration: Codable, Hashable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.spaceDragSensitivity = try container.decodeIfPresent(Int.self, forKey: .spaceDragSensitivity)
     self.distanceThreshold = try container.decodeIfPresent(Int.self, forKey: .distanceThreshold)
+    self.swipeUpDistanceThreshold = try container.decodeIfPresent(Int.self, forKey: .swipeUpDistanceThreshold)
     self.tangentThreshold = try container.decodeIfPresent(CGFloat.self, forKey: .tangentThreshold)
     self.longPressDelay = try container.decodeIfPresent(Double.self, forKey: .longPressDelay)
     self.keyboardSwipe = try container.decodeIfPresent([KeyboardSwipe].self, forKey: .keyboardSwipe)
@@ -53,6 +61,7 @@ public struct KeyboardSwipeConfiguration: Codable, Hashable {
   enum CodingKeys: CodingKey {
     case spaceDragSensitivity
     case distanceThreshold
+    case swipeUpDistanceThreshold
     case tangentThreshold
     case longPressDelay
     case keyboardSwipe
@@ -62,6 +71,7 @@ public struct KeyboardSwipeConfiguration: Codable, Hashable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encodeIfPresent(self.spaceDragSensitivity, forKey: .spaceDragSensitivity)
     try container.encodeIfPresent(self.distanceThreshold, forKey: .distanceThreshold)
+    try container.encodeIfPresent(self.swipeUpDistanceThreshold, forKey: .swipeUpDistanceThreshold)
     try container.encodeIfPresent(self.tangentThreshold, forKey: .tangentThreshold)
     try container.encodeIfPresent(self.longPressDelay, forKey: .longPressDelay)
     try container.encodeIfPresent(self.keyboardSwipe, forKey: .keyboardSwipe)

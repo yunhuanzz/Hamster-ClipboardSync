@@ -523,6 +523,15 @@ public class KeyboardContext: ObservableObject {
     max(32, CGFloat(hamsterConfiguration?.swipe?.distanceThreshold ?? 32))
   }
 
+  /// 上滑专用的向上距离阈值 (热修复 2026-11-24): 只看向上分量
+  /// (-distanceY)。32pt 时点按抬手的轻微上飘仍会误触上滑, 所以上滑
+  /// 另要一个更大的值: 默认 48pt, 约 0.85 个键高 (键高 56pt), 需要
+  /// 有意地向上划满将近一个键高才触发。下限 32pt, 与 distanceThreshold
+  /// 同理在代码里 enforced (老用户配置不自动更新)。
+  var swipeUpDistanceThreshold: CGFloat {
+    max(32, CGFloat(hamsterConfiguration?.swipe?.swipeUpDistanceThreshold ?? 48))
+  }
+
   /// 滑动角度正切阈值
   var tangentThreshold: CGFloat {
     hamsterConfiguration?.swipe?.tangentThreshold ?? 0.268
