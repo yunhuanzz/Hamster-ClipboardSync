@@ -12,17 +12,22 @@
 //  - cn_dicts/8105、41448、base、ext、tencent、others (6 个中文组件)
 //  - en_dicts/en、en_ext (英文)、melt_eng (英文合并, import en_ext + en)
 //  - radical_pinyin (部首拼音, 码是带调拼音如 heng2)
-//  诚实结论: 真正能当拼音主词库的只有一个大的合并词库 rime_ice
-//  (加它的 6 个组件); 其余是英文/部首辅助。花样主要在输入方案,
-//  不在词库; 自定义词库以后靠导入 (.dict.yaml 放进 Rime 用户数据目录)。
-//  注意: tencent.dict.yaml 没有注音列 (columns 只有 text/weight,
-//  词条是"词 + 权重", 读音靠 8105 字表在编译时自动注音——
-//  entry_collector.cc: 无码词条进 encode_queue, 由 encoder 拆字
-//  查已收集的单字读音来注音)。单挂它时没有任何单字读音可查,
-//  全部 Encode failure, 等于空词库, 所以九宫格不列它;
-//  九宫格拼音词库是 rime_ice + 8105/41448/base/ext/others 共 6 个,
-//  不是 7 个 (任务原先数的 7 个把 tencent 也算进去了, 是错的)。
-//  26 键仍列全部 11 个 (含 tencent, 只是别指望它单挂能出候选)。
+//  诚实结论 (第 12 轮第 7 项, 真实 deployer + rime_api_console 活验证,
+//  11 个自带词库逐个对 rime_ice 和 t9 两个方案都测过):
+//  能直接挂 translator/dictionary 的只有 3 个: rime_ice、melt_eng、
+//  radical_pinyin。cn_dicts/* (8105/41448/base/ext/tencent/others) 和
+//  en_dicts/* (en/en_ext) 全都编译失败——dict_compiler 的 GetTables()
+//  总把 dict 文件内部的 name: 字段当第一张表, 而这些文件的 name: 是短名
+//  (如 base), 编译器按 "base.dict.yaml" 去顶层找, 找不到就整个词库
+//  编译失败 ("dictionary 'cn_dicts/base' failed to compile")。
+//  所以九宫格 (只列拼音词库) 现在只有 rime_ice 一个可选; 26 键列 3 个
+//  (rime_ice、melt_eng、radical_pinyin)。tencent 单挂无候选的问题
+//  随它整个不可用而消失, 不用再单独排除。
+//  可用性不是写死的白名单, 是按上面这条规则当场判的
+//  (见 isUsableAsDictionary): 以后导入的自定义词库只要 name: 和
+//  import_tables 每一项都能按相对路径找到 .dict.yaml, 也会出现在列表里。
+//  (附: tencent.dict.yaml 本来就没有注音列, 单挂也出不了候选,
+//  但它现在连编译都过不了, 不用再单独排除。)
 //
 //  机制 (librime 1.8.5 源码核对过, 不是猜的):
 //  - 词库是方案通过 translator/dictionary 挂的: rime_ice.schema.yaml
@@ -132,7 +137,7 @@ public enum LayoutDictionary {
     "cn_dicts/41448": ("大字表 41448", "单字表, 约 46k 字 (含生僻字), 默认不并入主词库, 2026-07-01", true),
     "cn_dicts/base": ("基础词库", "常用词, 约 543k 条, 2026-11-01", true),
     "cn_dicts/ext": ("扩展词库", "三字以上词, 约 339k 条, 2026-11-01", true),
-    "cn_dicts/tencent": ("腾讯词向量", "大词库, 约 982k 条, 无注音列 (读音靠字表自动注音), 单挂基本没候选, 2026-11-01", false),
+    "cn_dicts/tencent": ("腾讯词向量", "大词库, 约 982k 条, 无注音列; 且内部 name: 为短名, 不能直接挂 translator/dictionary (第 12 轮第 7 项已验证编译失败), 2026-11-01", false),
     "cn_dicts/others": ("杂项", "容错读音等, 约 0.6k 条, 2026-08-08", true),
     "en_dicts/en": ("英文主词库", "约 21k 常见单词, 2026-10-01", false),
     "en_dicts/en_ext": ("英文补充", "缩写/网络词, 约 2.6k 条, 2026-10-29", false),
@@ -154,14 +159,38 @@ public enum LayoutDictionary {
     }
   }
 
-  /// 生效的绑定: 存的值对应的文件还在才算, 文件没了 (删了导入的词库)
-  /// 就回退默认, 避免部署时因找不到词库文件而失败。
+  /// 生效的绑定: 存的值对应的文件还在、且能直接挂 translator/dictionary
+  /// 才算, 否则回退默认, 避免部署时因找不到词库文件而失败。
+  /// (文件在但不可用: 如第 11 轮遗留的 cn_dicts/base——内部 name: 是短名,
+  /// dict_compiler 在顶层找不到对应的 .dict.yaml, 整个词库编译失败。)
   public static func effectiveBinding(for layout: Layout) -> String {
     let id = binding(for: layout)
-    if id == defaultDictionaryId || dictionaryFileExists(id: id) {
+    if id == defaultDictionaryId {
       return id
     }
-    return defaultDictionaryId
+    guard let url = dictionaryFileURL(id: id), isUsableAsDictionary(fileURL: url) else {
+      return defaultDictionaryId
+    }
+    return id
+  }
+
+  /// 把已存的绑定里"文件在、但不可用"的 (如 cn_dicts/base) 重置为默认。
+  /// 在 apply() 里调 (部署/同步/重置/改绑定都会走 apply), 存的值下次部署起
+  /// 就干净了; 读侧 effectiveBinding 本来就会把不可用绑定当默认用。
+  /// 注意只清文件存在的: 文件压根不存在时不动 (目录可能还没解压,
+  /// 不能把还没解压的自定义词库绑定误清掉)。
+  public static func sanitizeStoredBindings() {
+    for layout in Layout.allCases {
+      let stored = binding(for: layout)
+      guard stored != defaultDictionaryId,
+            let url = dictionaryFileURL(id: stored),
+            !isUsableAsDictionary(fileURL: url) else { continue }
+      switch layout {
+      case .rimeIce: UserDefaults.hamster.layoutDictionaryRimeIce = defaultDictionaryId
+      case .t9: UserDefaults.hamster.layoutDictionaryT9 = defaultDictionaryId
+      }
+      Logger.statistics.info("layout dictionary: 不可用绑定 \(stored) (\(layout.rawValue)) 已重置为默认 \(defaultDictionaryId)")
+    }
   }
 
   /// 改绑定: 存 UserDefaults + 立刻把补丁写进两个用户数据目录
@@ -210,8 +239,9 @@ public enum LayoutDictionary {
         }
       }
     }
-    var options = found.map { id, url in
-      option(for: id, fileURL: url)
+    var options = found.compactMap { id, url in
+      // 不可用的不列: 挂上去部署会失败 (如 cn_dicts/*, 见 isUsableAsDictionary)。
+      isUsableAsDictionary(fileURL: url) ? option(for: id, fileURL: url) : nil
     }
     if pinyinCapableOnly {
       options = options.filter { $0.isPinyinCapable }
@@ -256,12 +286,108 @@ public enum LayoutDictionary {
   }
 
   static func dictionaryFileExists(id: String) -> Bool {
+    dictionaryFileURL(id: id) != nil
+  }
+
+  /// 词库文件在哪个用户数据目录里 (沙盒优先, 没有才看 App Group)。
+  static func dictionaryFileURL(id: String) -> URL? {
     for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
-      if FileManager.default.fileExists(atPath: dir.appendingPathComponent(id + ".dict.yaml").path) {
+      let url = dir.appendingPathComponent(id + ".dict.yaml")
+      if FileManager.default.fileExists(atPath: url.path) {
+        return url
+      }
+    }
+    return nil
+  }
+
+  /// 词库能不能直接挂 translator/dictionary (第 12 轮第 7 项)。
+  /// dict_compiler 的硬性要求 (dict_settings.cc DictSettings::GetTables):
+  /// 它总把 dict 文件头的 name: 字段当第一张表, 再加 import_tables 里的
+  /// 每一项, 每一项都按相对路径找 <entry>.dict.yaml, 有一项找不到,
+  /// 整个词库编译就失败 ("dictionary '...' failed to compile")。
+  /// 所以: name: 必须存在且能解析到文件, import_tables 每一项也必须
+  /// 能解析到文件。实测: 自带的 11 个里只有 rime_ice、melt_eng、
+  /// radical_pinyin 满足 (cn_dicts/*、en_dicts/* 的 name: 都是短名,
+  /// 在顶层找不到)。只读文件头 (到 "..." 为止), 不读词条, 大文件也便宜。
+  /// 注意 name: 缺失时编译器拿到的 name 是空串, 同样失败, 所以也判不可用。
+  static func isUsableAsDictionary(fileURL: URL) -> Bool {
+    let info = dictionaryHeaderInfo(fileURL: fileURL)
+    guard let name = info.name, !name.isEmpty, dictionaryEntryFileExists(entry: name) else {
+      return false
+    }
+    for entry in info.imports {
+      if entry == name { continue } // 编译器跳过自引用, 不用解析
+      guard dictionaryEntryFileExists(entry: entry) else { return false }
+    }
+    return true
+  }
+
+  /// dict 编译器按相对路径找的词条 (name: 或 import_tables 里的项)
+  /// 能不能在用户数据目录里找到对应的 .dict.yaml (沙盒或 App Group)。
+  static func dictionaryEntryFileExists(entry: String) -> Bool {
+    for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
+      if FileManager.default.fileExists(atPath: dir.appendingPathComponent(entry + ".dict.yaml").path) {
         return true
       }
     }
     return false
+  }
+
+  /// 读 dict 文件头的 name: 字段和 import_tables 列表
+  /// (只读到 "..." 为止——与 librime 的 LoadDictHeader 同款, 它读到 "..." 停;
+  /// 上限 5000 行是安全阀: 有的文件头前有几千行注释
+  /// 如 cn_dicts/base.dict.yaml 的 name: 在 3284 行, radical_pinyin 的在 92 行,
+  /// 原来的 40 行上限会把它们都漏掉, radical_pinyin 会被误判为不可用,
+  /// 而它实测是能编译的。第 12 轮第 7 项)。
+  /// import 项去掉行内注释和引号, 只取第一个词 (如 "- cn_dicts/8105 # 字表")。
+  static func dictionaryHeaderInfo(fileURL: URL) -> (name: String?, imports: [String]) {
+    guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
+      return (nil, [])
+    }
+    var name: String?
+    var imports: [String] = []
+    var inImports = false
+    for line in content.components(separatedBy: .newlines).prefix(5000) {
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      if trimmed == "..." { break }
+      if trimmed.hasPrefix("name:") {
+        let value = trimmed.dropFirst("name:".count).trimmingCharacters(in: .whitespaces)
+          .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        if !value.isEmpty {
+          name = value
+        }
+        inImports = false
+        continue
+      }
+      if trimmed.hasPrefix("import_tables:") {
+        // 行内 flow 写法: import_tables: [a, b]
+        if let open = trimmed.firstIndex(of: "["), let close = trimmed.firstIndex(of: "]"), open < close {
+          let inner = trimmed[trimmed.index(after: open)..<close]
+          imports = inner.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+          }.filter { !$0.isEmpty }
+        }
+        inImports = true
+        continue
+      }
+      if inImports {
+        if trimmed.isEmpty || trimmed.hasPrefix("#") {
+          // 空行/注释行不结束 import 列表
+          // (rime_ice 的 import_tables 里就有注释掉的 "- cn_dicts/41448" 行)。
+        } else if trimmed.hasPrefix("- ") || trimmed == "-" {
+          let value = trimmed.dropFirst(2).trimmingCharacters(in: .whitespaces)
+            .split(separator: "#", maxSplits: 1).first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) ?? ""
+          if !value.isEmpty {
+            imports.append(value)
+          }
+        } else {
+          inImports = false
+        }
+      }
+    }
+    return (name, imports)
   }
 
   /// 自带的有现成说明; 自定义的读文件头的 name: 当名字,
@@ -281,19 +407,7 @@ public enum LayoutDictionary {
 
   /// 读 dict 文件头的 name: 字段 (如 name: mydict)。
   static func dictionaryHeaderName(fileURL: URL) -> String? {
-    guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
-    for line in content.components(separatedBy: .newlines).prefix(40) {
-      let trimmed = line.trimmingCharacters(in: .whitespaces)
-      if trimmed.hasPrefix("name:") {
-        let name = trimmed.dropFirst("name:".count).trimmingCharacters(in: .whitespaces)
-          .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-        if !name.isEmpty {
-          return name
-        }
-      }
-      if trimmed == "..." { break }
-    }
-    return nil
+    dictionaryHeaderInfo(fileURL: fileURL).name
   }
 
   /// 抽样判断词库码是不是拼音: 取 "..." 之后的词条行, 在全文件里
@@ -347,7 +461,10 @@ public enum LayoutDictionary {
   /// 按当前绑定把补丁打进两个用户数据目录 (沙盒 + App Group)。
   /// 绑默认时只删本块 (不写 translator/dictionary, 走方案自带的);
   /// 文件内容没变就不重写 (不碰 mtime, 免得下次部署误判配置变了)。
+  /// 打补丁前先清理已存的不可用绑定 (第 12 轮第 7 项), 免得旧绑定
+  /// (如 cn_dicts/base) 在这里又被写回补丁里导致部署失败。
   public static func apply() throws {
+    sanitizeStoredBindings()
     for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
       try FileManager.createDirectory(override: false, dst: dir)
       for layout in Layout.allCases {

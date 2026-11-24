@@ -539,7 +539,9 @@ public extension UserDefaults {
   /// 菜单格子是否上色 (绿) 只看这个集合, 不看 toolbarToolsOrder:
   /// 旧逻辑把"在栏上"当成了"用户加上去的", 所以默认工具
   /// (剪贴板/常用语) 从没开过定制也是绿的。默认工具不算亲手加,
-  /// 只有在定制面板点池子加入、或在工具栏长按拖动摆放过, 才记进来。
+  /// 只有在定制面板点池子加入 (或把池子里的贴纸拖到工具栏上) 才记进来;
+  /// 工具栏长按拖动换位/换侧不算 (第 12 轮: 旧规则把拖动也算亲手加,
+  /// 拖一下默认工具就被误记进来, 菜单里一直绿着)。
   /// 未设置过时为空集: 从没开过定制 → 菜单里一个绿格子都没有。
   /// 注意: 老用户以前在定制里加过的工具, 升级后不会自动进这个集合
   /// (旧数据里分不出来); 绿格子会在他下次亲手加工具时重新出现。
@@ -554,7 +556,8 @@ public extension UserDefaults {
   }
 
   /// 把某个工具记为用户亲手加上去的 (定制面板点池子加入 /
-  /// 工具栏长按拖动摆放后调用)。
+  /// 把池子里的贴纸拖到工具栏上时调用; 工具栏长按拖动换位不算,
+  /// 见第 12 轮)。
   func markToolbarToolUserAdded(_ toolID: String) {
     guard Self.toolbarToolAllIDs.contains(toolID) else { return }
     var ids = toolbarUserAddedToolIDs
@@ -683,6 +686,21 @@ public extension UserDefaults {
     }
     // sorted(by:) 是稳定排序, 只按分区排, 组内相对顺序原样保留。
     toolbarToolsOrder = raw.sorted { rank($0) < rank($1) }
+  }
+
+  /// 一次性迁移 (第 12 轮): 把两个默认工具 (剪贴板/常用语) 从"亲手加上去"
+  /// 的集合里清掉。它们是默认就在栏上的, 从没通过定制加上去; 旧规则把
+  /// "工具栏长按拖动摆放过"也算亲手加, 拖动过的默认工具被误记进来, 菜单里
+  /// 一直绿着 (build #33 反馈)。第 12 轮起拖动不再记, 这次迁移把误记的
+  /// 两个默认 ID 清掉; 以后用户在池子里点按添加 (或把贴纸拖到栏上) 会
+  /// 重新标记。跑过一次后写 flag, 不重复跑。
+  public func migrateToolbarUserAddedDefaultsIfNeeded() {
+    guard object(forKey: Self.toolbarUserAddedDefaultsMigrationKey) == nil else { return }
+    set(true, forKey: Self.toolbarUserAddedDefaultsMigrationKey)
+    var ids = toolbarUserAddedToolIDs
+    ids.remove("clipboard")
+    ids.remove("phrases")
+    toolbarUserAddedToolIDs = ids
   }
 
   // MARK: - 工具栏工具位置分区 (左/中/右)
@@ -883,6 +901,7 @@ extension UserDefaults {
   private static let toolbarOrderFreeMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarOrderMigratedToFreeOrder"
   private static let toolbarToolSidesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolSides"
   private static let toolbarUserAddedToolIDsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarUserAddedToolIDs"
+  private static let toolbarUserAddedDefaultsMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarUserAddedDefaultsMigrated"
 
   // MARK: - 剪贴板历史 / 常用语
 

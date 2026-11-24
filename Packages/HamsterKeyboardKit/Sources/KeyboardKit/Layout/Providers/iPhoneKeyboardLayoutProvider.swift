@@ -181,6 +181,14 @@ open class iPhoneKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
     for context: KeyboardContext
   ) -> KeyboardActions {
     var result = KeyboardActions()
+    // 网址栏 (returnKeyType == .go) 的 "." 键放底行最左端 (第 12 轮第 3 条):
+    // 原来跟在中/英切换键后面, 中/英会比九宫格的第 4 位往左错一位; 放最左端后
+    // 中/英回到第 4 位, 与九宫格对齐。邮箱键盘已有自己的 "@" "."，不另加。
+    if context.textDocumentProxy.returnKeyType == .go,
+       context.textDocumentProxy.keyboardType != .emailAddress {
+      result.append(.symbol(.init(char: ".")))
+    }
+
     if let action = keyboardSwitchActionForBottomRow(for: context) { result.append(action) }
 
     if context.keyboardType.isAlphabetic, context.chineseEnglishSwitchButtonIsOnLeftOfSpaceButton {
@@ -200,9 +208,6 @@ open class iPhoneKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
 
     if context.textDocumentProxy.keyboardType == .emailAddress {
       result.append(.symbol(.init(char: "@")))
-      result.append(.symbol(.init(char: ".")))
-    }
-    if context.textDocumentProxy.returnKeyType == .go {
       result.append(.symbol(.init(char: ".")))
     }
     result.append(keyboardReturnAction(for: context))

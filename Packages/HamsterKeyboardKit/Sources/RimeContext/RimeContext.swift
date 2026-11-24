@@ -80,6 +80,10 @@ public class RimeContext {
   /// rime option 选项对应的值的缓存
   private var optionValueCache: [String: [Bool: String]] = [:]
 
+  /// flushUserDictionary() 的重入守卫 (落盘键本身不触发 syncContext,
+  /// 这里只是防御未来 processor 变化导致递归)。
+  private var isFlushingUserDictionary = false
+
   /// 用户选择的候选拼音
   /// 注意：只保存最近一次选择的拼音和拼音开始位置及长度
   public lazy var selectCandidatePinyin: (String, Int, Int)? = nil
@@ -239,7 +243,34 @@ public extension RimeContext {
   /// RIME 关闭
   /// 注意：仅用于键盘扩展调用
   func shutdown() {
+    // 先落盘: 否则最后一次提交的学习还只在内存事务里, 随 session 一起丢掉
+    // (第 12 轮第 1 项)。
+    flushUserDictionary()
     Rime.shared.shutdown()
+  }
+
+  /// 把待提交的用户词典学习落盘 (第 12 轮第 1 项)。
+  ///
+  /// 根因 (librime 1.8.5 源码 + 活验证):
+  /// 选词提交只把学习写进一个打开的 LevelDB 事务 (内存里的 WriteBatch),
+  /// 真正写盘要等下一次翻译 Query 开头的 Memory::FinishSession()
+  /// (script_translator.cc:184) 或一个未处理按键的 OnUnhandledKey。
+  /// iOS 键盘扩展随时会被系统杀掉; 如果提交是被杀前的最后一个引擎动作,
+  /// 这次学习就全丢——实测: 无后续按键直接退出进程, 再打同一串数字,
+  /// 首选仍是旧句子, 磁盘上的 rime_ice.userdb 里没有新词条;
+  /// 而提交后多按一次键再退出, 新进程里该词组直接排第一。
+  /// 所以每次观测到提交就立刻发一个引擎不认的键 (F24, 没有任何
+  /// processor/key_binder 认领它, 也不像裸 Shift 那样会留一个 500ms
+  /// 的中英切换窗口), 让它走到 OnUnhandledKey → FinishSession →
+  /// CommitTransaction, 学习当场写盘。无待提交事务时
+  /// CommitPendingTransaction 直接返回 false, 开销可忽略。
+  /// 注意: 不能用 RimeSyncUserData() 来落盘——它先 CleanupAllSessions
+  /// 销毁 session/引擎, 待提交事务随引擎一起丢掉, 反而丢学习。
+  func flushUserDictionary() {
+    guard isRunning, !isFlushingUserDictionary else { return }
+    isFlushingUserDictionary = true
+    _ = Rime.shared.inputKeyCode(XK_F24)
+    isFlushingUserDictionary = false
   }
 
   /// RIME 部署
@@ -919,6 +950,13 @@ public extension RimeContext {
     // 如果输入状态不是待组字阶段, 则重置输入法
     if !status.isComposing {
       self.commitText = commitText
+      // 刚提交了一次选词: 立刻把用户词典学习落盘, 否则这次学习只在
+      // 内存事务里, 键盘进程被系统杀掉就丢了 (第 12 轮第 1 项)。
+      // 注意 getCommitText() 读一次就清 (RimeGetCommit 会 ResetCommitText),
+      // 所以 commitText 非空只会在刚提交的这一次同步里出现, 不会重复落盘。
+      if !commitText.isEmpty {
+        flushUserDictionary()
+      }
       self.reset()
       return
     }

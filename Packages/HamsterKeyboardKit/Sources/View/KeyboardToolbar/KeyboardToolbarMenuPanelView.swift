@@ -168,7 +168,7 @@ class KeyboardToolbarMenuPanelView: NibLessView {
 
   /// 刷新格子 (按 4 列分行, 每 8 个一页)。
   /// activeIDs: 已在工具栏上的格子 id, 以彩色显示 (绿图标 + 淡绿底);
-  /// 不在栏上的灰色。
+  /// 不在栏上的图标/文字用深色 (第 12 轮)。
   func reload(with tiles: [(id: String, title: String, systemImage: String)], activeIDs: Set<String> = []) {
     self.tiles = tiles
     self.activeTileIDs = activeIDs
@@ -264,7 +264,7 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   /// 单个格子: 图标在上、文字在下的按钮。
-  /// 已在工具栏上的 (activeIDs 里) 以彩色显示, 其余灰色 (第 9 轮)。
+  /// 已在工具栏上的 (activeIDs 里) 以彩色显示, 其余图标/文字深色 (第 12 轮)。
   private func makeTile(_ tile: (id: String, title: String, systemImage: String)) -> UIControl {
     let button = MenuTileButton()
     button.tileID = tile.id
@@ -298,8 +298,8 @@ extension KeyboardToolbarMenuPanelView: UIScrollViewDelegate {
 /// 每个格子自带淡淡的圆角矩形底 (仿微信白格子): 浅色模式偏白、深色模式偏深灰,
 /// 不硬编码黑/白, 深色模式也不会出现黑斑。
 /// 第 9 轮: 格子放大 (76pt 高、28pt 图标、圆角 12pt, 更接近微信的大白格子);
-/// 已在工具栏上的格子以彩色显示 (绿图标 + 淡绿底), 不在栏上的灰色
-/// (图标/文字都灰), 一眼看出哪个已生效。
+/// 已在工具栏上的格子以彩色显示 (绿图标 + 淡绿底), 不在栏上的图标/文字
+/// 用深色 (第 12 轮: 原来都灰, 太浅, 微信的是近黑), 绿与不绿靠图标颜色 + 淡绿底区分。
 private class MenuTileButton: UIControl {
   var tileID: String = ""
   private var isActiveTile = false
@@ -386,9 +386,11 @@ private class MenuTileButton: UIControl {
     iconImageView.image = UIImage(
       systemName: systemImage,
       withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 26)))
-    // 已生效: 绿图标 + 深色标题 + 淡绿底; 未生效: 图标/标题都灰。
-    iconImageView.tintColor = isActive ? Self.activeIconColor : .tertiaryLabel
-    titleLabel.textColor = isActive ? .label : .secondaryLabel
+    // 已生效: 绿图标 + 深色标题 + 淡绿底; 未生效: 图标/标题都用深色
+    // (第 12 轮: 原来图标 .tertiaryLabel / 标题 .secondaryLabel 太浅,
+    // 微信的格子图标和文字都是近黑的; 绿与不绿靠图标颜色 + 淡绿底区分)。
+    iconImageView.tintColor = isActive ? Self.activeIconColor : .label
+    titleLabel.textColor = .label
     backgroundColor = isActive ? Self.activeTileBackgroundColor : Self.tileBackgroundColor
   }
 

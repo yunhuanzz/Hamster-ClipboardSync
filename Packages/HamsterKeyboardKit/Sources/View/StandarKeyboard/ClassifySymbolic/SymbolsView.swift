@@ -86,7 +86,10 @@ class SymbolsView: UICollectionView {
       // cell.text = KKL10n.text(forKey: symbol.rawValue, locale: keyboardContext.locale)
       cell.updateWithSymbol(
         symbol.char,
-        style: style
+        style: style,
+        // 第 12 轮第 2 条: 白键只属于符号菜单; 侧栏复用 SymbolCell 时
+        // 不传此参数 (默认 false), 保持第 11 轮之前的灰底扁平样式。
+        showsKeyBackground: true
       )
     }
 
@@ -123,8 +126,24 @@ extension SymbolsView: UICollectionViewDelegate {
 }
 
 extension SymbolsView: UICollectionViewDelegateFlowLayout {
+  /// 网格布局 (第 12 轮第 5 条, 向微信看齐, 实测数见注释):
+  /// 微信一行 10 列, 白键宽 37pt, 白键间隙约 6.7pt, 边距约 5.3pt
+  /// (440pt 宽截图实测: 白键 111px, 间隙 20px, 3px = 1pt);
+  /// 我们之前一行 8 列, 格子 40pt + 间距 15pt, 白键间隙约 19.3pt。
+  /// 本布局: 固定 10 列, 格子宽由实测宽度反推, 行/列间距 2pt;
+  /// 白键 = 格子内缩 2pt (SymbolCell), 故白键间隙 = 2 + 4 = 6pt,
+  /// 与微信的 6.7pt 接近; 440pt 宽时格子 41pt、白键 37pt, 与微信一致。
+  private enum SymbolGridLayout {
+    static let columns: CGFloat = 10
+    static let interitemSpacing: CGFloat = 2
+    static let lineSpacing: CGFloat = 2
+    static let horizontalInset: CGFloat = 6
+    static let verticalInset: CGFloat = 6
+    static let fallbackItemSize = CGSize(width: 40, height: 40)
+  }
+
   public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
-    .horizontal(6, vertical: 6)
+    .horizontal(SymbolGridLayout.horizontalInset, vertical: SymbolGridLayout.verticalInset)
   }
 
   // 询问委托一个部分连续的行或列之间的间距。
@@ -132,7 +151,7 @@ extension SymbolsView: UICollectionViewDelegateFlowLayout {
   // 对于一个水平滚动的网格，这个值代表连续的列之间的最小间距。
   // 这个间距不应用于标题和第一行之间的空间或最后一行和页脚之间的空间。
   public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
-    return 0
+    return SymbolGridLayout.lineSpacing
   }
 
   // 向委托询问某部分的行或列中连续项目之间的间距。
@@ -141,10 +160,16 @@ extension SymbolsView: UICollectionViewDelegateFlowLayout {
   // 对于一个水平滚动的网格，这个值代表同一列中项目之间的最小间距。
   // 这个间距是用来计算单行可以容纳多少个项目的，但是在确定了项目的数量之后，实际的间距可能会被向上调整。
   public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
-    return 15
+    return SymbolGridLayout.interitemSpacing
   }
 
   public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-    return CGSize(width: 40, height: 40)
+    // 格子宽按实测宽度反推, 保证恰好 10 列 (不 floor: 余量不足 1pt,
+    // 向下取整会在行尾攒出不对称空隙); 布局未就绪时回退到旧 40x40。
+    let availableWidth = collectionView.bounds.width - SymbolGridLayout.horizontalInset * 2
+    guard availableWidth > 0 else { return SymbolGridLayout.fallbackItemSize }
+    let width = (availableWidth - SymbolGridLayout.interitemSpacing * (SymbolGridLayout.columns - 1)) / SymbolGridLayout.columns
+    guard width > 0 else { return SymbolGridLayout.fallbackItemSize }
+    return CGSize(width: width, height: width)
   }
 }

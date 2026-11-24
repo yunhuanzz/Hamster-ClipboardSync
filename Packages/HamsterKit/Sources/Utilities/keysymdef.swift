@@ -147,6 +147,11 @@ public let XK_F16: Int32 = 0xffcd
 public let XK_F17: Int32 = 0xffce
 public let XK_F18: Int32 = 0xffcf
 public let XK_F19: Int32 = 0xffd0
+public let XK_F20: Int32 = 0xffd1
+public let XK_F21: Int32 = 0xffd2
+public let XK_F22: Int32 = 0xffd3
+public let XK_F23: Int32 = 0xffd4
+public let XK_F24: Int32 = 0xffd5 // 第 12 轮第 1 项: 用户词典落盘用的无害键, 见 RimeContext.flushUserDictionary()
 
 // MARK: Cursor control & motion
 

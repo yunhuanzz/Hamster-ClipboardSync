@@ -893,6 +893,8 @@ class KeyboardToolbarView: NibLessView {
   func rebuildToolbarButtons() {
     // 一次性迁移: 分区顺序展平成自由顺序 (只跑一次, 见 UserDefaults+)。
     UserDefaults.hamster.migrateToolbarToolsOrderFromZonesIfNeeded()
+    // 一次性迁移 (第 12 轮): 默认工具误记进"亲手加上去"集合的清掉 (只跑一次)。
+    UserDefaults.hamster.migrateToolbarUserAddedDefaultsIfNeeded()
     setupToolsStackLayoutIfNeeded()
     // 退出定制态: 晃动停掉, ⊖ 标记清掉 (重建后位置/归属可能已变)。
     exitToolbarCustomizeMode()
@@ -1017,9 +1019,10 @@ class KeyboardToolbarView: NibLessView {
       currentStackView?.removeArrangedSubview(button)
       targetStackView.insertArrangedSubview(button, at: min(targetIndex, targetStackView.arrangedSubviews.count))
       saveToolbarLayoutFromStacks()
-      // 亲手拖动摆放过 = 用户自己放上去的, 菜单里该工具上色 (第 10 轮)。
-      // 只在真正换了位置/换了侧时记 (上面 guard 已保证位置变了才到这里)。
-      UserDefaults.hamster.markToolbarToolUserAdded(toolID)
+      // 注意 (第 12 轮): 拖动换位/换侧不再记为"亲手加上去"——绿格子只表示
+      // "在定制面板池子里点按加入过"。已经在栏上的工具 (尤其是默认的
+      // 剪贴板/常用语) 只是挪了个位置, 不是加上去的; 旧规则 (第 10 轮)
+      // 把拖动也算亲手加, 长按拖一下就把默认工具记进来, 菜单里一直绿着。
     case .ended, .cancelled:
       guard toolbarDraggedToolID == toolID else { return }
       toolbarDraggedToolID = nil
