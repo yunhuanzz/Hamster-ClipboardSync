@@ -35,6 +35,10 @@ import UIKit
  收起键盘 (⌄) 是钉死在工具栏最右的固定按钮, 不参与排序、
  不在菜单格子里、也不在可定制工具里 (第 7 轮, 用户要求)。
  第 6 轮起不再用左/中/右分区 (toolbarToolZones 留着不用, 不删已存数据)。
+ 第 13 轮: 定制面板不再画放大的工具栏复制品, 而是顶贴工具栏底边、
+ 只盖住按键区; 打开面板时工具栏本身进入编辑态 (晃动 + ⊖),
+ 长按拖动换位/换侧、贴边吸附都在工具栏本体上 (第 12 轮面板顶行
+ 的那套行为搬过来), 面板只剩两行连续横滑的工具池 + ✓ + 恢复默认。
  */
 class KeyboardToolbarView: NibLessView {
   private let appearance: KeyboardAppearance
@@ -269,6 +273,20 @@ class KeyboardToolbarView: NibLessView {
   private var toolbarCustomizeModeTimer: Timer?
   /// 定制态下每个工具图标右上角的小红 ⊖ (toolID -> 标记按钮)。
   private var toolbarDeleteBadges: [String: UIButton] = [:]
+
+  /// 定制面板是否开着 (第 13 轮): 开着时工具栏本身就是被编辑的那行,
+  /// exitToolbarCustomizeMode() 在此期间不生效, 免得 3 秒定时器或
+  /// rebuildToolbarButtons() 把编辑态关掉; 面板关闭时
+  /// (dismissCustomizePanel) 先清掉这个标记再退出编辑态。
+  private var customizePanelOpen = false
+  /// 池子贴纸拖到真实工具栏上时的占位坑 (插进左/右组栈里表示落点)。
+  private var poolDropPlaceholder: UIView?
+  /// 池子贴纸拖到真实工具栏上时的落点 (侧 + 组内下标)。
+  private var poolDropTarget: (isRight: Bool, index: Int)?
+  /// 工具栏拖动本次进入的贴边吸附侧 (nil = 未吸附), 进区只震一次。
+  private var toolbarDragSnappedRight: Bool?
+  /// 工具栏拖动贴边吸附区宽度 (与第 12 轮定制面板顶行一致)。
+  private static let toolbarSnapEdgeWidth: CGFloat = 48
 
   /// 当前展示的文本列表面板 (剪贴板 / 常用语), 覆盖在键盘根视图上
   private var textListPanel: KeyboardTextListPanelView?
@@ -977,6 +995,8 @@ class KeyboardToolbarView: NibLessView {
   /// 拖动时按手指 x 实时换位并写盘 (侧 + 顺序), 松手即保存并退出定制态;
   /// 手指在工具栏左半区 → 左侧容器, 右半区 → 右侧容器 (第 9 轮);
   /// 组内位置按“去掉被拖按钮后的其余按钮中点”为界, 不会错一位。
+  /// 靠近左右边缘 48pt 时吸附到该侧端点 (第 13 轮, 第 12 轮定制面板
+  /// 顶行同款, 进区轻震一次)。
   /// 原地长按松手则留在定制态 (全部图标晃动 + ⊖), 3 秒无操作自动退出。
   @objc private func toolbarToolLongPressed(_ recognizer: UILongPressGestureRecognizer) {
     guard let button = recognizer.view as? UIButton,
@@ -989,6 +1009,7 @@ class KeyboardToolbarView: NibLessView {
       toolbarDraggedToolID = toolID
       toolbarDragStartX = recognizer.location(in: commonFunctionBar).x
       toolbarDragMoved = false
+      toolbarDragSnappedRight = nil
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
       button.backgroundColor = style.toolbarButtonBackgroundColor
       UIView.animate(withDuration: 0.15) {
@@ -1001,18 +1022,29 @@ class KeyboardToolbarView: NibLessView {
       if abs(x - toolbarDragStartX) > 12 { toolbarDragMoved = true }
       guard toolbarDragMoved else { return }
       restartToolbarCustomizeModeTimer()
-      // 手指在哪半区, 工具就进哪侧容器 (以工具栏中线为界)。
-      let targetStackView = x > commonFunctionBar.bounds.midX ? rightToolsStackView : leftToolsStackView
-      let others = targetStackView.arrangedSubviews.compactMap { $0 as? UIButton }.filter { $0 !== button }
-      var targetIndex = others.count
-      for (index, other) in others.enumerated() {
-        // 按钮中点换算到 commonFunctionBar 坐标系再比较 (两个容器坐标系不同)。
-        let otherCenterX = commonFunctionBar.convert(other.center, from: other.superview).x
-        if x < otherCenterX {
-          targetIndex = index
-          break
+      // 落点: 左右边缘 48pt 内吸附到该侧端点 (左组首位/右组末位,
+      // 第 12 轮定制面板顶行同款, 进区轻震一次); 中间区域按其余按钮
+      // 中点算位置 (与原来一致: 手指在哪半区进哪侧容器)。
+      let target: (isRight: Bool, index: Int)
+      if x <= Self.toolbarSnapEdgeWidth {
+        if toolbarDragSnappedRight != false {
+          toolbarDragSnappedRight = false
+          UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
+        target = (false, 0)
+      } else if x >= commonFunctionBar.bounds.width - Self.toolbarSnapEdgeWidth {
+        if toolbarDragSnappedRight != true {
+          toolbarDragSnappedRight = true
+          UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        let rightCount = rightToolsStackView.arrangedSubviews.compactMap { $0 as? UIButton }.filter { $0 !== button }.count
+        target = (true, rightCount)
+      } else {
+        toolbarDragSnappedRight = nil
+        target = toolbarInsertionTarget(forX: x, excluding: button)
       }
+      let targetStackView = target.isRight ? rightToolsStackView : leftToolsStackView
+      let targetIndex = target.index
       let currentStackView = button.superview as? UIStackView
       guard let currentIndex = currentStackView?.arrangedSubviews.firstIndex(of: button),
             currentStackView !== targetStackView || currentIndex != targetIndex else { return }
@@ -1026,6 +1058,7 @@ class KeyboardToolbarView: NibLessView {
     case .ended, .cancelled:
       guard toolbarDraggedToolID == toolID else { return }
       toolbarDraggedToolID = nil
+      toolbarDragSnappedRight = nil
       UIView.animate(withDuration: 0.15) {
         button.transform = .identity
         button.alpha = 1.0
@@ -1043,16 +1076,34 @@ class KeyboardToolbarView: NibLessView {
     }
   }
 
+  /// 手指 x (commonFunctionBar 坐标系) 对应的落点: 哪侧容器、组内第几个。
+  /// 以工具栏中线分侧, 组内位置按其余按钮中点为界 (池子贴纸拖入时也用
+  /// 同一套算法, 见 poolDragHover; excluding 为 nil 时不排除任何按钮)。
+  private func toolbarInsertionTarget(forX x: CGFloat, excluding draggedButton: UIButton?) -> (isRight: Bool, index: Int) {
+    let targetStackView = x > commonFunctionBar.bounds.midX ? rightToolsStackView : leftToolsStackView
+    let isRight = targetStackView === rightToolsStackView
+    let others = targetStackView.arrangedSubviews.compactMap { $0 as? UIButton }.filter { $0 !== draggedButton }
+    var targetIndex = others.count
+    for (index, other) in others.enumerated() {
+      // 按钮中点换算到 commonFunctionBar 坐标系再比较 (两个容器坐标系不同)。
+      let otherCenterX = commonFunctionBar.convert(other.center, from: other.superview).x
+      if x < otherCenterX {
+        targetIndex = index
+        break
+      }
+    }
+    return (isRight, targetIndex)
+  }
+
   // MARK: - 工具栏定制态 (第 9 轮: 晃动 + ⊖)
 
   /// 进定制态: 全部工具图标像 iOS 主屏幕编辑态一样晃动,
   /// 每个图标右上角出一个小红 ⊖ (点它拿掉工具, 仍留在定制态)。
   /// 格子图标与 ⌄ 收起键盘不晃动、没有 ⊖。
   private func enterToolbarCustomizeMode() {
-    guard !isToolbarCustomizeMode else {
-      restartToolbarCustomizeModeTimer()
-      return
-    }
+    // 幂等: 每次都重跑一遍晃动 + ⊖, 新上栏的工具 (池子点按/拖入加入的)
+    // 也能拿到晃动和 ⊖; 已在晃动的按钮 startToolbarWiggle 会跳过,
+    // ⊖ 先清后重建, 不会重复叠加。3 秒定时器也每次重计。
     isToolbarCustomizeMode = true
     startToolbarWiggle()
     showToolbarDeleteBadges()
@@ -1063,6 +1114,10 @@ class KeyboardToolbarView: NibLessView {
   /// 工具栏重建 / 点格子图标 / 点 ⌄ 时都调这里。
   private func exitToolbarCustomizeMode() {
     guard isToolbarCustomizeMode else { return }
+    // 定制面板开着时不退出: 工具栏本身就是被编辑的那行, 3 秒无操作
+    // 定时器和 rebuild 都不应该把它关掉; 面板关闭时 dismissCustomizePanel
+    // 先清 customizePanelOpen 再调这里。
+    guard !customizePanelOpen else { return }
     isToolbarCustomizeMode = false
     toolbarCustomizeModeTimer?.invalidate()
     toolbarCustomizeModeTimer = nil
@@ -1142,9 +1197,13 @@ class KeyboardToolbarView: NibLessView {
     UserDefaults.hamster.setToolbarToolVisible(toolID, visible: false)
     UserDefaults.hamster.unmarkToolbarToolUserAdded(toolID)
     rebuildToolbarButtons()
-    // rebuild 会退出定制态; 若栏上还有工具, 重新进定制态 (继续删)。
+    // rebuild 会退出定制态 (面板没开时); 若栏上还有工具, 重新进定制态 (继续删)。
     if !toolbarToolButtons.isEmpty {
       enterToolbarCustomizeMode()
+    }
+    // 定制面板开着时: 被删的工具回池, 池子里它的绿底要跟着去掉。
+    if customizePanel != nil {
+      customizePanel?.reload(allTools: customizeAllTools(), onToolbarIDs: customizeOnToolbarIDs())
     }
   }
 
@@ -1156,7 +1215,8 @@ class KeyboardToolbarView: NibLessView {
     menuTiles().filter { $0.id != "customize" }
   }
 
-  /// 定制工具栏面板要列出的"当前工具栏" (按保存的顺序, 只含实际在栏上的工具)。
+  /// 当前在工具栏上的工具 (按保存的顺序, 只含实际在栏上的工具)。
+  /// 第 13 轮起只用来算池子绿底 (customizeOnToolbarIDs)。
   /// 注意: 老模型下藏起来的工具仍在顺序里 (可见开关关着), 这里按可见性过滤,
   /// 让它回到工具池、可以点按重新上栏, 而不是卡在"当前工具栏"里却不在栏上。
   private func customizeTools() -> [(id: String, title: String, systemImage: String)] {
@@ -1167,42 +1227,34 @@ class KeyboardToolbarView: NibLessView {
     }
   }
 
-  /// 定制面板"当前工具栏"按左/右侧分组 (第 9 轮): 左侧组、右侧组
-  /// 各按栏上顺序; 定制面板里分两节显示, 拖动可跨节换侧。
-  private func customizeLeftTools() -> [(id: String, title: String, systemImage: String)] {
-    customizeTools().filter { UserDefaults.hamster.toolbarToolSide(for: $0.id) == .left }
+  /// 定制面板工具池列出的全部工具 (第 13 轮: 池子显示全部 6 个,
+  /// 不再只列不在栏上的; 注册表顺序与菜单宫格一致)。
+  private func customizeAllTools() -> [(id: String, title: String, systemImage: String)] {
+    toolbarToolDefinitions()
   }
 
-  private func customizeRightTools() -> [(id: String, title: String, systemImage: String)] {
-    customizeTools().filter { UserDefaults.hamster.toolbarToolSide(for: $0.id) == .right }
+  /// 工具池里带绿底的工具 id: 当前在工具栏上的 (可见的) 工具。
+  /// 注意: 池子绿底只表示"在栏上", 与菜单绿格的"亲手加上去"
+  /// (toolbarUserAddedToolIDs) 不是同一回事。
+  private func customizeOnToolbarIDs() -> Set<String> {
+    Set(customizeTools().map { $0.id })
   }
 
-  /// 定制工具栏面板要列出的"可选工具池" (注册表里不在工具栏上的工具, 点按加入)。
-  private func customizePoolTools() -> [(id: String, title: String, systemImage: String)] {
-    let onToolbar = Set(customizeTools().map { $0.id })
-    return toolbarToolDefinitions().filter { !onToolbar.contains($0.id) }
-  }
-
-  /// 打开定制工具栏面板 (覆盖在键盘根视图上)。
+  /// 打开定制工具栏面板 (第 13 轮: 就地编辑)。
+  /// 面板顶贴工具栏底边、只盖住按键区, 真实工具栏露在上面进入编辑态
+  /// (晃动 + ⊖, 见 enterToolbarCustomizeMode): 被编辑的那行就是键盘
+  /// 界面上的那行、图标就是真实大小, 不再是面板里放大的复制品。
+  /// 面板本身不透明 (opaquePanelBackgroundColor), 不用像菜单面板那样
+  /// 先藏按键区——按键本来就被不透明面板盖住、点不到。
+  /// 面板开着期间工具栏不退出编辑态 (见 exitToolbarCustomizeMode 里
+  /// 的 customizePanelOpen 保护; 3 秒定时器、rebuild 都关不掉它),
+  /// 直到面板关闭 (dismissCustomizePanel)。
   private func showToolbarCustomizePanel() {
     dismissAllPanels()
     guard let container = superview else { return }
     let panel = KeyboardToolbarCustomizePanelView()
     panel.panelBackgroundColor = opaquePanelBackgroundColor
     panel.onClose = { [weak self] in self?.dismissCustomizePanel() }
-    // ⊖ 删除: 把工具从工具栏拿掉 (回工具池), 顺序与可见开关同步更新。
-    panel.onRemoveTool = { [weak self] toolID in
-      var order = UserDefaults.hamster.toolbarToolsOrder
-      order.removeAll { $0 == toolID }
-      UserDefaults.hamster.toolbarToolsOrder = order
-      UserDefaults.hamster.setToolbarToolVisible(toolID, visible: false)
-      UserDefaults.hamster.unmarkToolbarToolUserAdded(toolID)
-      self?.rebuildToolbarButtons()
-      self?.customizePanel?.reload(
-        leftTools: self?.customizeLeftTools() ?? [],
-        rightTools: self?.customizeRightTools() ?? [],
-        poolTools: self?.customizePoolTools() ?? [])
-    }
     // 点按加入: 从工具池放回工具栏, 追加到左侧末尾 (默认左;
     // 收起键盘是固定按钮, 不在顺序里, 不用再"插在它前面")。
     // 拖动可再调位置/换侧。老模型下藏起来的工具仍在顺序里:
@@ -1213,42 +1265,164 @@ class KeyboardToolbarView: NibLessView {
         order.append(toolID)
         UserDefaults.hamster.toolbarToolsOrder = order
       }
-      // 从池里加入默认放左侧 (与面板本地“追加到左组”一致;
-      // 想要放右侧再拖过去, 侧属性以这次写入为准)。
+      // 从池里加入默认放左侧 (想要放右侧再拖过去, 侧属性以这次写入为准)。
       UserDefaults.hamster.setToolbarToolSide(toolID, side: .left)
       UserDefaults.hamster.setToolbarToolVisible(toolID, visible: true)
       // 亲手在定制里加上去的, 菜单里该工具上色 (第 10 轮)。
+      // 标记只在这里 (第 12 轮规则): 池子拖入也走这里 (见 poolDragDrop),
+      // 工具栏长按拖动换位/换侧不走这里、不标记。
       UserDefaults.hamster.markToolbarToolUserAdded(toolID)
       self?.rebuildToolbarButtons()
+      // 新上栏的工具也要进编辑态 (晃动 + ⊖), 否则它光秃秃地站在栏上。
+      self?.enterToolbarCustomizeMode()
       self?.customizePanel?.reload(
-        leftTools: self?.customizeLeftTools() ?? [],
-        rightTools: self?.customizeRightTools() ?? [],
-        poolTools: self?.customizePoolTools() ?? [])
+        allTools: self?.customizeAllTools() ?? [],
+        onToolbarIDs: self?.customizeOnToolbarIDs() ?? [])
     }
-    // 拖拽排序/换侧: 面板内已调整顺序并刷新, 这里只保存新布局
-    // (左组 + 右组: 顺序 + 两侧属性一起写盘) 并重建工具栏。
-    panel.onReorder = { [weak self] leftIDs, rightIDs in
-      UserDefaults.hamster.saveToolbarLayout(leftIDs: leftIDs, rightIDs: rightIDs)
-      self?.rebuildToolbarButtons()
+    // 池子贴纸拖到真实工具栏上: 悬停时在栏上插占位坑并返回坑中心
+    // (容器坐标系), 供面板的快照落下动画用; 手指不在工具栏上时
+    // 返回 nil (占位坑已拿掉)。
+    panel.onPoolDragHover = { [weak self] pointInContainer in
+      self?.poolDragHover(pointInContainer: pointInContainer) ?? nil
+    }
+    // 池子贴纸按占位坑落进真实工具栏 (见 poolDragDrop)。
+    panel.onPoolDragDrop = { [weak self] toolID in
+      self?.poolDragDrop(toolID: toolID)
+    }
+    // 池子拖动取消/没放进工具栏: 拿掉栏上的占位坑。
+    panel.onPoolDragCancel = { [weak self] in
+      self?.removePoolDropPlaceholder()
     }
     panel.onReset = { [weak self] in
       UserDefaults.hamster.resetToolbarToolsOrder()
       self?.rebuildToolbarButtons()
+      self?.enterToolbarCustomizeMode()
       self?.customizePanel?.reload(
-        leftTools: self?.customizeLeftTools() ?? [],
-        rightTools: self?.customizeRightTools() ?? [],
-        poolTools: self?.customizePoolTools() ?? [])
+        allTools: self?.customizeAllTools() ?? [],
+        onToolbarIDs: self?.customizeOnToolbarIDs() ?? [])
     }
     panel.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(panel)
-    panel.fillSuperview()
-    panel.reload(leftTools: customizeLeftTools(), rightTools: customizeRightTools(), poolTools: customizePoolTools())
+    NSLayoutConstraint.activate([
+      panel.topAnchor.constraint(equalTo: bottomAnchor),
+      panel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+      panel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+      panel.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+    ])
+    panel.reload(allTools: customizeAllTools(), onToolbarIDs: customizeOnToolbarIDs())
     customizePanel = panel
+    // 面板开着时工具栏本身进入编辑态 (晃动 + ⊖)。
+    customizePanelOpen = true
+    enterToolbarCustomizeMode()
   }
 
   private func dismissCustomizePanel() {
+    removePoolDropPlaceholder()
     customizePanel?.removeFromSuperview()
     customizePanel = nil
+    // 先清标记再退出编辑态, 否则 exit 里的保护会把它拦住。
+    customizePanelOpen = false
+    exitToolbarCustomizeMode()
+  }
+
+  // MARK: - 池子贴纸拖到真实工具栏上 (第 13 轮)
+
+  /// 池子贴纸拖到真实工具栏上方时: 手指在容器坐标系里的位置 ->
+  /// 在对应组里插占位坑 (灰圆, 与工具按钮同大), 返回坑中心
+  /// (容器坐标系) 供面板的快照落下动画用; 手指不在工具栏上时
+  /// 拿掉占位坑并返回 nil。
+  /// 落点算法与工具栏长按拖动同一套 (中线分侧 + 其余按钮中点定组内
+  /// 位置, 左右边缘 48pt 吸附到端点, 见 toolbarInsertionTarget)。
+  func poolDragHover(pointInContainer: CGPoint) -> CGPoint? {
+    guard let container = superview else { return nil }
+    let pointInBar = commonFunctionBar.convert(pointInContainer, from: container)
+    let barFrame = commonFunctionBar.bounds.insetBy(dx: -8, dy: -12)
+    guard barFrame.contains(pointInBar) else {
+      removePoolDropPlaceholder()
+      return nil
+    }
+    let x = pointInBar.x
+    let target: (isRight: Bool, index: Int)
+    if x <= Self.toolbarSnapEdgeWidth {
+      target = (false, 0)
+    } else if x >= commonFunctionBar.bounds.width - Self.toolbarSnapEdgeWidth {
+      let rightCount = rightToolsStackView.arrangedSubviews.compactMap { $0 as? UIButton }.count
+      target = (true, rightCount)
+    } else {
+      target = toolbarInsertionTarget(forX: x, excluding: nil)
+    }
+    if let current = poolDropTarget, current.isRight == target.isRight, current.index == target.index,
+       poolDropPlaceholder != nil {
+      return poolDropPlaceholderCenterInContainer()
+    }
+    removePoolDropPlaceholder()
+    let placeholder = makeToolbarDropPlaceholderView()
+    let targetStack = target.isRight ? rightToolsStackView : leftToolsStackView
+    targetStack.insertArrangedSubview(placeholder, at: min(target.index, targetStack.arrangedSubviews.count))
+    poolDropPlaceholder = placeholder
+    poolDropTarget = target
+    return poolDropPlaceholderCenterInContainer()
+  }
+
+  /// 池子贴纸按占位坑落进真实工具栏: 先走 onAddTool (与点按加入同一入口:
+  /// 标记为亲手加上去的 + 追加到左组末尾 + 重建 + 池子刷新), 再按落点
+  /// 纠正布局 (onAddTool 只认左组末尾) 并重建; 最后刷新池子绿底。
+  /// 没占位坑时什么都不做 (面板只在有落点时调这里)。
+  func poolDragDrop(toolID: String) {
+    guard let target = poolDropTarget else { return }
+    removePoolDropPlaceholder()
+    var leftIDs = leftToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { toolID(for: $0) } }
+    var rightIDs = rightToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { toolID(for: $0) } }
+    if target.isRight {
+      rightIDs.insert(toolID, at: min(target.index, rightIDs.count))
+    } else {
+      leftIDs.insert(toolID, at: min(target.index, leftIDs.count))
+    }
+    // 1) 走 onAddTool: 标记 + 上栏 (标记只在这里, 见 UserDefaults+;
+    // 拖动换位/换侧本身不标记, 池子拖入是"加入", 与点按同一入口)。
+    customizePanel?.onAddTool?(toolID)
+    // 2) 按落点纠正布局并重建 (onAddTool 只追加到左组末尾)。
+    UserDefaults.hamster.saveToolbarLayout(leftIDs: leftIDs, rightIDs: rightIDs)
+    rebuildToolbarButtons()
+    enterToolbarCustomizeMode()
+    customizePanel?.reload(allTools: customizeAllTools(), onToolbarIDs: customizeOnToolbarIDs())
+  }
+
+  /// 占位坑中心 (容器坐标系): 坑在左/右组栈里, 先换算到工具栏坐标系,
+  /// 再换算到容器坐标系 (面板拿它当快照落下动画的目标点)。
+  private func poolDropPlaceholderCenterInContainer() -> CGPoint? {
+    guard let placeholder = poolDropPlaceholder,
+          let placeholderSuperview = placeholder.superview,
+          let container = superview else { return nil }
+    let centerInBar = commonFunctionBar.convert(placeholder.center, from: placeholderSuperview)
+    return convert(centerInBar, to: container)
+  }
+
+  /// 栏上的放下占位坑: 灰圆, 与工具按钮同大 (一眼能看出"贴纸会落在这里")。
+  private func makeToolbarDropPlaceholderView() -> UIView {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = .tertiarySystemFill
+    let buttonHeight = toolbarToolButtons.first?.bounds.height ?? 0
+    let diameter: CGFloat = buttonHeight > 0 ? buttonHeight : 30
+    view.layer.cornerRadius = diameter / 2
+    view.alpha = 0.7
+    NSLayoutConstraint.activate([
+      view.widthAnchor.constraint(equalToConstant: diameter),
+      view.heightAnchor.constraint(equalToConstant: diameter),
+    ])
+    return view
+  }
+
+  /// 拿掉栏上的放下占位坑 (拖出工具栏 / 放下提交 / 取消 / 面板关闭时)。
+  private func removePoolDropPlaceholder() {
+    guard let placeholder = poolDropPlaceholder else { return }
+    if let stack = placeholder.superview as? UIStackView {
+      stack.removeArrangedSubview(placeholder)
+    }
+    placeholder.removeFromSuperview()
+    poolDropPlaceholder = nil
+    poolDropTarget = nil
   }
 
   // MARK: - 粘贴提示行 (微信式: 文字在左, ⌄ 展开 + X 并排在右)
@@ -1420,23 +1594,70 @@ class KeyboardToolbarView: NibLessView {
     keyboardContext.textDocumentProxy.insertText(text)
   }
 
-  /// 在键盘根视图上覆盖展示一个文本列表面板
-  private func showTextListPanel(title: String, items: [String], onSelect: @escaping (String) -> Void, onDelete: @escaping (Int) -> Void) {
+  /// 在键盘根视图上覆盖展示剪贴板 / 常用语二合一面板 (仿微信: 顶部
+  /// [剪贴板 | 常用语] 分段切换, 每条一张白底圆角卡片, 右上角 ⋮ 菜单)。
+  /// 两个页面各接自己的数据与回调, 互不串味: 剪贴板页读写 clipboardHistory,
+  /// 常用语页读写 commonPhrases; 切段只换数据源, 不重建面板。
+  private func showClipboardPhrasesPanel(initialPage: KeyboardTextListPanelView.Page) {
     dismissAllPanels()
     guard let container = superview else { return }
-    let panel = KeyboardTextListPanelView(title: title)
+    let panel = KeyboardTextListPanelView(initialPage: initialPage)
     panel.panelBackgroundColor = opaquePanelBackgroundColor
-    panel.onSelect = { [weak self] text in
-      onSelect(text)
+    panel.onSelectClipboardText = { [weak self] text in
+      self?.insertPanelText(text)
       self?.dismissTextListPanel()
     }
-    panel.onDelete = onDelete
+    panel.onSelectPhrase = { [weak self] text in
+      self?.insertPanelText(text)
+      self?.dismissTextListPanel()
+    }
+    panel.onDeleteClipboardItem = { [weak self] index in
+      var history = UserDefaults.hamster.clipboardHistory
+      guard history.indices.contains(index) else { return }
+      history.remove(at: index)
+      UserDefaults.hamster.clipboardHistory = history
+      self?.refreshClipboardPhrasesPanel()
+    }
+    panel.onDeletePhrase = { [weak self] index in
+      var phrases = UserDefaults.hamster.commonPhrases
+      guard phrases.indices.contains(index) else { return }
+      phrases.remove(at: index)
+      UserDefaults.hamster.commonPhrases = phrases
+      self?.refreshClipboardPhrasesPanel()
+    }
+    panel.onEditPhrase = { [weak self] index in
+      guard let self else { return }
+      self.dismissTextListPanel()
+      self.showCommonPhrasesEditorPanel()
+      self.phrasesEditorPanel?.beginEditingPhrase(at: index)
+    }
+    panel.onManagePhrases = { [weak self] in
+      guard let self else { return }
+      self.dismissTextListPanel()
+      self.showCommonPhrasesEditorPanel()
+    }
     panel.onClose = { [weak self] in self?.dismissTextListPanel() }
+    panel.onSyncNow = {
+      ClipboardSyncService.shared.syncNow()
+    }
+    panel.onSyncFinished = { [weak self] in
+      #if canImport(UIKit)
+        if let text = UIPasteboard.general.string, !text.isEmpty {
+          UserDefaults.hamster.recordClipboardHistory(text)
+        }
+      #endif
+      self?.refreshClipboardPhrasesPanel()
+    }
     panel.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(panel)
     panel.fillSuperview()
-    panel.reload(with: items)
+    panel.reload(clipboardItems: UserDefaults.hamster.clipboardHistory, phrases: UserDefaults.hamster.commonPhrases)
     textListPanel = panel
+  }
+
+  /// 面板开着时从共享 UserDefaults 重读两页数据并刷新 (删条、同步完成时调用)。
+  private func refreshClipboardPhrasesPanel() {
+    textListPanel?.reload(clipboardItems: UserDefaults.hamster.clipboardHistory, phrases: UserDefaults.hamster.commonPhrases)
   }
 
   private func dismissTextListPanel() {
@@ -1446,8 +1667,9 @@ class KeyboardToolbarView: NibLessView {
 
   /// 剪贴板历史: 打开时先触发一次同步 (上传本机剪贴板、下载服务器最新内容),
   /// 再把当前剪贴板记入历史, 展示最近 20 条。面板顶部显示最近一次同步结果,
-  /// 并有"立即同步"按钮; 同步完成后列表会自动刷新。
+  /// 并有"立即同步"药丸按钮; 同步完成后列表会自动刷新。
   /// 无 Full Access 或剪贴板为空时静默, 只显示已有历史。
+  /// 打开在剪贴板分段页; 顶栏切到常用语即是常用语页, 同一个面板。
   private func showClipboardHistoryPanel() {
     // 打开面板即同步一次 (跳过节流), 让 PC 复制的内容尽快出现
     ClipboardSyncService.shared.syncNow()
@@ -1456,40 +1678,14 @@ class KeyboardToolbarView: NibLessView {
         UserDefaults.hamster.recordClipboardHistory(text)
       }
     #endif
-    showTextListPanel(title: "剪贴板", items: UserDefaults.hamster.clipboardHistory, onSelect: { [weak self] text in
-      self?.insertPanelText(text)
-    }, onDelete: { [weak self] index in
-      var history = UserDefaults.hamster.clipboardHistory
-      guard history.indices.contains(index) else { return }
-      history.remove(at: index)
-      UserDefaults.hamster.clipboardHistory = history
-      self?.textListPanel?.reload(with: history)
-    })
-    // 同步状态行 + 立即同步按钮
-    textListPanel?.onSyncNow = {
-      ClipboardSyncService.shared.syncNow()
-    }
-    textListPanel?.onSyncFinished = { [weak self] in
-      #if canImport(UIKit)
-        if let text = UIPasteboard.general.string, !text.isEmpty {
-          UserDefaults.hamster.recordClipboardHistory(text)
-        }
-      #endif
-      self?.textListPanel?.reload(with: UserDefaults.hamster.clipboardHistory)
-    }
+    showClipboardPhrasesPanel(initialPage: .clipboard)
+    // 同步状态行 + 立即同步按钮 (仅剪贴板页显示)
     textListPanel?.showSyncRow(statusText: UserDefaults.hamster.clipboardSyncLastStatusText)
   }
 
-  /// 常用语: 展示内置/自定义列表。长按删除单条。
+  /// 常用语: 打开在常用语分段页 (与剪贴板同一个面板)。
+  /// 点一条粘贴上屏; ⋮ 菜单可编辑 / 删除; 操作行有"管理常用语"入口。
   private func showCommonPhrasesPanel() {
-    showTextListPanel(title: "常用语", items: UserDefaults.hamster.commonPhrases, onSelect: { [weak self] text in
-      self?.insertPanelText(text)
-    }, onDelete: { [weak self] index in
-      var phrases = UserDefaults.hamster.commonPhrases
-      guard phrases.indices.contains(index) else { return }
-      phrases.remove(at: index)
-      UserDefaults.hamster.commonPhrases = phrases
-      self?.textListPanel?.reload(with: phrases)
-    })
+    showClipboardPhrasesPanel(initialPage: .phrases)
   }
 }

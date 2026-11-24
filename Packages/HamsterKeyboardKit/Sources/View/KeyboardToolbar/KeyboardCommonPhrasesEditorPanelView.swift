@@ -217,6 +217,24 @@ class KeyboardCommonPhrasesEditorPanelView: NibLessView {
     tableView.reloadData()
   }
 
+  /// 进入编辑态: 把第 index 条载入输入框 (按钮变"保存", 出现取消)。
+  /// 列表点一条与剪贴板面板 ⋮→编辑共用; 下标越界时什么都不做。
+  func beginEditingPhrase(at index: Int) {
+    let phrases = UserDefaults.hamster.commonPhrases
+    guard phrases.indices.contains(index) else { return }
+    enterEditingMode(at: index, text: phrases[index])
+  }
+
+  /// 把一条载入输入框进入编辑态 (按钮变"保存", 出现取消)。
+  private func enterEditingMode(at index: Int, text: String) {
+    editingIndex = index
+    inputTextField.text = text
+    actionButton.setTitle("保存", for: .normal)
+    actionButton.isEnabled = true
+    cancelButton.isHidden = false
+    inputTextField.becomeFirstResponder()
+  }
+
   /// 退出编辑态 (清空输入框、按钮恢复"添加"、隐藏取消)。
   private func exitEditingMode() {
     editingIndex = nil
@@ -315,12 +333,7 @@ extension KeyboardCommonPhrasesEditorPanelView: UITableViewDelegate {
     tableView.deselectRow(at: indexPath, animated: true)
     let phrases = UserDefaults.hamster.commonPhrases
     guard phrases.indices.contains(indexPath.row) else { return }
-    editingIndex = indexPath.row
-    inputTextField.text = phrases[indexPath.row]
-    actionButton.setTitle("保存", for: .normal)
-    actionButton.isEnabled = true
-    cancelButton.isHidden = false
-    inputTextField.becomeFirstResponder()
+    enterEditingMode(at: indexPath.row, text: phrases[indexPath.row])
   }
 
   /// 左滑删除。

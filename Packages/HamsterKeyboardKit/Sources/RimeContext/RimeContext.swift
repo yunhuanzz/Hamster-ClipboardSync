@@ -379,6 +379,18 @@ public extension RimeContext {
       Logger.statistics.error("RIME deploy layout dictionary patch error \(error.localizedDescription)")
     }
 
+    // 九宫格首字母拼写 (第 13 轮第 3 项 a 小点): 把 11 个常用音节的
+    // 首字母形式以 derive 规则打进 t9.custom.yaml (常开, 只写 t9)。
+    // 不写成 abbrev——abbrev 派生是 kAbbreviation 类型, 查询时
+    // syllabifier 只要见到全普通拼写的切分就把它剪掉, 4263 就永远
+    // 出不了“好的”; derive 保持普通类型, 活验证 4263 好的 #1。
+    // 失败不阻断部署, 只记日志, 下次部署再试。
+    do {
+      try T9SyllableInitials.apply()
+    } catch {
+      Logger.statistics.error("RIME deploy t9 syllable initials patch error \(error.localizedDescription)")
+    }
+
     if !isRunning {
       Rime.shared.start(Rime.createTraits(
         sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
@@ -520,8 +532,8 @@ public extension RimeContext {
     )
 
     // 将 Sandbox 目录下方案复制到AppGroup下
-    try FileManager.syncSandboxSharedSupportDirectoryToAppGroup(override: true)
-    try FileManager.syncSandboxUserDataDirectoryToAppGroup(override: true)
+    try FileManager.syncSandboxSharedSupportDirectoryToAppGroup()
+    try FileManager.syncSandboxUserDataDirectoryToAppGroup()
   }
 
   /// RIME 同步
@@ -588,6 +600,14 @@ public extension RimeContext {
       Logger.statistics.error("RIME sync layout dictionary patch error \(error.localizedDescription)")
     }
 
+    // 九宫格首字母拼写 (第 13 轮第 3 项 a 小点, 理由同 deployment)。
+    // 失败不阻断同步, 只记日志, 下次部署再试。
+    do {
+      try T9SyllableInitials.apply()
+    } catch {
+      Logger.statistics.error("RIME sync t9 syllable initials patch error \(error.localizedDescription)")
+    }
+
     if !isRunning {
       Rime.shared.start(Rime.createTraits(
         sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
@@ -613,8 +633,8 @@ public extension RimeContext {
     )
 
     // 将 Sandbox 目录下方案复制到AppGroup下
-    try FileManager.syncSandboxSharedSupportDirectoryToAppGroup(override: true)
-    try FileManager.syncSandboxUserDataDirectoryToAppGroup(override: true)
+    try FileManager.syncSandboxSharedSupportDirectoryToAppGroup()
+    try FileManager.syncSandboxUserDataDirectoryToAppGroup()
   }
 
   /// RIME 重置
@@ -686,9 +706,18 @@ public extension RimeContext {
       Logger.statistics.error("RIME reset layout dictionary patch error \(error.localizedDescription)")
     }
 
+    // 九宫格首字母拼写 (第 13 轮第 3 项 a 小点): 重置清空了沙盒用户
+    // 数据目录, 把补丁打回来 (常开, 不跟开关走), 否则下面沙盒 ->
+    // App Group 的同步会把 App Group 里的补丁也删掉。
+    do {
+      try T9SyllableInitials.apply()
+    } catch {
+      Logger.statistics.error("RIME reset t9 syllable initials patch error \(error.localizedDescription)")
+    }
+
     // 部署后将方案copy至AppGroup下供keyboard使用
-    try FileManager.syncSandboxSharedSupportDirectoryToAppGroup(override: true)
-    try FileManager.syncSandboxUserDataDirectoryToAppGroup(override: true)
+    try FileManager.syncSandboxSharedSupportDirectoryToAppGroup()
+    try FileManager.syncSandboxUserDataDirectoryToAppGroup()
   }
 
   var isRunning: Bool {
@@ -1370,10 +1399,16 @@ public extension RimeContext {
         }
       }
     } else {
-      // 使用 trie 结构判断 pre 的字符
+      // 使用 trie 结构判断 pre 的字符: 逐位加长前缀, 只要还是某个音节编码的
+      // 前缀就继续, 是完整音节编码就把它的拼音列出来。
+      // 注意 (第 13 轮): 这里必须用 hasPrefix 判断“还能不能继续”, 不能用
+      // contains——contains 要求整串是一个完整 key, 而 "782"/"982" 这类中间
+      // 前缀本身不是 key (只是 "7826"/"9826" 的前缀), contains 会在第 3 位
+      // 就 break, 导致 7826→quan/ruan/suan、9826→xuan/yuan/zuan 永远列不
+      // 出来 (用户实测: 9826 边栏只有 xu, 手动点 xu 再点 'an 才能拼出 xuan)。
       for count in 1 ... prePinypin.count {
         let sub = String(prePinypin.prefix(count))
-        if !t9PinyinTrie.contains(sub) {
+        if !t9PinyinTrie.hasPrefix(sub) {
           break
         }
         if let subList = t9ToPinyinMapping[sub] {

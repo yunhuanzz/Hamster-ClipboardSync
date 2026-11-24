@@ -1,30 +1,66 @@
 //
 //  KeyboardTextListPanelView.swift
 //
-//  键盘内文本列表面板 (剪贴板历史 / 常用语共用)。
-//  点一条把文本输入到当前输入框; 长按一条删除该条。
+//  键盘内剪贴板 / 常用语二合一面板 (仿微信输入法剪贴板工具, 第 13 轮重做)。
+//  顶部是 [剪贴板 | 常用语] 分段切换 (UISegmentedControl), 两页共用一个面板:
+//  每条内容一张白底圆角卡片 (浅色下 .systemBackground 白底、圆角 12pt),
+//  每条右上角 ⋮ 菜单 (粘贴 / 删除; 常用语页另有编辑)。
+//  点卡片把文本输入到当前输入框 (并关闭面板); 剪贴板页保留同步状态行
+//  ("11:03 同步成功" + "立即同步"药丸按钮, 不再是两行裸链接); 常用语页
+//  的操作行是"管理常用语"药丸按钮 (打开键盘内常用语管理面板)。
+//  长按一条删除 (旧行为, 保留)。
+//  两个页面各接自己的数据与回调, 互不串味: 剪贴板页读写 clipboardHistory,
+//  常用语页读写 commonPhrases; 切段只换数据源, 不重建面板。
 //  所有失败静默处理, 不弹框、不阻塞打字。
+//  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上。
 //
 
 import HamsterKit
 import HamsterUIKit
 import UIKit
 
-/// 键盘内文本列表面板: 标题 + 关闭按钮 + 列表。
-/// 由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上。
+/// 键盘内剪贴板 / 常用语面板: 分段切换 + 卡片列表 + 操作行。
 class KeyboardTextListPanelView: NibLessView {
-  /// 选中一条时的回调 (由调用方负责把文本输入到输入框并关闭面板)
-  var onSelect: ((String) -> Void)?
-  /// 长按删除一条时的回调 (由调用方负责从存储中删除并刷新列表)
-  var onDelete: ((Int) -> Void)?
+  /// 面板内的两个分段页。
+  enum Page {
+    case clipboard
+    case phrases
+  }
+
+  /// 选中剪贴板页的一条时的回调 (由调用方把文本输入到输入框并关闭面板)。
+  var onSelectClipboardText: ((String) -> Void)?
+  /// 剪贴板页删一条时的回调 (由调用方从存储中删除并刷新列表, 面板保持打开)。
+  var onDeleteClipboardItem: ((Int) -> Void)?
+  /// 选中常用语页的一条时的回调 (由调用方把文本输入到输入框并关闭面板)。
+  var onSelectPhrase: ((String) -> Void)?
+  /// 常用语页删一条时的回调 (由调用方从存储中删除并刷新列表, 面板保持打开)。
+  var onDeletePhrase: ((Int) -> Void)?
+  /// 常用语页 ⋮→编辑时的回调 (由调用方打开常用语管理面板并载入该条)。
+  var onEditPhrase: ((Int) -> Void)?
+  /// 常用语页点"管理常用语"时的回调 (由调用方打开常用语管理面板)。
+  var onManagePhrases: (() -> Void)?
   /// 关闭按钮回调
   var onClose: (() -> Void)?
-  /// 点"立即同步"时的回调 (仅剪贴板面板使用)
+  /// 点"立即同步"时的回调 (仅剪贴板页使用)
   var onSyncNow: (() -> Void)?
-  /// 同步完成时的回调 (仅剪贴板面板使用, 供调用方刷新列表)
+  /// 同步完成时的回调 (仅剪贴板页使用, 供调用方刷新列表)
   var onSyncFinished: (() -> Void)?
 
-  private var items: [String] = []
+  /// 当前显示的分段页。
+  private var currentPage: Page
+  private var clipboardItems: [String] = []
+  private var phraseItems: [String] = []
+
+  /// 当前页的数据源 (切段时换, 回调按页分流, 不会串味)。
+  private var currentItems: [String] {
+    switch currentPage {
+    case .clipboard: return clipboardItems
+    case .phrases: return phraseItems
+    }
+  }
+
+  /// 调用方是否打开了同步状态行 (仅剪贴板页显示; 默认不开)。
+  private var isSyncRowEnabled = false
 
   /// 覆盖式面板底色: 调用方 (KeyboardToolbarView) 传入与键盘本体一致的不透明颜色;
   /// 默认用系统键盘标准底色 (浅色 #D5D6DD / 深色 #2C2C2C, 不透明)。
@@ -37,24 +73,30 @@ class KeyboardTextListPanelView: NibLessView {
     }
   }
 
-  private lazy var titleLabel: UILabel = {
-    let label = UILabel()
-    label.font = .systemFont(ofSize: 15, weight: .semibold)
-    label.textColor = .label
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
+  /// 顶部 [剪贴板 | 常用语] 分段切换 (仿微信剪贴板工具顶栏的灰底药丸分段条)。
+  private lazy var segmentedControl: UISegmentedControl = {
+    let control = UISegmentedControl(items: ["剪贴板", "常用语"])
+    control.selectedSegmentIndex = self.currentPage == .clipboard ? 0 : 1
+    // 灰底药丸 + 白底选中段: 浅色下与微信的分段条一致, 深色下自动变深。
+    control.backgroundColor = .systemGray5
+    control.selectedSegmentTintColor = .systemBackground
+    control.translatesAutoresizingMaskIntoConstraints = false
+    control.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
+    return control
   }()
 
+  /// 左上角 ⌃ 收起按钮 = 关闭面板 (与功能菜单面板的 ⌃ 收起同一套入口)。
   private lazy var closeButton: UIButton = {
     let button = UIButton(type: .system)
-    button.setTitle("关闭", for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 15)
+    button.setImage(UIImage(systemName: "chevron.up"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18, weight: .semibold), scale: .default), forImageIn: .normal)
+    button.tintColor = .label
     button.translatesAutoresizingMaskIntoConstraints = false
     button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
     return button
   }()
 
-  /// 同步状态文字 (仅剪贴板面板使用): 显示最近一次同步结果, 如 "13:20 同步成功"。
+  /// 同步状态文字 (仅剪贴板页使用): 显示最近一次同步结果, 如 "11:03 同步成功"。
   private lazy var statusLabel: UILabel = {
     let label = UILabel()
     label.font = .systemFont(ofSize: 12)
@@ -63,25 +105,40 @@ class KeyboardTextListPanelView: NibLessView {
     return label
   }()
 
-  /// 立即同步按钮 (仅剪贴板面板使用): 手动触发一次同步, 跳过 0.5 秒节流。
+  /// 立即同步药丸按钮 (仅剪贴板页使用): 手动触发一次同步, 跳过 0.5 秒节流。
   private lazy var syncNowButton: UIButton = {
-    let button = UIButton(type: .system)
-    button.setTitle("立即同步", for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
-    button.translatesAutoresizingMaskIntoConstraints = false
+    let button = Self.makePillButton(title: "立即同步")
     button.addTarget(self, action: #selector(syncNowTapped), for: .touchUpInside)
     return button
   }()
 
-  /// 同步状态行容器 (仅剪贴板面板使用)。隐藏时高度为 0, 不占位置。
-  private lazy var syncRowView: UIView = {
+  /// 常用语页的操作行提示 (仅常用语页使用)。
+  private lazy var phrasesHintLabel: UILabel = {
+    let label = UILabel()
+    label.text = "点 ⋮ 可编辑、删除"
+    label.font = .systemFont(ofSize: 12)
+    label.textColor = .secondaryLabel
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+
+  /// 管理常用语药丸按钮 (仅常用语页使用): 打开键盘内常用语管理面板。
+  private lazy var manageButton: UIButton = {
+    let button = Self.makePillButton(title: "管理常用语")
+    button.addTarget(self, action: #selector(manageTapped), for: .touchUpInside)
+    return button
+  }()
+
+  /// 操作行容器: 剪贴板页放同步状态 + 立即同步, 常用语页放提示 + 管理常用语。
+  /// 剪贴板页未启用同步行时高度为 0, 不占位置。
+  private lazy var actionRowView: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isHidden = true
     return view
   }()
 
-  private var syncRowHeightConstraint: NSLayoutConstraint?
+  private var actionRowHeightConstraint: NSLayoutConstraint?
 
   private lazy var tableView: UITableView = {
     let tableView = UITableView(frame: .zero, style: .plain)
@@ -89,11 +146,13 @@ class KeyboardTextListPanelView: NibLessView {
     tableView.dataSource = self
     tableView.delegate = self
     tableView.rowHeight = UITableView.automaticDimension
-    tableView.estimatedRowHeight = 44
+    tableView.estimatedRowHeight = 64
+    // 卡片之间用 cell 内的留白分隔, 不用系统分割线。
+    tableView.separatorStyle = .none
     // 不透明: 面板本身已是不透明底色, 列表用同一颜色, 按键透不出来;
     // 深色模式下是深灰, 不是纯黑, 不会出现黑斑。
     tableView.backgroundColor = panelBackgroundColor
-    tableView.register(UITableViewCell.self, forCellReuseIdentifier: "TextListCell")
+    tableView.register(KeyboardTextListCardCell.self, forCellReuseIdentifier: "TextListCardCell")
     return tableView
   }()
 
@@ -107,12 +166,25 @@ class KeyboardTextListPanelView: NibLessView {
     return label
   }()
 
-  init(title: String) {
+  /// 蓝底浅色药丸按钮 (同步行 / 管理行共用): 旧"立即同步"蓝色文字链的样式收进药丸里。
+  private static func makePillButton(title: String) -> UIButton {
+    let button = UIButton(type: .system)
+    button.setTitle(title, for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
+    button.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
+    button.layer.cornerRadius = 13
+    button.contentEdgeInsets = UIEdgeInsets(top: 4, left: 12, bottom: 4, right: 12)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    return button
+  }
+
+  init(initialPage: Page = .clipboard) {
+    currentPage = initialPage
     super.init(frame: .zero)
-    titleLabel.text = title
     constructViewHierarchy()
     activateViewConstraints()
     setupAppearance()
+    updateActionRow()
 
     let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
     tableView.addGestureRecognizer(longPress)
@@ -127,37 +199,50 @@ class KeyboardTextListPanelView: NibLessView {
   }
 
   override func constructViewHierarchy() {
-    addSubview(titleLabel)
     addSubview(closeButton)
-    syncRowView.addSubview(statusLabel)
-    syncRowView.addSubview(syncNowButton)
-    addSubview(syncRowView)
+    addSubview(segmentedControl)
+    actionRowView.addSubview(statusLabel)
+    actionRowView.addSubview(syncNowButton)
+    actionRowView.addSubview(phrasesHintLabel)
+    actionRowView.addSubview(manageButton)
+    addSubview(actionRowView)
     addSubview(tableView)
     addSubview(emptyLabel)
   }
 
   override func activateViewConstraints() {
-    syncRowHeightConstraint = syncRowView.heightAnchor.constraint(equalToConstant: 0)
+    actionRowHeightConstraint = actionRowView.heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
-      titleLabel.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
-      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      closeButton.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
+      closeButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      closeButton.widthAnchor.constraint(equalToConstant: 32),
+      closeButton.heightAnchor.constraint(equalToConstant: 32),
 
-      closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+      segmentedControl.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+      segmentedControl.centerXAnchor.constraint(equalTo: centerXAnchor),
+      segmentedControl.widthAnchor.constraint(equalToConstant: 200),
+      segmentedControl.heightAnchor.constraint(equalToConstant: 30),
 
-      syncRowView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-      syncRowView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-      syncRowView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-      syncRowHeightConstraint!,
+      actionRowView.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 4),
+      actionRowView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      actionRowView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+      actionRowHeightConstraint!,
 
-      statusLabel.leadingAnchor.constraint(equalTo: syncRowView.leadingAnchor),
-      statusLabel.centerYAnchor.constraint(equalTo: syncRowView.centerYAnchor),
+      statusLabel.leadingAnchor.constraint(equalTo: actionRowView.leadingAnchor),
+      statusLabel.centerYAnchor.constraint(equalTo: actionRowView.centerYAnchor),
       statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: syncNowButton.leadingAnchor, constant: -8),
 
-      syncNowButton.trailingAnchor.constraint(equalTo: syncRowView.trailingAnchor),
-      syncNowButton.centerYAnchor.constraint(equalTo: syncRowView.centerYAnchor),
+      syncNowButton.trailingAnchor.constraint(equalTo: actionRowView.trailingAnchor),
+      syncNowButton.centerYAnchor.constraint(equalTo: actionRowView.centerYAnchor),
 
-      tableView.topAnchor.constraint(equalTo: syncRowView.bottomAnchor, constant: 8),
+      phrasesHintLabel.leadingAnchor.constraint(equalTo: actionRowView.leadingAnchor),
+      phrasesHintLabel.centerYAnchor.constraint(equalTo: actionRowView.centerYAnchor),
+      phrasesHintLabel.trailingAnchor.constraint(lessThanOrEqualTo: manageButton.leadingAnchor, constant: -8),
+
+      manageButton.trailingAnchor.constraint(equalTo: actionRowView.trailingAnchor),
+      manageButton.centerYAnchor.constraint(equalTo: actionRowView.centerYAnchor),
+
+      tableView.topAnchor.constraint(equalTo: actionRowView.bottomAnchor, constant: 8),
       tableView.leadingAnchor.constraint(equalTo: leadingAnchor),
       tableView.trailingAnchor.constraint(equalTo: trailingAnchor),
       tableView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -174,17 +259,46 @@ class KeyboardTextListPanelView: NibLessView {
     backgroundColor = panelBackgroundColor
   }
 
-  /// 刷新列表内容
-  func reload(with items: [String]) {
-    self.items = items
-    emptyLabel.isHidden = !items.isEmpty
+  /// 刷新两页内容 (调用方从共享 UserDefaults 重读后传入)。
+  func reload(clipboardItems: [String], phrases: [String]) {
+    self.clipboardItems = clipboardItems
+    phraseItems = phrases
+    reloadCurrentPage()
+  }
+
+  /// 刷新当前页的列表与空态 (切段 / 数据变化时调用)。
+  private func reloadCurrentPage() {
+    emptyLabel.text = currentPage == .clipboard ? "暂无剪贴板内容" : "暂无常用语"
+    emptyLabel.isHidden = !currentItems.isEmpty
     tableView.reloadData()
   }
 
-  /// 显示同步状态行 (仅剪贴板面板调用): 左侧最近一次同步结果, 右侧"立即同步"按钮。
+  /// 按当前页配置操作行:
+  /// 剪贴板页显示同步状态 + 立即同步 (未启用同步行时整行隐藏);
+  /// 常用语页显示提示 + 管理常用语。
+  private func updateActionRow() {
+    switch currentPage {
+    case .clipboard:
+      statusLabel.isHidden = false
+      syncNowButton.isHidden = false
+      phrasesHintLabel.isHidden = true
+      manageButton.isHidden = true
+      actionRowView.isHidden = !isSyncRowEnabled
+      actionRowHeightConstraint?.constant = isSyncRowEnabled ? 28 : 0
+    case .phrases:
+      statusLabel.isHidden = true
+      syncNowButton.isHidden = true
+      phrasesHintLabel.isHidden = false
+      manageButton.isHidden = false
+      actionRowView.isHidden = false
+      actionRowHeightConstraint?.constant = 28
+    }
+  }
+
+  /// 显示同步状态行 (仅剪贴板页调用): 左侧最近一次同步结果, 右侧"立即同步"药丸按钮。
   func showSyncRow(statusText: String) {
-    syncRowView.isHidden = false
-    syncRowHeightConstraint?.constant = 28
+    isSyncRowEnabled = true
+    updateActionRow()
     setStatusText(statusText)
   }
 
@@ -201,9 +315,70 @@ class KeyboardTextListPanelView: NibLessView {
     onSyncNow?()
   }
 
+  @objc private func manageTapped() {
+    onManagePhrases?()
+  }
+
+  @objc private func segmentChanged() {
+    currentPage = segmentedControl.selectedSegmentIndex == 0 ? .clipboard : .phrases
+    updateActionRow()
+    reloadCurrentPage()
+  }
+
+  /// 点卡片 / ⋮→粘贴的公共入口: 按当前页分流到各自的选中回调。
+  private func selectItem(at row: Int) {
+    let items = currentItems
+    guard items.indices.contains(row) else { return }
+    switch currentPage {
+    case .clipboard:
+      onSelectClipboardText?(items[row])
+    case .phrases:
+      onSelectPhrase?(items[row])
+    }
+  }
+
+  /// ⋮ 菜单点下时按当前 cell 反查行号: 列表在菜单打开期间被同步刷新重排过
+  /// 也能拿到最新行号; 再用建菜单时记下的文本比对一次, 对不上就什么都不做
+  /// (宁可不执行, 也不对错一条——剪贴板里可能有重复文本)。
+  private func resolveRow(for cell: UITableViewCell, expectedText: String) -> Int? {
+    guard let indexPath = tableView.indexPath(for: cell) else { return nil }
+    let items = currentItems
+    guard items.indices.contains(indexPath.row), items[indexPath.row] == expectedText else { return nil }
+    return indexPath.row
+  }
+
+  /// 某条卡片的 ⋮ 菜单: 粘贴 / 删除; 常用语页另有编辑。
+  /// 行号不在建菜单时定死, 点下时按 cell 反查最新行号 (见 resolveRow)。
+  private func moreMenu(for cell: KeyboardTextListCardCell, text: String) -> UIMenu {
+    let paste = UIAction(title: "粘贴", image: UIImage(systemName: "doc.on.clipboard")) { [weak self, weak cell] _ in
+      guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
+      self.selectItem(at: row)
+    }
+    let delete = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self, weak cell] _ in
+      guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
+      switch self.currentPage {
+      case .clipboard:
+        self.onDeleteClipboardItem?(row)
+      case .phrases:
+        self.onDeletePhrase?(row)
+      }
+    }
+    switch currentPage {
+    case .clipboard:
+      return UIMenu(title: "", children: [paste, delete])
+    case .phrases:
+      let edit = UIAction(title: "编辑", image: UIImage(systemName: "square.and.pencil")) { [weak self, weak cell] _ in
+        guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
+        self.onEditPhrase?(row)
+      }
+      return UIMenu(title: "", children: [paste, edit, delete])
+    }
+  }
+
   /// 同步完成: 刷新状态文字, 并通知调用方刷新列表 (下载的新内容可能已写入剪贴板)。
+  /// 注意: 不再像旧版那样"操作行隐藏时直接 return"——面板现在同时管两页,
+  /// 常用语页开着时同步完成也要刷新剪贴板数据, 否则切回剪贴板页看到的是旧列表。
   @objc private func syncDidFinish() {
-    guard !syncRowView.isHidden else { return }
     setStatusText(UserDefaults.hamster.clipboardSyncLastStatusText)
     onSyncFinished?()
   }
@@ -212,30 +387,106 @@ class KeyboardTextListPanelView: NibLessView {
     guard gesture.state == .began else { return }
     let point = gesture.location(in: tableView)
     guard let indexPath = tableView.indexPathForRow(at: point) else { return }
-    onDelete?(indexPath.row)
+    switch currentPage {
+    case .clipboard:
+      onDeleteClipboardItem?(indexPath.row)
+    case .phrases:
+      onDeletePhrase?(indexPath.row)
+    }
   }
 }
 
 extension KeyboardTextListPanelView: UITableViewDataSource {
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-    items.count
+    currentItems.count
   }
 
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    let cell = tableView.dequeueReusableCell(withIdentifier: "TextListCell", for: indexPath)
-    var content = cell.defaultContentConfiguration()
-    content.text = items[indexPath.row]
-    content.textProperties.numberOfLines = 2
-    content.textProperties.lineBreakMode = .byTruncatingTail
-    cell.contentConfiguration = content
-    cell.backgroundColor = .clear
-    return cell
+    let cell = tableView.dequeueReusableCell(withIdentifier: "TextListCardCell", for: indexPath)
+    guard let cardCell = cell as? KeyboardTextListCardCell else { return cell }
+    let text = currentItems[indexPath.row]
+    cardCell.contentLabel.text = text
+    // ⋮ 菜单按当前行现建 (复用时重建, 不会串到上一行); 点下时再反查最新行号。
+    cardCell.moreButton.menu = moreMenu(for: cardCell, text: text)
+    return cardCell
   }
 }
 
 extension KeyboardTextListPanelView: UITableViewDelegate {
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
     tableView.deselectRow(at: indexPath, animated: true)
-    onSelect?(items[indexPath.row])
+    selectItem(at: indexPath.row)
+  }
+}
+
+/// 卡片式列表行: 白底圆角卡片 + 内容文字 + 右上角 ⋮ 按钮。
+/// 卡片与面板底色拉开层次 (浅色下白卡片配灰底, 与微信剪贴板工具一致);
+/// 深色下 .systemBackground 自动变深, 不会刺眼。
+private final class KeyboardTextListCardCell: UITableViewCell {
+  let cardView: UIView = {
+    let view = UIView()
+    // 浅色白底、深色自动变深; 圆角 12pt 向微信/菜单宫格看齐。
+    view.backgroundColor = .systemBackground
+    view.layer.cornerRadius = 12
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  let contentLabel: UILabel = {
+    let label = UILabel()
+    label.font = .systemFont(ofSize: 16)
+    label.textColor = .label
+    label.numberOfLines = 2
+    label.lineBreakMode = .byTruncatingTail
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+
+  /// 右上角 ⋮: 点按弹出菜单 (UIMenu, iOS 14+; 部署目标 15.0)。
+  /// 菜单由面板在 cellForRowAt 里按当前行现建。
+  let moreButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.setTitle("⋮", for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
+    button.setTitleColor(.secondaryLabel, for: .normal)
+    button.showsMenuAsPrimaryAction = true
+    button.translatesAutoresizingMaskIntoConstraints = false
+    return button
+  }()
+
+  override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+    super.init(style: style, reuseIdentifier: reuseIdentifier)
+    backgroundColor = .clear
+    selectionStyle = .none
+    contentView.addSubview(cardView)
+    cardView.addSubview(contentLabel)
+    cardView.addSubview(moreButton)
+    NSLayoutConstraint.activate([
+      cardView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+      cardView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+      cardView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+      cardView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+
+      contentLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 16),
+      contentLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 12),
+      contentLabel.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -12),
+      contentLabel.trailingAnchor.constraint(lessThanOrEqualTo: moreButton.leadingAnchor, constant: -4),
+
+      moreButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8),
+      moreButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+      moreButton.widthAnchor.constraint(equalToConstant: 32),
+      moreButton.heightAnchor.constraint(equalToConstant: 32),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    contentLabel.text = nil
+    moreButton.menu = nil
   }
 }

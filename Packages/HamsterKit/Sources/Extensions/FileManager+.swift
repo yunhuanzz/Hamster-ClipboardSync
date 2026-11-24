@@ -441,16 +441,66 @@ public extension FileManager {
     try FileManager.copyDirectory(override: override, src: appGroupUserDataDirectoryURL, dst: sandboxUserDataDirectory)
   }
 
+  /// 删除目标目录里源目录没有的陈旧文件 (只删文件, 永不删目录)。
+  /// 用途: 沙盒 -> App Group 同步要保持“镜像”语义——删掉已从沙盒移除的
+  /// 旧文件 (如被删的自定义方案), 但绝不能像 copyDirectory(override: true)
+  /// 那样整个删掉目标目录: 键盘进程正开着 App Group 里的 LevelDB 文件,
+  /// 目录一删, 打开的文件变成已删除 inode, 之后的学习写进黑洞、重启后
+  /// 丢失 (第 13 轮第 4 项)。
+  /// 安全阀: 源目录或目标目录不存在时什么都不删; 只删文件, 目录 (含删空
+  /// 后剩下的空目录) 一律保留; 相对路径按“去掉各自根目录前缀”对齐, 与
+  /// incrementalCopy 的算法一致。
+  private static func removeStaleFiles(src: URL, dst: URL) throws {
+    let fm = FileManager.default
+    guard fm.fileExists(atPath: src.path), fm.fileExists(atPath: dst.path) else { return }
+    guard let srcFiles = fm.enumerator(at: src, includingPropertiesForKeys: [.isDirectoryKey]),
+          let dstFiles = fm.enumerator(at: dst, includingPropertiesForKeys: [.isDirectoryKey]) else { return }
+    let srcPrefix = src.path
+    var srcPaths = Set<String>()
+    while let file = srcFiles.nextObject() as? URL {
+      // 与 incrementalCopy 同款相对路径算法 (含 /private 前缀回退),
+      // 两边算出来的 key 必须对齐, 否则会把目标文件误判为陈旧文件删掉。
+      let relativePath = file.path.hasPrefix(srcPrefix) ? file.path.replacingOccurrences(of: srcPrefix, with: "") : file.path.replacingOccurrences(of: "/private" + srcPrefix, with: "")
+      srcPaths.insert(relativePath)
+    }
+    let dstPrefix = dst.path
+    var removedCount = 0
+    while let file = dstFiles.nextObject() as? URL {
+      let isDirectory = (try? file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+      if isDirectory { continue }
+      let relativePath = file.path.hasPrefix(dstPrefix) ? file.path.replacingOccurrences(of: dstPrefix, with: "") : file.path.replacingOccurrences(of: "/private" + dstPrefix, with: "")
+      if !srcPaths.contains(relativePath) {
+        Logger.statistics.debug("removeStaleFiles remove stale file: \(file.path)")
+        try fm.removeItem(at: file)
+        removedCount += 1
+      }
+    }
+    if removedCount > 0 {
+      Logger.statistics.info("removeStaleFiles removed \(removedCount) stale files from \(dst.path)")
+    }
+  }
+
   // 同步 Sandbox 目录下 SharedSupport 目录至 AppGroup 目录
-  static func syncSandboxSharedSupportDirectoryToAppGroup(override: Bool = false) throws {
-    Logger.statistics.info("rime syncSandboxSharedSupportDirectoryToApGroup: override \(override)")
-    try FileManager.copyDirectory(override: override, src: sandboxSharedSupportDirectory, dst: appGroupSharedSupportDirectoryURL)
+  // 注意 (第 13 轮第 4 项): 不再用 copyDirectory(override: true)——它会
+  // 整个删掉 App Group 目录再拷回; 键盘进程若正开着里面的文件, 打开的
+  // 文件会变成已删除 inode, 之后的学习写进黑洞、重启后丢失。
+  // 现在是增量拷回: 先建好目标目录 (incrementalCopy 在目标不存在时会
+  // 静默返回, 不能省这一步), 再只覆盖内容不同的文件, 最后删掉目标里
+  // 多余的陈旧文件 (只删文件, 永不删目录)——“镜像”语义不变。
+  static func syncSandboxSharedSupportDirectoryToAppGroup() throws {
+    Logger.statistics.info("rime syncSandboxSharedSupportDirectoryToApGroup")
+    try FileManager.createDirectory(override: false, dst: appGroupSharedSupportDirectoryURL)
+    try FileManager.incrementalCopy(src: sandboxSharedSupportDirectory, dst: appGroupSharedSupportDirectoryURL)
+    try FileManager.removeStaleFiles(src: sandboxSharedSupportDirectory, dst: appGroupSharedSupportDirectoryURL)
   }
 
   // 同步 Sandbox 目录下 UserData 目录至 AppGroup 目录
-  static func syncSandboxUserDataDirectoryToAppGroup(override: Bool = false) throws {
-    Logger.statistics.info("rime syncSandboxUserDataDirectoryToApGroup: override \(override)")
-    try FileManager.copyDirectory(override: override, src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL)
+  // (第 13 轮第 4 项, 语义同上: 增量拷回 + 只删文件的陈旧清理, 永不删目录。)
+  static func syncSandboxUserDataDirectoryToAppGroup() throws {
+    Logger.statistics.info("rime syncSandboxUserDataDirectoryToApGroup")
+    try FileManager.createDirectory(override: false, dst: appGroupUserDataDirectoryURL)
+    try FileManager.incrementalCopy(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL)
+    try FileManager.removeStaleFiles(src: sandboxUserDataDirectory, dst: appGroupUserDataDirectoryURL)
   }
 
   /// 拷贝 Sandbox 下 SharedSupport 目录至 AppGroup 下 SharedSupport 目录

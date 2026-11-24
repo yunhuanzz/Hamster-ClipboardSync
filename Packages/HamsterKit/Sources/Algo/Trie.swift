@@ -48,6 +48,22 @@ public class Trie<CollectionType: Collection> where CollectionType.Element: Hash
     }
     return current.isTerminating
   }
+
+  /// 前缀匹配: collection 是已插入的某个 key 的前缀 (含自身就是 key 的情况)。
+  /// 注意 contains() 要求整串是一个完整 key (isTerminating); 像 "782" 这样
+  /// 只是 "7826" 的前缀、本身不是 key 的串, contains() 返回 false, 不能用它
+  /// 判断“还能不能继续往下走”——否则九宫格边栏会丢掉 7826→quan/ruan/suan、
+  /// 9826→xuan/yuan/zuan 这类长音节 (第 13 轮, 用户实测: 9826 边栏只有 xu)。
+  public func hasPrefix(_ collection: CollectionType) -> Bool {
+    var current = root
+    for element in collection {
+      guard let child = current.children[element] else {
+        return false
+      }
+      current = child
+    }
+    return true
+  }
   
   public func remove(_ collection: CollectionType) {
     var current = root
