@@ -348,8 +348,13 @@ public extension ChineseNineGridKeyboard {
     }
 
     // 候选拼音处理: 待修改拼音音节开始位置
+    // (2026-11-24 边栏 jin 重现) 提交后 getInputKeys() 仍含已提交前缀,
+    // 必须只在剩余输入里找, 否则会在已提交的词里命中; 替换也只重敲剩余
+    // 部分, 否则提交状态就丢了 (见 tryHandleReplaceRemainingInputTexts)。
+    let fullKeys = rimeContext.getInputKeys()
+    let offset = rimeContext.remainingInputOffset()
     var startPos = 0
-    var inputKeys = rimeContext.getInputKeys()
+    var inputKeys = String(fullKeys.dropFirst(offset))
     let inputKeysCount = inputKeys.utf8.count
 
     if let symbolT9Pinyin = pinyinToT9Mapping[symbol] {
@@ -367,7 +372,7 @@ public extension ChineseNineGridKeyboard {
       startPos = selectCandidatePinyin.1
     }
 
-    let handle = rimeContext.tryHandleReplaceInputTexts(symbol, startPos: startPos, count: symbol.utf8.count)
+    let handle = rimeContext.tryHandleReplaceRemainingInputTexts(symbol, startPos: startPos, count: symbol.utf8.count)
     Logger.statistics.warning("change input text handle = \(handle)")
   }
 }

@@ -805,6 +805,10 @@ public extension RimeContext {
     if !isShowingPrefixCandidates {
       pendingCommitCode = Rime.shared.getInputKeys()
       lastCommit = nil
+      // (2026-11-24 边栏 jin 重现) 之前边栏点选留下的记录, 其坐标是提交前
+      // 的全量输入里的; 部分提交后引擎输入变了, 旧记录会被退格路径和边栏
+      // 点选的 fallback 误读, 选词时就清掉。整句提交走 reset() 本来就会清。
+      selectCandidatePinyin = nil
     }
     // 前缀候选模式: 屏幕上显示的是最长合法前缀的候选, 引擎里却是完整输入
     // (菜单为空)。先把引擎换回前缀, 选词上屏, 再把尾巴数字重新敲回去当新输入
@@ -826,6 +830,8 @@ public extension RimeContext {
       syncContext()
       pendingCommitCode = Rime.shared.getInputKeys()
       lastCommit = nil
+      // 同上: 清掉提交前的边栏点选记录 (见 selectCandidate 开头)。
+      selectCandidatePinyin = nil
       _ = Rime.shared.selectCandidate(index: engineIndex)
       syncContext()
       for digit in tail {
@@ -958,6 +964,59 @@ public extension RimeContext {
   func tryHandleReplaceInputTexts(_ text: String, startPos: Int, count: Int) -> Bool {
     guard Rime.shared.replaceInputKeys(text, startPos: startPos, count: count) else { return false }
     self.selectCandidatePinyin = (text, startPos, count)
+    self.syncContext()
+    return true
+  }
+
+  /// 未提交的剩余输入在全量输入码中的起始偏移 (已提交部分的码长)。
+  /// 提交后 getInputKeys() 仍含已提交前缀 (librime 行为: input 只增不减,
+  /// 提交的词只进 preedit), 边栏点选必须从剩余输入开始算, 否则会在已提交
+  /// 的词里命中 (2026-11-24 边栏 jin 重现: 8426 在 546|8426 里命中)。
+  /// 算法: preedit 末尾连续的“输入码”部分 (数字/小写字母/空格分隔的音节)
+  /// 就是剩余输入, 已提交的中文在它前面; 倒着找, 遇到中文/大写/标点就停。
+  /// 倒着找 (而不是找首个数字) 是因为之前被固定成拼音字母的音节也属于
+  /// 剩余输入, 用首个数字算会把它错当成已提交丢掉 (链式点选第二下就丢词)。
+  /// 无提交时为 0。
+  @MainActor
+  func remainingInputOffset() -> Int {
+    let fullKeys = Rime.shared.getInputKeys()
+    let preedit = rimeContext?.composition.preedit ?? ""
+    var start = preedit.endIndex
+    while start > preedit.startIndex {
+      let prev = preedit.index(before: start)
+      let ch = preedit[prev]
+      if ch.isNumber || ch.isLowercase || ch == " " {
+        start = prev
+      } else {
+        break
+      }
+    }
+    let remainingLen = preedit[start...].replacingOccurrences(of: " ", with: "").count
+    return max(0, fullKeys.count - remainingLen)
+  }
+
+  /// 在剩余输入里替换一段 (边栏点选音节用, 替代 tryHandleReplaceInputTexts)。
+  /// 旧方法对全量输入码做 clear + 重敲, 会把已提交的前缀也重敲回去, 提交
+  /// 状态就丢了 (候选栏回到整句)。这里只重敲剩余部分: 已提交的词已经在
+  /// 文档里了, 不需要、也不应该再进引擎。startPos/count 与
+  /// tryHandleReplaceInputTexts 同单位, 但以剩余输入的开头为 0。
+  @MainActor
+  func tryHandleReplaceRemainingInputTexts(_ text: String, startPos: Int, count: Int) -> Bool {
+    let fullKeys = Rime.shared.getInputKeys()
+    let offset = remainingInputOffset()
+    guard offset <= fullKeys.count else { return false }
+    let remaining = String(fullKeys.dropFirst(offset))
+    guard startPos >= 0, startPos <= remaining.count else { return false }
+    let end = min(startPos + count, remaining.count)
+    var newRemaining = remaining
+    let startIdx = newRemaining.index(newRemaining.startIndex, offsetBy: startPos)
+    let endIdx = newRemaining.index(startIdx, offsetBy: end - startPos)
+    newRemaining.replaceSubrange(startIdx..<endIdx, with: text)
+    reset()  // 清掉组字与 selectCandidatePinyin; 已提交的词已在文档里
+    for key in newRemaining {
+      _ = Rime.shared.inputKey(String(key))
+    }
+    self.selectCandidatePinyin = (text, startPos, count)  // 剩余输入内的相对坐标, reset 之后再记
     self.syncContext()
     return true
   }
