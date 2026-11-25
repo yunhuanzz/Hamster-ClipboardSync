@@ -34,7 +34,8 @@ class MoreSettingsRootView: NibLessView {
     tableView.register(TextFieldTableViewCell.self, forCellReuseIdentifier: TextFieldTableViewCell.identifier)
     tableView.register(ButtonTableViewCell.self, forCellReuseIdentifier: ButtonTableViewCell.identifier)
     tableView.register(PullDownMenuCell.self, forCellReuseIdentifier: PullDownMenuCell.identifier)
-    tableView.register(StepperTableViewCell.self, forCellReuseIdentifier: StepperTableViewCell.identifier)
+    tableView.register(SliderTableViewCell.self, forCellReuseIdentifier: SliderTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 
@@ -112,11 +113,11 @@ extension MoreSettingsRootView: UITableViewDataSource {
       cell.updateWithSettingItem(setting)
       return cell
     case .step:
-      let cell = tableView.dequeueReusableCell(withIdentifier: StepperTableViewCell.identifier, for: indexPath)
-      // 注意: StepperTableViewCell 继承 NibLessTableViewCell, 不是
+      let cell = tableView.dequeueReusableCell(withIdentifier: SliderTableViewCell.identifier, for: indexPath)
+      // 注意: SliderTableViewCell 继承 NibLessTableViewCell, 不是
       // SettingTableViewCell 的子类, 以前这里强转 SettingTableViewCell
-      // 恒失败, step 行直接返回未配置的空 cell。
-      guard let cell = cell as? StepperTableViewCell else { return cell }
+      // 恒失败, step 行直接返回未配置的空 cell (round 16 item 3 已改对)。
+      guard let cell = cell as? SliderTableViewCell else { return cell }
       cell.updateWithSettingItem(setting)
       return cell
     }

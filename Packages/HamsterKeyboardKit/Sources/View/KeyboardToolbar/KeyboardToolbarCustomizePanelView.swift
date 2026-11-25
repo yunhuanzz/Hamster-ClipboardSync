@@ -9,9 +9,10 @@
 //  工具栏上的长按拖动换位/换侧、贴边吸附、提起动画都在工具栏本体上
 //  (toolbarToolLongPressed), 面板只负责下面的工具池 + ✓ + 恢复默认。
 //  下半工具池是两行、连续横向滑动的长条 (不要离散分页+页点):
-//  贴纸按行优先排布 (每行 4 列), 列宽 84pt, 内容比可视区宽半列,
-//  下一列露半边、提示可以左滑; 显示全部 6 个工具, 已在栏上的带绿底
-//  (绿 = 在栏上, 与菜单绿格的"亲手加上去"不是同一回事)。
+//  贴纸按行优先排布, 每列最多 2 个 (池子只有两行高), 列数随工具数
+//  增长: 9 个工具 = 5 列, 内容 468pt, 在 390pt 屏上可视 338pt,
+//  可滑 130pt, 第 4 列露半边、提示可以左滑; 显示全部 9 个工具,
+//  已在栏上的带绿底 (绿 = 在栏上, 与菜单绿格的"亲手加上去"不是同一回事)。
 //  池子点按加入 (进左侧末尾, 可再拖); 点按已在栏上的绿贴纸是开关
 //  (第 14 轮): 点一下从工具栏拿掉 (与 ⊖ 同一语义, 同时清掉
 //  "亲手加上去"标记), 再点一下重新加入 (与点按加入同一入口 onAddTool)。
@@ -23,8 +24,9 @@
 //  没有上下滚动: 内容按行排布, 面板矮时 (小屏/横屏) 池高约束可压缩,
 //  不报无法满足约束的警告 (与菜单面板 MenuTileButton 的 defaultHigh
 //  格子高同理)。
-//  工具注册表共 6 个 (剪贴板/常用语/切换26键·九宫格/立即同步剪贴板/
-//  设置/常用语管理; "定制工具栏"本身是入口、不上栏, "收起键盘"是固定按钮、
+//  工具注册表共 9 个 (剪贴板/常用语/切换26键·九宫格/立即同步剪贴板/
+//  设置/常用语管理/粘贴/左移/右移, 后 3 个是第 15 轮加的;
+//  "定制工具栏"本身是入口、不上栏, "收起键盘"是固定按钮、
 //  也不上栏), 由调用方 (KeyboardToolbarView) 传入; 面板不自己决定有哪些工具。
 //  菜单格子开关 (第 10 轮已删): 5 个菜单格子永远全部显示, 面板里不再有
 //  开关, reload 也没有 tiles 参数。
@@ -94,9 +96,13 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     }
   }
 
-  /// 每行列数 (行优先排布: 6 个工具 = 第一行 4 个、第二行 2 个,
-  /// 内容 4 列宽, 比可视区宽半列, 下一列露半边)。
-  private static let poolColumnsPerRow = 4
+  /// 每列贴纸数 (池子只有两行高, 每列最多 2 个; 列数 = 工具数向上取整
+  /// 除以 2, 见 rebuildPool)。9 个工具 = 5 列, 内容 5*84+4*12=468pt;
+  /// 390pt 屏上池子可视宽 338pt (屏宽 - 两侧 16pt 边距 - 两侧 10pt
+  /// 内边距), 可滑 468-338=130pt, 第 4 列露半边、提示可以左滑。
+  /// 之前列数固定封顶 4 列、6 个工具时内容只有 372pt、可滑约 34pt
+  /// (不到半列), 用户说的"几乎滑不动"就是这个数。
+  private static let poolRowsPerColumn = 2
   /// 每列宽度 (贴纸宽)。
   private static let poolColumnWidth: CGFloat = 84
   /// 工具池格高: 圆图标 46pt + 名称 (7 字名如“立即同步剪贴板”要放得下
@@ -435,10 +441,12 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
 
   // MARK: - 可选工具池 (下半: 两行贴纸, 连续横向滑动)
 
-  /// 按 allTools 重建两行横滑长条: 行优先排布 (每行 4 列),
-  /// 6 个工具 = 第一行 4 个、第二行 2 个, 内容 4 列宽,
-  /// 比可视区宽半列, 下一列露半边。
+  /// 按 allTools 重建两行横滑长条: 行优先排布 (每列最多 2 个贴纸),
+  /// 9 个工具 = 5 列, 内容 468pt, 比 390pt 屏上 338pt 可视区宽 130pt。
   /// 全部工具都显示, 已在栏上的带绿底 (不隐藏、不进"已上栏就消失"的旧逻辑)。
+  /// 旧算法列数固定封顶 4 列 (index % 4): 9 个工具时第 0 列会塞进
+  /// 3 个贴纸 (0、4、8 号), 把列撑出两行高; 现在列数 = 工具数
+  /// 向上取整除以 2, 每列最多 2 个, 不会再撑出池高。
   private func rebuildPool() {
     // 旧列必须先从 arrangedSubviews 里摘掉再移出层级: 只调
     // removeFromSuperview 不会把它从 arrangedSubviews 摘掉, 旧列的约束
@@ -448,10 +456,10 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       $0.removeFromSuperview()
     }
     guard !allTools.isEmpty else { return }
-    let columnCount = min(allTools.count, Self.poolColumnsPerRow)
+    let columnCount = (allTools.count + Self.poolRowsPerColumn - 1) / Self.poolRowsPerColumn
     var columns: [[Tool]] = Array(repeating: [], count: columnCount)
     for (index, tool) in allTools.enumerated() {
-      columns[index % Self.poolColumnsPerRow].append(tool)
+      columns[index % columnCount].append(tool)
     }
     for columnTools in columns {
       poolColumnsStackView.addArrangedSubview(makePoolColumn(with: columnTools))

@@ -329,6 +329,8 @@ public extension UILabel {
 extension CandidateWordsCollectionView {
   @objc private func handleCandidateLongPress(_ gesture: UILongPressGestureRecognizer) {
     guard gesture.state == .began else { return }
+    // 外部建议 (第 15 轮: 联想词 / 英文纠错) 没有引擎菜单, 忘掉/置顶无意义。
+    guard rimeContext.externalSuggestionsKind == .none else { return }
     let point = gesture.location(in: self)
     guard let indexPath = self.indexPathForItem(at: point),
           indexPath.item < rimeContext.suggestions.count else { return }

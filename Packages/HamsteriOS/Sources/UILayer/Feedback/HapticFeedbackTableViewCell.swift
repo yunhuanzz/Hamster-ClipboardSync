@@ -48,6 +48,8 @@ class HapticFeedbackTableViewCell: NibLessTableViewCell {
   lazy var switchView: UISwitch = {
     let switchView = UISwitch(frame: .zero)
     switchView.isOn = keyboardFeedbackViewModel.enableHapticFeedback
+    // 扁平化强调色: 微信绿 (round 16 item 3)。
+    switchView.onTintColor = SettingsAppearance.weChatGreen
     switchView.addTarget(
       keyboardFeedbackViewModel,
       action: #selector(keyboardFeedbackViewModel.toggleAction),
@@ -68,7 +70,8 @@ class HapticFeedbackTableViewCell: NibLessTableViewCell {
   private lazy var secondaryRowView: StepSlider = {
     let slider = StepSlider(frame: CGRect(x: 0, y: 0, width: contentView.bounds.width, height: 61))
     slider.translatesAutoresizingMaskIntoConstraints = false
-    slider.tintColor = .systemGreen
+    // 强度滑块改微信绿 (round 16 item 3): 轨道绿、滑块绿, 未走完轨道浅灰。
+    slider.tintColor = SettingsAppearance.weChatGreen
     slider.maxCount = UInt(HapticIntensity.allCases.count)
     slider.index = UInt(keyboardFeedbackViewModel.hapticFeedbackIntensity)
     slider.trackHeight = 1
@@ -78,7 +81,7 @@ class HapticFeedbackTableViewCell: NibLessTableViewCell {
     // slider.sliderCircleImage = UIImage(systemName: "")
     slider.trackColor = .systemFill
     slider.labelColor = .label
-    slider.sliderCircleColor = .secondarySystemFill
+    slider.sliderCircleColor = SettingsAppearance.weChatGreen
     slider.labelOffset = 20
     slider.adjustLabel = true
     slider.enableHapticFeedback = true

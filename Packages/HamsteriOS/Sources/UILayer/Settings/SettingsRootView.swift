@@ -232,6 +232,7 @@ public class SettingsRootView: NibLessView {
     for item in favoriteButtonItems {
       let button = UIButton(type: .system)
       button.setTitle(item.text, for: .normal)
+      button.setTitleColor(SettingsAppearance.weChatGreen, for: .normal)
       button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
       button.backgroundColor = Self.cardBackgroundColor
       button.layer.cornerRadius = 18

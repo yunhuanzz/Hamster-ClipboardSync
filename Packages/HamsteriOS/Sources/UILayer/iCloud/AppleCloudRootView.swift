@@ -23,6 +23,7 @@ class AppleCloudRootView: NibLessView {
     tableView.allowsSelection = false
     tableView.delegate = self
     tableView.dataSource = self
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 

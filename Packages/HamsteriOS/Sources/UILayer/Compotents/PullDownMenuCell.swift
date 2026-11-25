@@ -22,6 +22,7 @@ public class PullDownMenuCell: NibLessTableViewCell {
 
   lazy var titleLabel: UILabel = {
     let label = UILabel(frame: .zero)
+    label.font = SettingsAppearance.rowTitleFont
     label.translatesAutoresizingMaskIntoConstraints = false
     label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
     label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -47,6 +48,8 @@ public class PullDownMenuCell: NibLessTableViewCell {
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
     super.init(style: style, reuseIdentifier: reuseIdentifier)
 
+    // 下拉行点按弹出菜单, 不显示选中高亮 (扁平化, round 16 item 3)。
+    selectionStyle = .none
     setupContentView()
   }
 

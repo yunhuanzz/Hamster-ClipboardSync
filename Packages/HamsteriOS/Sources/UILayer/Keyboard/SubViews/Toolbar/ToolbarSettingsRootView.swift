@@ -15,7 +15,8 @@ class ToolbarSettingsRootView: NibLessView {
     let tableView = UITableView(frame: .zero, style: .insetGrouped)
     tableView.allowsSelection = false
     tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
-    tableView.register(StepperTableViewCell.self, forCellReuseIdentifier: StepperTableViewCell.identifier)
+    tableView.register(SliderTableViewCell.self, forCellReuseIdentifier: SliderTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 
@@ -55,8 +56,8 @@ extension ToolbarSettingsRootView: UITableViewDataSource, UITableViewDelegate {
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let setting = keyboardSettingsViewModel.toolbarSettings[indexPath.section].items[indexPath.row]
     if setting.type == .step {
-      let cell = tableView.dequeueReusableCell(withIdentifier: StepperTableViewCell.identifier, for: indexPath)
-      guard let cell = cell as? StepperTableViewCell else { return cell }
+      let cell = tableView.dequeueReusableCell(withIdentifier: SliderTableViewCell.identifier, for: indexPath)
+      guard let cell = cell as? SliderTableViewCell else { return cell }
       cell.updateWithSettingItem(setting)
       return cell
     }

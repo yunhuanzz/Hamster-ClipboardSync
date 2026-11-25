@@ -8,6 +8,7 @@
 .deps
 .HamsterInputSchemas
 Resources/SharedSupport/*.zip
+Resources/SharedSupport/*.gram
 *.zip
 *.tgz
 

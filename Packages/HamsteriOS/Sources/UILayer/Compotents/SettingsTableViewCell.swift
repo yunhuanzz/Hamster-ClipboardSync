@@ -34,13 +34,15 @@ public class SettingTableViewCell: NibLessTableViewCell {
 
     var config = UIListContentConfiguration.valueCell()
     config.text = state.settingItemModel?.text
-    config.textProperties.font = UIFont.systemFont(ofSize: UIFont.labelFontSize)
+    config.textProperties.font = SettingsAppearance.rowTitleFont
     if state.settingItemModel?.type == .navigation {
       config.secondaryText = state.settingItemModel?.navigationLinkLabel()
     } else {
       config.secondaryText = state.settingItemModel?.secondaryText
     }
-    config.secondaryTextProperties.font = UIFont.systemFont(ofSize: UIFont.labelFontSize)
+    // 副标题统一 15 号灰字 (扁平化, round 16 item 3)。
+    config.secondaryTextProperties.font = SettingsAppearance.rowSecondaryFont
+    config.secondaryTextProperties.color = .secondaryLabel
     config.image = state.settingItemModel?.icon
     if let type = state.settingItemModel?.accessoryType {
       accessoryType = type

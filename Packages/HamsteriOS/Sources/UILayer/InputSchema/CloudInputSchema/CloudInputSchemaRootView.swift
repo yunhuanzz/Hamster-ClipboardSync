@@ -37,6 +37,7 @@ class CloudInputSchemaRootView: NibLessView {
     view.delegate = self
     view.dataSource = self
     view.addSubview(refreshControl)
+    view.backgroundColor = SettingsAppearance.pageBackgroundColor
     return view
   }()
 

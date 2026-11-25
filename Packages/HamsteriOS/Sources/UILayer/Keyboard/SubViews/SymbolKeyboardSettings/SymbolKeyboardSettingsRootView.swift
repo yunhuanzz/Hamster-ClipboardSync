@@ -18,6 +18,7 @@ class SymbolKeyboardSettingsRootView: NibLessView {
     tableView.allowsSelection = false
     tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
     tableView.register(ButtonTableViewCell.self, forCellReuseIdentifier: ButtonTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 

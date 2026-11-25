@@ -19,6 +19,7 @@ class NumberNineGridSettingsView: NibLessView {
     let tableView = UITableView(frame: .zero, style: .insetGrouped)
     tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
     tableView.register(ButtonTableViewCell.self, forCellReuseIdentifier: ButtonTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 

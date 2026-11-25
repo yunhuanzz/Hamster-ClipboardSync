@@ -8,15 +8,11 @@
 //  点卡片把文本输入到当前输入框 (并关闭面板); 剪贴板页保留同步状态行
 //  ("11:03 同步成功" + "立即同步"药丸按钮, 不再是两行裸链接); 常用语页
 //  的操作行是"管理常用语"药丸按钮 (打开键盘内常用语管理面板)。
-//  常用语页底部还有一行添加入口 (输入框 + 粘贴 + 添加, 第 14 轮):
-//  走与常用语管理面板、主 App 设置页同一条保存路径
-//  (共享 UserDefaults 的 commonPhrases, 追加后刷新列表)。
-//  注意: 面板是盖住按键区的全屏覆盖层, 键盘按键够不着面板内的输入框
-//  (按键输入只会写到宿主 App 的输入框), 所以这里的输入框目前只能靠
-//  "粘贴"填入; 要直接打字添加, 需把添加行做到工具栏本行
-//  (按键露在外面) 并在上屏漏斗处把提交文字重定向到输入框,
-//  那是动核心输入链路的活, 本机无编译器、无真机, 本轮不做,
-//  见第 14 轮报告。
+//  第 15 轮删掉了常用语页底部的添加行 (输入框 + 粘贴 + 添加):
+//  面板是盖住按键区的全屏覆盖层, 键盘按键够不着面板内的输入框
+//  (按键输入只会写到宿主 App 的输入框), 输入框里根本打不出字,
+//  粘贴添加也不好用, 不如不要; 添加常用语走键盘内常用语管理面板
+//  或主 App 设置页 (同一条 commonPhrases 保存路径)。
 //  长按一条删除 (旧行为, 保留)。
 //  两个页面各接自己的数据与回调, 互不串味: 剪贴板页读写 clipboardHistory,
 //  常用语页读写 commonPhrases; 切段只换数据源, 不重建面板。
@@ -46,9 +42,6 @@ class KeyboardTextListPanelView: NibLessView {
   var onDeletePhrase: ((Int) -> Void)?
   /// 常用语页 ⋮→编辑时的回调 (由调用方打开常用语管理面板并载入该条)。
   var onEditPhrase: ((Int) -> Void)?
-  /// 常用语页底部添加行点"添加"时的回调 (由调用方把文本追加进
-  /// commonPhrases 并刷新列表; 输入框由面板自己清空)。
-  var onAddPhrase: ((String) -> Void)?
   /// 常用语页点"管理常用语"时的回调 (由调用方打开常用语管理面板)。
   var onManagePhrases: (() -> Void)?
   /// 关闭按钮回调
@@ -152,52 +145,6 @@ class KeyboardTextListPanelView: NibLessView {
 
   private var actionRowHeightConstraint: NSLayoutConstraint?
 
-  /// 常用语页底部的添加行 (仅常用语页使用): 输入框 + 粘贴 + 添加。
-  /// 输入框点一下成为第一响应者 (可长按选粘贴); 面板盖住按键区,
-  /// 键盘按键打不出字进来, 所以填入靠"粘贴" (见文件头注释)。
-  private lazy var addRowView: UIView = {
-    let view = UIView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.isHidden = true
-    return view
-  }()
-
-  private var addRowHeightConstraint: NSLayoutConstraint?
-
-  /// 添加行输入框: 输入新常用语 (回车 = 添加)。
-  private lazy var addTextField: UITextField = {
-    let textField = UITextField()
-    textField.translatesAutoresizingMaskIntoConstraints = false
-    textField.placeholder = "输入新常用语"
-    textField.font = .systemFont(ofSize: 15)
-    textField.borderStyle = .roundedRect
-    textField.returnKeyType = .done
-    textField.delegate = self
-    textField.addTarget(self, action: #selector(addTextChanged), for: .editingChanged)
-    return textField
-  }()
-
-  /// 添加行粘贴按钮: 把剪贴板内容填进输入框 (用户主动点的合规读取点)。
-  private lazy var addPasteButton: UIButton = {
-    let button = UIButton(type: .system)
-    button.setTitle("粘贴", for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.addTarget(self, action: #selector(addPasteTapped), for: .touchUpInside)
-    return button
-  }()
-
-  /// 添加行添加按钮: 空输入时禁用, 有字才能点。
-  private lazy var addButton: UIButton = {
-    let button = UIButton(type: .system)
-    button.setTitle("添加", for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.isEnabled = false
-    button.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
-    return button
-  }()
-
   private lazy var tableView: UITableView = {
     let tableView = UITableView(frame: .zero, style: .plain)
     tableView.translatesAutoresizingMaskIntoConstraints = false
@@ -266,15 +213,10 @@ class KeyboardTextListPanelView: NibLessView {
     addSubview(actionRowView)
     addSubview(tableView)
     addSubview(emptyLabel)
-    addRowView.addSubview(addTextField)
-    addRowView.addSubview(addPasteButton)
-    addRowView.addSubview(addButton)
-    addSubview(addRowView)
   }
 
   override func activateViewConstraints() {
     actionRowHeightConstraint = actionRowView.heightAnchor.constraint(equalToConstant: 0)
-    addRowHeightConstraint = addRowView.heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
       closeButton.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
       closeButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
@@ -308,23 +250,7 @@ class KeyboardTextListPanelView: NibLessView {
       tableView.topAnchor.constraint(equalTo: actionRowView.bottomAnchor, constant: 8),
       tableView.leadingAnchor.constraint(equalTo: leadingAnchor),
       tableView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      tableView.bottomAnchor.constraint(equalTo: addRowView.topAnchor, constant: -8),
-
-      addRowView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-      addRowView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-      addRowView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -8),
-      addRowHeightConstraint!,
-
-      addTextField.leadingAnchor.constraint(equalTo: addRowView.leadingAnchor),
-      addTextField.centerYAnchor.constraint(equalTo: addRowView.centerYAnchor),
-      addTextField.heightAnchor.constraint(equalToConstant: 36),
-
-      addPasteButton.centerYAnchor.constraint(equalTo: addRowView.centerYAnchor),
-      addPasteButton.leadingAnchor.constraint(equalTo: addTextField.trailingAnchor, constant: 8),
-
-      addButton.centerYAnchor.constraint(equalTo: addRowView.centerYAnchor),
-      addButton.leadingAnchor.constraint(equalTo: addPasteButton.trailingAnchor, constant: 8),
-      addButton.trailingAnchor.constraint(equalTo: addRowView.trailingAnchor),
+      tableView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -8),
 
       emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
       emptyLabel.centerYAnchor.constraint(equalTo: tableView.centerYAnchor),
@@ -354,8 +280,7 @@ class KeyboardTextListPanelView: NibLessView {
 
   /// 按当前页配置操作行:
   /// 剪贴板页显示同步状态 + 立即同步 (未启用同步行时整行隐藏);
-  /// 常用语页显示提示 + 管理常用语, 底部再加一行添加入口
-  /// (输入框 + 粘贴 + 添加, 高 44pt; 剪贴板页高度压到 0 不占位置)。
+  /// 常用语页显示提示 + 管理常用语。
   private func updateActionRow() {
     switch currentPage {
     case .clipboard:
@@ -365,8 +290,6 @@ class KeyboardTextListPanelView: NibLessView {
       manageButton.isHidden = true
       actionRowView.isHidden = !isSyncRowEnabled
       actionRowHeightConstraint?.constant = isSyncRowEnabled ? 28 : 0
-      addRowView.isHidden = true
-      addRowHeightConstraint?.constant = 0
     case .phrases:
       statusLabel.isHidden = true
       syncNowButton.isHidden = true
@@ -374,8 +297,6 @@ class KeyboardTextListPanelView: NibLessView {
       manageButton.isHidden = false
       actionRowView.isHidden = false
       actionRowHeightConstraint?.constant = 28
-      addRowView.isHidden = false
-      addRowHeightConstraint?.constant = 44
     }
   }
 
@@ -401,32 +322,6 @@ class KeyboardTextListPanelView: NibLessView {
 
   @objc private func manageTapped() {
     onManagePhrases?()
-  }
-
-  /// 添加行输入变化: 空输入时"添加"禁用, 有字才能点。
-  @objc private func addTextChanged() {
-    let text = addTextField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    addButton.isEnabled = !text.isEmpty
-  }
-
-  /// 添加行粘贴: 把剪贴板内容填进输入框 (用户主动点的合规读取点)。
-  @objc private func addPasteTapped() {
-    #if canImport(UIKit)
-      if let text = UIPasteboard.general.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        addTextField.text = text
-        addTextChanged()
-      }
-    #endif
-  }
-
-  /// 添加行添加: 去首尾空白后交给调用方追加进 commonPhrases;
-  /// 成功后清空输入框、留着焦点 (可连续粘贴添加, 不用再点输入框)。
-  @objc private func addButtonTapped() {
-    let text = addTextField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !text.isEmpty else { return }
-    onAddPhrase?(text)
-    addTextField.text = ""
-    addTextChanged()
   }
 
   @objc private func segmentChanged() {
@@ -503,14 +398,6 @@ class KeyboardTextListPanelView: NibLessView {
     case .phrases:
       onDeletePhrase?(indexPath.row)
     }
-  }
-}
-
-extension KeyboardTextListPanelView: UITextFieldDelegate {
-  /// 添加行输入框回车 = 添加 (与点"添加"按钮同一入口)。
-  func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-    addButtonTapped()
-    return false
   }
 }
 

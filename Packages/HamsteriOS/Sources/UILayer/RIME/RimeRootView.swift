@@ -21,6 +21,7 @@ public class RimeRootView: NibLessView {
     tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
     tableView.register(ButtonTableViewCell.self, forCellReuseIdentifier: ButtonTableViewCell.identifier)
     tableView.register(SettingTableViewCell.self, forCellReuseIdentifier: SettingTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 

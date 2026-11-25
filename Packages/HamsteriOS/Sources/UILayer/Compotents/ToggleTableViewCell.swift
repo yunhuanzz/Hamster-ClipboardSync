@@ -28,6 +28,8 @@ class ToggleTableViewCell: NibLessTableViewCell {
 
   lazy var switchView: UISwitch = {
     let switchView = UISwitch(frame: .zero)
+    // 扁平化强调色: 微信绿 (round 16 item 3)。
+    switchView.onTintColor = SettingsAppearance.weChatGreen
     switchView.addTarget(self, action: #selector(toggleAction), for: .valueChanged)
     switchView.translatesAutoresizingMaskIntoConstraints = false
     return switchView
@@ -40,6 +42,8 @@ class ToggleTableViewCell: NibLessTableViewCell {
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
     super.init(style: style, reuseIdentifier: reuseIdentifier)
 //    accessoryView = switchView
+    // 开关行点按无跳转, 不显示选中高亮 (扁平化, round 16 item 3)。
+    selectionStyle = .none
 
     contentView.addSubview(label)
     contentView.addSubview(switchView)

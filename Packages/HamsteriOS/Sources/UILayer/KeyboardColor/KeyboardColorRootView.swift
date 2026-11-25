@@ -50,6 +50,7 @@ class KeyboardColorRootView: NibLessView {
       keyboardColorViewModel,
       action: #selector(keyboardColorViewModel.segmentChangeAction(sender:)),
       for: .valueChanged)
+    SettingsAppearance.tint(segmentedControl)
     return segmentedControl
   }()
 
@@ -64,6 +65,7 @@ class KeyboardColorRootView: NibLessView {
     tableView.sectionHeaderHeight = 8
     tableView.estimatedSectionFooterHeight = 8
     tableView.estimatedSectionHeaderHeight = 8
+    tableView.backgroundColor = SettingsAppearance.pageBackgroundColor
     return tableView
   }()
 
@@ -87,7 +89,7 @@ class KeyboardColorRootView: NibLessView {
   }
 
   func setupSubview() {
-    backgroundColor = .secondarySystemBackground
+    backgroundColor = SettingsAppearance.pageBackgroundColor
 
     addSubview(enableColorSchemaView)
     addSubview(segmentedControl)

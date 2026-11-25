@@ -51,6 +51,7 @@ class TextFieldTableViewCell: NibLessTableViewCell, UITextFieldDelegate {
     textField.clearButtonMode = .whileEditing
     textField.translatesAutoresizingMaskIntoConstraints = false
     textField.textAlignment = .left
+    textField.font = SettingsAppearance.rowTitleFont
     textField.delegate = self
     textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return textField
@@ -58,6 +59,7 @@ class TextFieldTableViewCell: NibLessTableViewCell, UITextFieldDelegate {
 
   private lazy var leftTextLabel: UILabel = {
     let label = UILabel(frame: .zero)
+    label.font = SettingsAppearance.rowTitleFont
     label.translatesAutoresizingMaskIntoConstraints = false
     label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
     label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)

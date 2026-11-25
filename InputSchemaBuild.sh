@@ -110,3 +110,26 @@ rm -rf $OUTPUT/.$input_scheme_name && \
   cp -R $OUTPUT/.$input_scheme_name/*.zip $CI_PRIMARY_REPOSITORY_PATH/Resources/SharedSupport/
 
 
+# 本地语言模型 (第 15 轮第 1 项): lotem/rime-octagram-data hans 分支的简体词模型。
+# 注意: 实测 40,925,228 字节 (约 39MB), 不是方案里写的约 10MB (10MB 的是字模型 bgc,
+# 实测会把造句质量拉垮, 见 Docs/r15-lm-fork-patch/README.md); IPA 约 28MB -> 约 69MB。
+# 文件不进 git (见 .gitignore), 以散文件放进 Resources/SharedSupport/ (不在
+# SharedSupport.zip 里, 原因同上: zip 只在首次运行/重置时才解压)。
+# 运行时 deployment()/syncRime() 会把它拷进沙盒 SharedSupport, 再同步到 App Group。
+gram_file="zh-hans-t-essay-bgw.gram"
+gram_sha256="d3cb2438c1fdcd6a855dd6ca8f5c1060a29273c6b64c2c2c69af67cd71b6aa7e"
+gram_url="https://raw.githubusercontent.com/lotem/rime-octagram-data/hans/${gram_file}"
+gram_dst="$CI_PRIMARY_REPOSITORY_PATH/Resources/SharedSupport/${gram_file}"
+gram_actual_sha256=""
+if [[ -f "$gram_dst" ]]; then
+  gram_actual_sha256="$(shasum -a 256 "$gram_dst" | awk '{print $1}')"
+fi
+if [[ "$gram_actual_sha256" != "$gram_sha256" ]]; then
+  [ -z "${no_download}" ] && curl -L -o "$gram_dst" "$gram_url"
+  gram_actual_sha256="$(shasum -a 256 "$gram_dst" 2>/dev/null | awk '{print $1}')" || gram_actual_sha256=""
+fi
+if [[ "$gram_actual_sha256" != "$gram_sha256" ]]; then
+  echo "ERROR: $gram_file SHA256 mismatch (got $gram_actual_sha256, want $gram_sha256)" >&2
+  exit 1
+fi
+

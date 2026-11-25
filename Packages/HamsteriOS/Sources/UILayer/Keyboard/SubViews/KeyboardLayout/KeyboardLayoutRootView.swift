@@ -46,6 +46,7 @@ class KeyboardLayoutRootView: NibLessView {
     let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
     view.delegate = self
     view.allowsSelection = false
+    view.backgroundColor = SettingsAppearance.pageBackgroundColor
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()

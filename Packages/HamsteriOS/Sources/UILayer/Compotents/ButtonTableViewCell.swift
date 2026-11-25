@@ -46,7 +46,7 @@ public class ButtonTableViewCell: NibLessTableViewCell {
   override public func prepareForReuse() {
     super.prepareForReuse()
 
-    buttonView.titleLabel?.tintColor = nil
+    buttonView.setTitleColor(nil, for: .normal)
   }
 
   func updateWithSettingItem(_ item: SettingItemModel) {
@@ -58,8 +58,13 @@ public class ButtonTableViewCell: NibLessTableViewCell {
   override public func updateConfiguration(using state: UICellConfigurationState) {
     buttonView.setTitle(state.settingItemModel?.text, for: .normal)
     buttonView.titleLabel?.font = UIFont.preferredFont(forTextStyle: .headline)
+    // 操作按钮默认微信绿; 带 textTintColor 的 (如红色"恢复默认值") 保持原色。
+    // 旧代码只改 titleLabel.tintColor, 对 UIButton 标题色无效, 这里用 setTitleColor。
+    // (扁平化, round 16 item 3)。
     if let textTintColor = state.settingItemModel?.textTintColor {
-      buttonView.titleLabel?.tintColor = textTintColor
+      buttonView.setTitleColor(textTintColor, for: .normal)
+    } else {
+      buttonView.setTitleColor(SettingsAppearance.weChatGreen, for: .normal)
     }
     buttonView.addTarget(self, action: #selector(buttonHandled), for: .touchUpInside)
   }
@@ -67,6 +72,8 @@ public class ButtonTableViewCell: NibLessTableViewCell {
   func setupButtonView() {
     contentView.addSubview(buttonView)
     buttonView.fillSuperview()
+    // 自动行高下按钮自身高度决定行高: 保底 44, 避免行被压扁。
+    buttonView.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
 //    buttonView.translatesAutoresizingMaskIntoConstraints = false
 //    NSLayoutConstraint.activate([
 //      buttonView.topAnchor.constraint(equalToSystemSpacingBelow: contentView.topAnchor, multiplier: 1.0),

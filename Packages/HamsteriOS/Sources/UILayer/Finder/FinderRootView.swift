@@ -30,6 +30,7 @@ class FinderRootView: NibLessView {
       finderViewModel,
       action: #selector(finderViewModel.segmentChangeAction(sender:)),
       for: .valueChanged)
+    SettingsAppearance.tint(segmentedControl)
     return segmentedControl
   }()
 
@@ -69,7 +70,7 @@ class FinderRootView: NibLessView {
 
     super.init(frame: frame)
 
-    backgroundColor = UIColor.systemBackground
+    backgroundColor = SettingsAppearance.pageBackgroundColor
 
     setupView()
   }

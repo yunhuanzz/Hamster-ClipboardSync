@@ -23,6 +23,7 @@ public class NumberNineGridSettingsViewController: NibLessViewController {
       action: #selector(keyboardSettingsViewModel.numberNineGridSegmentedControlChange(_:)),
       for: .valueChanged
     )
+    SettingsAppearance.tint(segmentedControl)
     return segmentedControl
   }()
 

@@ -35,6 +35,7 @@ class NumberNineGridSettingsRootView: NibLessView {
 
     super.init(frame: frame)
 
+    backgroundColor = SettingsAppearance.pageBackgroundColor
     combine()
   }
 

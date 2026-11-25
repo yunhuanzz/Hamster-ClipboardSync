@@ -338,7 +338,7 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
 
    您可以用自定义实现来替代它。
    */
-  public lazy var autocompleteProvider: AutocompleteProvider = DisabledAutocompleteProvider()
+  public lazy var autocompleteProvider: AutocompleteProvider = EnglishSpellcheckAutocompleteProvider()
 
   /**
    The callout action provider that is used to provide the
@@ -504,6 +504,14 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     // 常用语补全 (英文/数字键盘): 打字不走 RIME, userInputKey 为空,
     // 按光标前连续的字母/数字串查常用语前缀, 挂进候选栏。
     updatePhraseCompletionForDirectInput()
+
+    // 英文纠错 (第 15 轮第 2 项 b): 只在英文 26 键下跑 UITextChecker;
+    // 中文键盘走 RIME, 绝不进这里——中文词一旦当成英文查, 会被当成错词,
+    // 下一个空格就会把中文词换成英文 guess。放 textDidChange 而不是按键
+    // 处理, 是因为删字/粘贴也走这里, 一处覆盖全部。
+    if keyboardContext.keyboardType.isAlphabetic {
+      performAutocomplete()
+    }
   }
 
   /// 直输键盘判定: 字母/数字不进 RIME 组字、直接上屏的键盘,
@@ -751,12 +759,18 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
   /// 打开 URL (如点"设置"格子跳回主 App)。
   /// 键盘扩展里没有 UIApplication, 不能走 UIApplication.shared.open:
   /// 优先用扩展上下文打开 (系统给扩展的开 URL 入口); 扩展上下文为空
-  /// 或系统拒绝 (如无完全访问权限时) 再回退到响应链 openURL: 旧招;
-  /// 两路都失败就记日志, 不静默。
-  /// 根因 (第 14 轮): 之前只有响应链一路, 在本机侧载环境下链上
-  /// 没有响应 openURL: 的对象, 点按直接静默失败; App 侧链路本身
-  /// 是通的 (Info.plist 注册了 hamster scheme,
-  /// SceneDelegate.openURLContexts 接住后 navigation(.main) 回到设置首页)。
+  /// 或系统拒绝再回退到响应链上的 UIApplication.open (现代 API)。
+  /// 根因 (第 16 轮, build #45 仍失败): 第 14 轮的两路都是死路——
+  /// (1) NSExtensionContext.open 只被 Today / iMessage 扩展点支持,
+  /// 在键盘扩展里直接返回 false / 什么都不做; (2) 响应链回退调的是
+  /// 已废弃的 -[UIApplication openURL:], iOS 18+ 对它强制返回 false
+  /// ("BUG IN CLIENT OF UIKIT ... Force returning false (NO)")。
+  /// 所以点设置格子时两路都静默失败, 只剩日志。修法: 响应链回退改
+  /// 走现代的 open(_:options:completionHandler:)——沿响应链找到
+  /// UIApplication 实例直接调它 (不碰扩展里禁用的 UIApplication.shared),
+  /// 这是键盘扩展里已知可行的路子。scheme 本身没问题:
+  /// Hamster/Info.plist 注册了 hamster, HamsterConstants.appURL 一致,
+  /// SceneDelegate.openURLContexts 接住 "main" 后 navigation(.main)。
   open func openUrl(_ url: URL?) {
     guard let url else { return }
     if let extensionContext {
@@ -774,19 +788,27 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     openURLViaResponderChain(url)
   }
 
-  /// 响应链 openURL: 旧招 (沿 next 找响应 openURL: 的对象再 perform)。
-  /// 找不到时记日志, 不静默失败。
+  /// 响应链打开 URL: 沿 next 找到 UIApplication 实例, 调现代的
+  /// open(_:options:completionHandler:) (不要用已废弃的 openURL:,
+  /// iOS 18+ 对它强制返回 false)。UIApplication.shared 在扩展里
+  /// 不可用, 但响应链末尾的 UIApplication 实例本身可以直接调。
+  /// 找不到 UIApplication 时记日志, 不静默失败。
   private func openURLViaResponderChain(_ url: URL) {
-    let selector = sel_registerName("openURL:")
     var responder = self as UIResponder?
-    while let r = responder, !r.responds(to: selector) {
+    while let r = responder {
+      if let app = r as? UIApplication {
+        app.open(url, options: [:]) { success in
+          if success {
+            Logger.statistics.info("openUrl: 响应链 UIApplication.open 打开成功: \(url.absoluteString)")
+          } else {
+            Logger.statistics.error("openUrl: 响应链 UIApplication.open 打开失败: \(url.absoluteString)")
+          }
+        }
+        return
+      }
       responder = r.next
     }
-    guard let responder else {
-      Logger.statistics.error("openUrl: 响应链上没有响应 openURL: 的对象: \(url.absoluteString)")
-      return
-    }
-    _ = responder.perform(selector, with: url)
+    Logger.statistics.error("openUrl: 响应链上没有 UIApplication: \(url.absoluteString)")
   }
 
   open func resetInputEngine() {
@@ -1165,6 +1187,59 @@ private extension KeyboardInputViewController {
       }
       .store(in: &cancellables)
 
+    // 英文纠错候选 -> RIME 候选栏 (第 15 轮第 2 项 b): 把 KeyboardKit 的
+    // autocomplete 建议映射进候选栏 (复用同一套 cell/样式/点选)。
+    // 只在英文键盘下生效; 中文键盘的建议永远走 RIME 引擎。
+    autocompleteContext.$suggestions
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] suggestions in
+        guard let self = self else { return }
+        guard self.keyboardContext.keyboardType.isAlphabetic else {
+          if self.rimeContext.externalSuggestionsKind == .englishCorrection {
+            self.rimeContext.clearExternalSuggestions()
+          }
+          return
+        }
+        let items = suggestions.prefix(5).map { suggestion in
+          CandidateSuggestion(index: -1, label: "", text: suggestion.text, title: suggestion.title, isAutocomplete: suggestion.isAutocomplete)
+        }
+        if items.isEmpty {
+          if self.rimeContext.externalSuggestionsKind == .englishCorrection {
+            self.rimeContext.clearExternalSuggestions()
+          }
+        } else {
+          self.rimeContext.showExternalSuggestions(items, kind: .englishCorrection)
+        }
+      }
+      .store(in: &cancellables)
+
+    // 切出英文键盘时清掉可能残留的英文纠错 (第 15 轮第 2 项 b):
+    // 不清的话, stale 的纠错会在中文键盘的下一个空格被
+    // tryApplyAutocompleteSuggestion 误应用到中文词上。
+    // 光标移动时 resetAutocomplete 本来就会清 (selectionWillChange/
+    // selectionDidChange), 这里补的是“键盘类型变了”那一路。
+    keyboardContext.keyboardTypePublished
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] type in
+        guard let self = self else { return }
+        guard !type.isAlphabetic else { return }
+        self.resetAutocomplete()
+        if self.rimeContext.externalSuggestionsKind == .englishCorrection {
+          self.rimeContext.clearExternalSuggestions()
+        }
+      }
+      .store(in: &cancellables)
+
+    // 联想词点选上屏 (第 15 轮第 2 项 a) / 英文纠错点选上屏 (b):
+    // RimeContext 只决定“点了哪个”, 真正写文档走这里 (它持有 proxy)。
+    // 联想词原文上屏 (insertTextPatch, 不补空格, 中文没有空格);
+    // 英文纠错走 insertAutocompleteSuggestion (替换当前词 + 补空格)。
+    rimeContext.onApplyAssociationText = { [weak self] text in
+      self?.insertTextPatch(text)
+    }
+    rimeContext.onApplyEnglishCorrection = { [weak self] suggestion in
+      self?.insertAutocompleteSuggestion(suggestion)
+    }
 //    rimeContext.registryHandleUserInputKeyChanged { [weak self] inputText in
 //      guard let self = self else { return }
 //

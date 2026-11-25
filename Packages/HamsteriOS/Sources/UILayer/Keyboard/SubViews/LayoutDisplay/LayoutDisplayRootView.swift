@@ -3,7 +3,8 @@
 //
 //  布局和显示子页的根视图: insetGrouped 列表, 行由
 //  KeyboardSettingsViewModel.layoutDisplaySettings 提供。
-//  行类型只有两种: .step (步进器, 候选字号/高度等) 与 toggle (开关,
+//  行类型只有两种: .step (滑块, 候选字号/高度等; round 16 item 3
+//  由 SliderTableViewCell 渲染, 替代旧的 +/- 步进器) 与 toggle (开关,
 //  拼音显示位置、26 键数字输入方式), 渲染方式与候选栏设置页一致。
 //
 
@@ -22,7 +23,8 @@ class LayoutDisplayRootView: NibLessView {
     tableView.estimatedRowHeight = 44
     tableView.register(SettingTableViewCell.self, forCellReuseIdentifier: SettingTableViewCell.identifier)
     tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
-    tableView.register(StepperTableViewCell.self, forCellReuseIdentifier: StepperTableViewCell.identifier)
+    tableView.register(SliderTableViewCell.self, forCellReuseIdentifier: SliderTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 
@@ -68,8 +70,8 @@ extension LayoutDisplayRootView: UITableViewDataSource {
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let setting = keyboardSettingsViewModel.layoutDisplaySettings[indexPath.section].items[indexPath.row]
     if setting.type == .step {
-      let cell = tableView.dequeueReusableCell(withIdentifier: StepperTableViewCell.identifier, for: indexPath)
-      guard let cell = cell as? StepperTableViewCell else { return cell }
+      let cell = tableView.dequeueReusableCell(withIdentifier: SliderTableViewCell.identifier, for: indexPath)
+      guard let cell = cell as? SliderTableViewCell else { return cell }
       cell.updateWithSettingItem(setting)
       return cell
     }

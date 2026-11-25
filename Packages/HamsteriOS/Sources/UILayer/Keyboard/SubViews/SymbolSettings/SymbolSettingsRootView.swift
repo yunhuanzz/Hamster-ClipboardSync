@@ -23,12 +23,13 @@ class SymbolSettingsRootView: NibLessView {
       action: #selector(keyboardSettingsViewModel.symbolsSegmentedControlChange(_:)),
       for: .valueChanged
     )
+    SettingsAppearance.tint(segmentedControl)
     return segmentedControl
   }()
 
   lazy var containerView: UIView = {
     let view = UIView()
-    view.backgroundColor = .secondarySystemBackground
+    view.backgroundColor = SettingsAppearance.pageBackgroundColor
     return view
   }()
 
@@ -115,7 +116,7 @@ class SymbolSettingsRootView: NibLessView {
   }
 
   func setupSubview() {
-    backgroundColor = .secondarySystemBackground
+    backgroundColor = SettingsAppearance.pageBackgroundColor
     addSubview(segmentedView)
     addSubview(containerView)
 

@@ -29,7 +29,7 @@ import UIKit
  UserDefaults (toolbarToolsOrder)。
  第 14 轮起"立即同步剪贴板"和"常用语管理"不在菜单宫格里
  (剪贴板面板里本来就有立即同步药丸按钮, 常用语面板里本来就
- 能编辑/删除/添加), 但仍是可上栏的工具 (工具池里还在),
+ 能编辑/删除, 添加走常用语管理面板), 但仍是可上栏的工具 (工具池里还在),
  工具栏按钮与菜单格子是两套注册表, 见 menuTiles() /
  toolbarToolDefinitions()。
  每个工具还有一侧属性 (左/右, toolbarToolSides, 第 9 轮):
@@ -537,13 +537,38 @@ class KeyboardToolbarView: NibLessView {
         self.updateCandidateBar(inputText: self.rimeContext.userInputKey)
       }
       .store(in: &subscriptions)
+
+    // 外部建议 (第 15 轮: 联想词 / 英文纠错): 出现时 userInputKey 是空的,
+    // 上面的 sink 会把候选栏藏起来, 这里再把它打开 (工具栏让位);
+    // kind 回 .none 时按 userInputKey 的老逻辑恢复 (组字态显示候选栏,
+    // 否则显示工具栏)。两个 sink 只在各自的信号变化时跑, 不会互相打架:
+    // 打字开始时 kind 已被 setEngineSuggestions 置回 .none, 栏由
+    // userInputKey 接管; 联想/纠错出现时 userInputKey 不动, 只这里跑。
+    rimeContext.$externalSuggestionsKind
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] kind in
+        guard let self = self else { return }
+        let showCandidateBar = kind != .none || !self.rimeContext.userInputKey.isEmpty
+        self.commonFunctionBar.isHidden = showCandidateBar
+        self.candidateBarView.isHidden = !showCandidateBar
+        if showCandidateBar, self.candidateBarView.superview == nil {
+          candidateBarView.setStyle(self.style)
+          addSubview(candidateBarView)
+          candidateBarView.fillSuperview()
+        }
+        // 联想链走完、栏收起后回到“没输入”态, 粘贴提示按老逻辑恢复。
+        if !showCandidateBar, self.rimeContext.userInputKey.isEmpty {
+          self.showClipboardChipFromCache()
+        }
+      }
+      .store(in: &subscriptions)
   }
 
   /// 候选栏显隐 + 拼音行: 输入为空且没有常用语补全在展示时隐藏
   /// (同时恢复工具栏与粘贴提示); 否则显示, 拼音行显示当前输入
   /// (补全展示时显示已输入的前缀)。
   private func updateCandidateBar(inputText: String) {
-    let isEmpty = inputText.isEmpty && rimeContext.phraseCompletionInput.isEmpty
+    let isEmpty = inputText.isEmpty && rimeContext.phraseCompletionInput.isEmpty && rimeContext.externalSuggestionsKind == .none
     self.commonFunctionBar.isHidden = !isEmpty
     self.candidateBarView.isHidden = isEmpty
 
@@ -671,8 +696,8 @@ class KeyboardToolbarView: NibLessView {
 
   /// 菜单宫格: 5 格 (第 14 轮: "立即同步剪贴板"和"常用语管理"
   /// 已拿掉——剪贴板面板里本来就有立即同步药丸按钮, 常用语面板里
-  /// 本来就能编辑/删除, 还在分段面板里加了键盘内添加入口;
-  /// 这两个功能仍是可上栏的工具, 见 toolbarToolDefinitions())。
+  /// 本来就能编辑/删除 (第 15 轮: 面板底部的添加行已删, 添加走
+  /// 常用语管理面板); 这两个功能仍是可上栏的工具, 见 toolbarToolDefinitions())。
   /// 切换 26 键/九宫格的标题随当前中文主键盘布局而变, 面板每次打开时现算。
   /// 共 5 格, 没有"收起键盘" (第 7 轮移出菜单: 它只保留在工具栏最右的
   /// 固定 ⌄ 按钮上, 放菜单里毫无意义)。
@@ -715,14 +740,12 @@ class KeyboardToolbarView: NibLessView {
     ])
     panel.reload(
       with: menuTiles(),
-      // 绿格子 = 用户亲手加上去的工具 (第 10 轮): 只看
-      // toolbarUserAddedToolIDs, 且当前在栏上; 默认工具 (剪贴板/常用语)
-      // 从没开过定制就不上色, 菜单里一个绿格子都没有。
-      // 定制工具栏本身不上栏, 永远灰色。
-      activeIDs: Set(UserDefaults.hamster.toolbarToolsOrder.filter {
-        UserDefaults.hamster.isToolbarToolVisible($0)
-          && UserDefaults.hamster.toolbarUserAddedToolIDs.contains($0)
-      }))
+      // 第 15 轮: 菜单格子永远不绿。绿只留在定制工具栏的池子里
+      // (绿 = 在工具栏上, 见 customizeOnToolbarIDs); 菜单里的绿
+      // 之前按 toolbarUserAddedToolIDs 上色, 用户反馈截图里
+      // 剪贴板/常用语两格绿得不对——菜单格子只是入口, 不是状态。
+      // toolbarUserAddedToolIDs 数据本身留着不动 (定制流程还用它)。
+      activeIDs: [])
     menuPanel = panel
     panel.alpha = 0
     panel.transform = CGAffineTransform(translationX: 0, y: 12)
@@ -1759,14 +1782,6 @@ class KeyboardToolbarView: NibLessView {
       var phrases = UserDefaults.hamster.commonPhrases
       guard phrases.indices.contains(index) else { return }
       phrases.remove(at: index)
-      UserDefaults.hamster.commonPhrases = phrases
-      self?.refreshClipboardPhrasesPanel()
-    }
-    /// 常用语页底部添加行: 追加进 commonPhrases (与常用语管理面板、
-    /// 主 App 设置页同一条保存路径), 列表刷新、面板保持打开。
-    panel.onAddPhrase = { [weak self] text in
-      var phrases = UserDefaults.hamster.commonPhrases
-      phrases.append(text)
       UserDefaults.hamster.commonPhrases = phrases
       self?.refreshClipboardPhrasesPanel()
     }

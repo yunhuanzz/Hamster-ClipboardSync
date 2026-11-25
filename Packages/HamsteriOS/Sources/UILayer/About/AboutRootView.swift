@@ -76,6 +76,7 @@ class AboutRootView: NibLessView {
     let tableView = UITableView(frame: .zero, style: .insetGrouped)
     tableView.register(SettingTableViewCell.self, forCellReuseIdentifier: SettingTableViewCell.identifier)
     tableView.register(ButtonTableViewCell.self, forCellReuseIdentifier: ButtonTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 

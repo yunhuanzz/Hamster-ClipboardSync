@@ -53,6 +53,7 @@ public class SymbolEditorView: NibLessView {
     tableView.delegate = self
     tableView.dataSource = self
     tableView.translatesAutoresizingMaskIntoConstraints = false
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 
@@ -120,7 +121,7 @@ public class SymbolEditorView: NibLessView {
   }
 
   func setupView() {
-    backgroundColor = .secondarySystemBackground
+    backgroundColor = SettingsAppearance.pageBackgroundColor
 
     addSubview(tableView)
     if !needRestButton {

@@ -22,6 +22,7 @@ class KeyboardFeedbackRootView: NibLessView {
     tableView.allowsSelection = false
     tableView.rowHeight = UITableView.automaticDimension
     tableView.estimatedRowHeight = 40
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 

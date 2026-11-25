@@ -21,9 +21,10 @@ class KeyboardColorTableViewCell: NibLessTableViewCell {
   
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
     super.init(style: style, reuseIdentifier: reuseIdentifier)
-    
-    tintColor = UIColor.systemGreen
-    
+
+    // 选中态强调色统一微信绿 (round 16 item 3)。
+    tintColor = SettingsAppearance.weChatGreen
+
     setupSubview()
   }
   
@@ -41,8 +42,8 @@ class KeyboardColorTableViewCell: NibLessTableViewCell {
   func updateCellState(_ selected: Bool) {
     if selected {
       accessoryType = .checkmark
-      layer.borderColor = UIColor.systemGreen.cgColor
-      layer.borderWidth = 1.5
+      layer.borderColor = SettingsAppearance.weChatGreen.cgColor
+      layer.borderWidth = 1
     } else {
       accessoryType = .none
       layer.borderColor = UIColor.clear.cgColor

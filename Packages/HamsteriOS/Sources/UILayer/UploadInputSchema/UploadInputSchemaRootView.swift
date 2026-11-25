@@ -21,6 +21,7 @@ class UploadInputSchemaRootView: NibLessView {
     let tableView = UITableView(frame: .zero, style: .insetGrouped)
     tableView.dataSource = self
     tableView.delegate = self
+    tableView.backgroundColor = SettingsAppearance.pageBackgroundColor
     return tableView
   }()
 

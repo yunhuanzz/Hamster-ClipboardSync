@@ -121,10 +121,13 @@ open class StandardKeyboardActionHandler: NSObject, KeyboardActionHandler {
     triggerFeedback(for: gesture, on: action)
     tryUpdateSpaceDragState(for: gesture, on: action)
     guard let gestureAction = self.action(for: gesture, on: action) else { return }
-    // tryRemoveAutocompleteInsertedSpace(before: gesture, on: action)
-    // tryApplyAutocompleteSuggestion(before: gesture, on: action)
+    // 英文纠错 (第 15 轮第 2 项 b): 点选纠错后自动补的空格, 输标点时删掉;
+    // 空格上屏前应用首个 isAutocomplete 纠错。中文下全是 no-op
+    // (autocomplete 建议为空、ProxyState 从未进 .autoInserted)。
+    tryRemoveAutocompleteInsertedSpace(before: gesture, on: action)
+    tryApplyAutocompleteSuggestion(before: gesture, on: action)
     gestureAction(keyboardController)
-    // tryReinsertAutocompleteRemovedSpace(after: gesture, on: action)
+    tryReinsertAutocompleteRemovedSpace(after: gesture, on: action)
     // tryEndSentence(after: gesture, on: action)
     tryChangeKeyboardType(after: gesture, on: action)
     tryRegisterEmoji(after: gesture, on: action)
@@ -145,10 +148,11 @@ open class StandardKeyboardActionHandler: NSObject, KeyboardActionHandler {
     triggerFeedback(for: gesture, on: action)
     tryUpdateSpaceDragState(for: gesture, on: action)
     guard let gestureAction = self.action(for: gesture, on: key) else { return }
-    // tryRemoveAutocompleteInsertedSpace(before: gesture, on: action)
-    // tryApplyAutocompleteSuggestion(before: gesture, on: action)
+    // 英文纠错 (第 15 轮第 2 项 b): 同上, 按键 (Key) 路径也要走。
+    tryRemoveAutocompleteInsertedSpace(before: gesture, on: action)
+    tryApplyAutocompleteSuggestion(before: gesture, on: action)
     gestureAction(keyboardController)
-    // tryReinsertAutocompleteRemovedSpace(after: gesture, on: action)
+    tryReinsertAutocompleteRemovedSpace(after: gesture, on: action)
     // tryEndSentence(after: gesture, on: action)
     tryChangeKeyboardType(after: gesture, on: action)
     tryRegisterEmoji(after: gesture, on: action)

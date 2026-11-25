@@ -23,6 +23,7 @@ class InputSchemaRootView: NibLessView {
   let tableView: UITableView = {
     let tableView = UITableView(frame: .zero, style: .insetGrouped)
     tableView.register(UITableViewCell.self, forCellReuseIdentifier: InputSchemaRootView.cellIdentifier)
+    tableView.backgroundColor = SettingsAppearance.pageBackgroundColor
     return tableView
   }()
 

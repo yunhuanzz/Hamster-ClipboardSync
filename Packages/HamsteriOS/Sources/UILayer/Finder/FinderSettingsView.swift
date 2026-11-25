@@ -17,6 +17,7 @@ class FinderSettingsView: NibLessView {
     tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
     tableView.delegate = self
     tableView.dataSource = self
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 

@@ -10,7 +10,11 @@
 //  文字 13pt, 比原来更接近微信功能面板。打开动画 (0.2s 淡入+上滑)
 //  在调用方 KeyboardToolbarView.showMenuPanel 里做, 不在这里。
 //  第 9 轮: 格子再放大 (76pt, 图标 28pt, 圆角 12pt, 更接近微信的大白格子);
-//  已在工具栏上的工具, 格子以彩色显示 (绿图标 + 淡绿底), 不在栏上的灰色;
+//  第 15 轮: 菜单格子永远不绿——绿只留在定制工具栏的池子里
+//  (绿 = 在工具栏上)。菜单格子只是功能入口, 不表示状态, 调用方
+//  (KeyboardToolbarView.showMenuPanel) 固定传空的 activeIDs。
+//  面板本身仍保留按 activeIDs 上色的渲染能力 (reload 的参数还在,
+//  默认空集), 以后如需恢复可直接传, 不用改面板。
 //  顶栏改成 ⌃ 收起 (左) + 标题, 不再用 safeAreaLayoutGuide 定位标题
 //  (第 8 轮 build #27 里标题"工具"只剩一条 4pt 高的笔画带跑到左沿外,
 //  位置与笔画形状都对得上标题本身, 其余部分被盖住/裁掉; 新顶栏用
@@ -31,7 +35,9 @@ class KeyboardToolbarMenuPanelView: NibLessView {
 
   /// 格子: (id, 标题, SF Symbol 名)。由调用方传入。
   private var tiles: [(id: String, title: String, systemImage: String)] = []
-  /// 已在工具栏上的格子 id: 这些格子以彩色显示, 其余灰色 (第 9 轮)。
+  /// 上色 (绿) 的格子 id。第 15 轮起菜单调用方固定传空集, 菜单格子
+  /// 永远不绿; 绿只留在定制工具栏的池子里 (绿 = 在工具栏上)。
+  /// 渲染能力保留 (reload 的 activeIDs 参数还在, 默认空集)。
   private var activeTileIDs: Set<String> = []
 
   /// 每页格子数: 2 行 x 4 列 = 8。
@@ -167,8 +173,8 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   /// 刷新格子 (按 4 列分行, 每 8 个一页)。
-  /// activeIDs: 已在工具栏上的格子 id, 以彩色显示 (绿图标 + 淡绿底);
-  /// 不在栏上的图标/文字用深色 (第 12 轮)。
+  /// activeIDs: 上色 (绿) 的格子 id; 第 15 轮起菜单调用方固定传空集,
+  /// 菜单格子永远不绿, 绿只留在定制工具栏的池子里。
   func reload(with tiles: [(id: String, title: String, systemImage: String)], activeIDs: Set<String> = []) {
     self.tiles = tiles
     self.activeTileIDs = activeIDs
@@ -264,7 +270,8 @@ class KeyboardToolbarMenuPanelView: NibLessView {
   }
 
   /// 单个格子: 图标在上、文字在下的按钮。
-  /// 已在工具栏上的 (activeIDs 里) 以彩色显示, 其余图标/文字深色 (第 12 轮)。
+  /// isActive 为真时以彩色显示 (绿图标 + 淡绿底); 菜单调用方
+  /// 第 15 轮起固定传空的 activeIDs, 菜单里永远是深色格子。
   private func makeTile(_ tile: (id: String, title: String, systemImage: String)) -> UIControl {
     let button = MenuTileButton()
     button.tileID = tile.id
@@ -298,8 +305,8 @@ extension KeyboardToolbarMenuPanelView: UIScrollViewDelegate {
 /// 每个格子自带淡淡的圆角矩形底 (仿微信白格子): 浅色模式偏白、深色模式偏深灰,
 /// 不硬编码黑/白, 深色模式也不会出现黑斑。
 /// 第 9 轮: 格子放大 (76pt 高、28pt 图标、圆角 12pt, 更接近微信的大白格子);
-/// 已在工具栏上的格子以彩色显示 (绿图标 + 淡绿底), 不在栏上的图标/文字
-/// 用深色 (第 12 轮: 原来都灰, 太浅, 微信的是近黑), 绿与不绿靠图标颜色 + 淡绿底区分。
+/// 第 15 轮起菜单格子永远不绿 (调用方传空的 activeIDs), 绿只留在
+/// 定制工具栏的池子里; isActive 的绿渲染保留, 以后如需恢复可直接传。
 private class MenuTileButton: UIControl {
   var tileID: String = ""
   private var isActiveTile = false

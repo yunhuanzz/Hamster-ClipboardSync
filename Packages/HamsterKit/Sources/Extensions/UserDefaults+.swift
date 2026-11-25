@@ -531,6 +531,52 @@ public extension UserDefaults {
     pinnedCandidates.contains { $0.code == code && $0.text == text }
   }
 
+  // MARK: - 联想词学习对子 (第 15 轮第 2 项 a)
+
+  /// 一条学到的联想: 上一段提交 prev 之后, 用户接着提交了 next (count 次)。
+  /// 只记中文 (两段都是 >=2 字的中文, 见 AssociationStore.recordLearnedPair
+  /// 的 guard), 最多保留 50 条; 展示时只取 count >= 2 的 (同一接续打过
+  /// 两次才算信号, 一次可能是两句不相干的话恰好连着打)。
+  public struct LearnedAssociation: Codable, Equatable {
+    public var prev: String
+    public var next: String
+    public var count: Int
+  }
+
+  /// 学到的联想对子列表, 最多保留 50 条 (最近记的在前)。
+  public var learnedAssociations: [LearnedAssociation] {
+    get {
+      if let data = data(forKey: Self.learnedAssociationsKey),
+         let array = try? JSONDecoder().decode([LearnedAssociation].self, from: data) {
+        return array
+      }
+      return []
+    }
+    set {
+      if let data = try? JSONEncoder().encode(Array(newValue.prefix(Self.learnedAssociationsMaxCount))) {
+        set(data, forKey: Self.learnedAssociationsKey)
+      }
+    }
+  }
+
+  /// 记一次 (prev -> next): 已有就 count+1 并移到最前, 否则插到最前。
+  public func recordLearnedAssociation(previous prev: String, next: String) {
+    guard !prev.isEmpty, !next.isEmpty, prev != next else { return }
+    let count = (learnedAssociations.first { $0.prev == prev && $0.next == next }?.count ?? 0) + 1
+    var list = learnedAssociations.filter { !($0.prev == prev && $0.next == next) }
+    list.insert(LearnedAssociation(prev: prev, next: next, count: count), at: 0)
+    learnedAssociations = list
+  }
+
+  // MARK: - 英文纠错忽略词 (第 15 轮第 2 项 b)
+
+  /// 用户点“忽略”的英文纠错词: provider 不再为它出纠错候选。
+  /// 与 UITextChecker.learnWord (系统级生词) 不同, 这是本键盘自己的忽略表。
+  public var ignoredEnglishWords: [String] {
+    get { stringArray(forKey: Self.ignoredEnglishWordsKey) ?? [] }
+    set { set(newValue, forKey: Self.ignoredEnglishWordsKey) }
+  }
+
   // MARK: - 中文主键盘布局 (九宫格 / 26键)
 
   /// 用户通过键盘内菜单切换过的中文主键盘布局: true=九宫格, false=26键。
@@ -989,6 +1035,9 @@ extension UserDefaults {
   private static let clipboardChipDismissedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedChangeCount"
   private static let pinnedCandidatesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.pinnedCandidates"
   private static let pinnedCandidatesMaxCount = 50
+  private static let learnedAssociationsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.learnedAssociations"
+  private static let learnedAssociationsMaxCount = 50
+  private static let ignoredEnglishWordsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.ignoredEnglishWords"
   private static let clipboardChipDismissedMaxCount = 20
   private static let chinesePrimaryKeyboardIsNineGridKey = "com.ihsiao.apps.Hamster.UserDefault.keys.chinesePrimaryKeyboardIsNineGrid"
   private static let toolbarVisibleToolsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarVisibleTools"

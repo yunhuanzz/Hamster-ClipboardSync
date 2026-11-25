@@ -19,7 +19,8 @@ class SpaceSettingsRootView: NibLessView {
     tableView.allowsSelection = false
     tableView.register(ToggleTableViewCell.self, forCellReuseIdentifier: ToggleTableViewCell.identifier)
     tableView.register(TextFieldTableViewCell.self, forCellReuseIdentifier: TextFieldTableViewCell.identifier)
-    tableView.register(StepperTableViewCell.self, forCellReuseIdentifier: StepperTableViewCell.identifier)
+    tableView.register(SliderTableViewCell.self, forCellReuseIdentifier: SliderTableViewCell.identifier)
+    SettingsAppearance.apply(to: tableView)
     return tableView
   }()
 
@@ -69,8 +70,8 @@ extension SpaceSettingsRootView: UITableViewDataSource, UITableViewDelegate {
     }
 
     if settingItem.type == .step {
-      let cell = tableView.dequeueReusableCell(withIdentifier: StepperTableViewCell.identifier, for: indexPath)
-      guard let cell = cell as? StepperTableViewCell else { return cell }
+      let cell = tableView.dequeueReusableCell(withIdentifier: SliderTableViewCell.identifier, for: indexPath)
+      guard let cell = cell as? SliderTableViewCell else { return cell }
       cell.updateWithSettingItem(settingItem)
       return cell
     }

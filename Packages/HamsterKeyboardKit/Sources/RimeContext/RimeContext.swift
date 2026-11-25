@@ -159,6 +159,21 @@ public class RimeContext {
     return nil
   }
 
+  /// 候选栏当前显示的是不是引擎建议之外的东西 (第 15 轮: 联想词 /
+  /// 英文纠错)。共用 suggestions 一个数组 (候选栏只认这一个数据源),
+  /// 靠这个 kind 区分; 引擎建议每次写入都走 setEngineSuggestions()
+  /// 把 kind 置回 .none, 所以中文一打字联想/纠错就消失, 不会串台。
+  @MainActor @Published
+  public var externalSuggestionsKind: ExternalSuggestionKind = .none
+
+  /// 联想词点选后真正写文档的回调 (第 15 轮): RimeContext 只决定“点了哪个”,
+  /// 写文档由持有 textDocumentProxy 的 VC 接 (见 KeyboardInputViewController)。
+  public var onApplyAssociationText: ((String) -> Void)?
+
+  /// 英文纠错点选后换词的回调 (第 15 轮): 同上, VC 里走
+  /// insertAutocompleteSuggestion (替换当前词 + 补空格)。
+  public var onApplyEnglishCorrection: ((AutocompleteSuggestion) -> Void)?
+
   /// 前缀候选模式: 引擎对完整九宫格输入给不出候选时, 展示最长合法前缀的候选。
   /// (用户乱按的长串常常整体切不全, 但前半段是合法音节; 微信会给前缀候选,
   /// 我们之前只显示一串字母。) 引擎输入始终保持完整串, 只有候选列表来自前缀;
@@ -183,6 +198,11 @@ public class RimeContext {
   /// 仅在“刚提交、还没输别的”期间有效; 退格删掉这段文字时用来撤销学习。
   @MainActor
   public var lastCommit: (code: String, text: String)?
+
+  /// 上一段提交的文字 (第 15 轮联想词): 用来记“上一段 -> 这段”的学习联想
+  /// 对子, 以及点选联想后继续链。空提交 / 撤销学习时清掉, 联想链随之断开。
+  @MainActor
+  public var previousCommitText: String?
 
   /// 本次引擎操作开始前的原始输入码 (提交归属用): tryHandleInputText /
   /// tryHandleInputCode / selectCandidate 在调引擎前快照, syncContext 在
@@ -240,6 +260,10 @@ public extension RimeContext {
     self.suggestions.removeAll(keepingCapacity: false)
     self.phraseCompletion = nil
     self.phraseCompletionInput = ""
+    // 外部建议 (第 15 轮) 不跨 reset 残留: 切输入法/切中英/切方案、
+    // 提交后清组字都走这里。注意 syncContext 的提交分支在 reset()
+    // 之后才挂新联想 (见 showAssociationSuggestions), 顺序别反。
+    self.externalSuggestionsKind = .none
     self.isShowingPrefixCandidates = false
     self.prefixCandidateInput = ""
     self.prefixCandidateTail = ""
@@ -471,6 +495,25 @@ public extension RimeContext {
       Logger.statistics.error("RIME deploy t9 syllable initials patch error \(error.localizedDescription)")
     }
 
+    // 本地语言模型 (第 15 轮第 1 项): 把 grammar 补丁打进 rime_ice.custom.yaml /
+    // t9.custom.yaml (常开, 两边都写; 理由同模糊音)。
+    // 失败不阻断部署, 只记日志, 下次部署再试。
+    do {
+      try LanguageModel.apply()
+    } catch {
+      Logger.statistics.error("RIME deploy language model patch error \(error.localizedDescription)")
+    }
+
+    // 本地语言模型 .gram 文件: 安装包里的散文件拷进沙盒 SharedSupport
+    // (首次运行/重置外的升级收不到 SharedSupport.zip 的新内容, 所以不走 zip)。
+    // 部署末尾 syncSandboxSharedSupportDirectoryToAppGroup() 再同步到 App Group。
+    // 失败不阻断部署, 只记日志, 下次部署再试。
+    do {
+      try LanguageModel.ensureGramFile()
+    } catch {
+      Logger.statistics.error("RIME deploy language model gram file error \(error.localizedDescription)")
+    }
+
     if !isRunning {
       Rime.shared.start(Rime.createTraits(
         sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
@@ -688,6 +731,22 @@ public extension RimeContext {
       Logger.statistics.error("RIME sync t9 syllable initials patch error \(error.localizedDescription)")
     }
 
+    // 本地语言模型 (第 15 轮第 1 项, 理由同 deployment)。
+    // 失败不阻断同步, 只记日志, 下次部署再试。
+    do {
+      try LanguageModel.apply()
+    } catch {
+      Logger.statistics.error("RIME sync language model patch error \(error.localizedDescription)")
+    }
+
+    // 本地语言模型 .gram 文件 (理由同 deployment)。
+    // 失败不阻断同步, 只记日志, 下次部署再试。
+    do {
+      try LanguageModel.ensureGramFile()
+    } catch {
+      Logger.statistics.error("RIME sync language model gram file error \(error.localizedDescription)")
+    }
+
     if !isRunning {
       Rime.shared.start(Rime.createTraits(
         sharedSupportDir: FileManager.sandboxSharedSupportDirectory.path,
@@ -865,6 +924,25 @@ public extension RimeContext {
   /// 根据索引选择候选字
   @MainActor
   func selectCandidate(index: Int) {
+    // 外部建议 (第 15 轮: 联想词 / 英文纠错) 不在引擎菜单里, 不能按引擎
+    // 下标选: 联想词点选 = 原文上屏 + 链到下一句; 英文纠错点选 = 回调给
+    // VC 换词。必须在算 engineIndexForDisplayIndex 之前先分支——外部项
+    // 的 index 是 -1, 拿去选引擎是错的。
+    if externalSuggestionsKind != .none {
+      guard index >= 0, index < suggestions.count else { return }
+      let text = suggestions[index].text
+      let isAutocomplete = suggestions[index].isAutocomplete
+      let kind = externalSuggestionsKind
+      clearExternalSuggestions()
+      if kind == .association {
+        previousCommitText = text
+        onApplyAssociationText?(text)
+        showAssociationSuggestions(afterCommit: text)
+      } else if kind == .englishCorrection {
+        onApplyEnglishCorrection?(AutocompleteSuggestion(text: text, isAutocomplete: isAutocomplete))
+      }
+      return
+    }
     // 常用语补全 (index == -1, 不在引擎菜单里): 不能按引擎下标选。
     // 先清状态 (reset 会清掉组字/候选/补全记录), 再回调给 VC 写文档
     // (中文: 清 marked 再插整条短语; 英文/数字: 先删已输入的前缀再插)。
@@ -1220,7 +1298,21 @@ public extension RimeContext {
           lastCommit = (pendingCommitCode, commitText)
         }
         flushUserDictionary()
+        // (第 15 轮联想词) 记一对学习联想 (上一段 -> 这段), 再算本次提交
+        // 的联想。顺序: 先记 previousCommitText, 再 reset() (它清掉旧的
+        // 联想显示), 最后挂新联想——reset 里也清 kind, 所以新联想必须在
+        // reset 之后挂。
+        let prevCommit = previousCommitText
+        previousCommitText = commitText
+        if let prev = prevCommit, prev != commitText {
+          AssociationStore.recordLearnedPair(previous: prev, next: commitText)
+        }
+        self.reset()
+        self.showAssociationSuggestions(afterCommit: commitText)
+        return
       }
+      // 空提交 (只清组字、没有文字上屏): 联想链断开。
+      previousCommitText = nil
       self.reset()
       return
     }
@@ -1262,7 +1354,7 @@ public extension RimeContext {
       if let prefixCandidates = self.prefixCandidatesForUnsegmentableT9Input(preedit: userInputText) {
         // 前缀候选也走置顶显示重排 (只重排显示; 引擎里是完整输入、菜单为
         // 空, 高亮无处可移, 不动引擎)。
-        self.suggestions = self.withPhraseCandidate(phraseCandidate, prependedTo: applyPinnedCandidates(prefixCandidates, code: prefixCandidateInput, moveHighlight: false))
+        self.setEngineSuggestions(self.withPhraseCandidate(phraseCandidate, prependedTo: applyPinnedCandidates(prefixCandidates, code: prefixCandidateInput, moveHighlight: false)))
         return
       }
     }
@@ -1270,7 +1362,7 @@ public extension RimeContext {
     self.prefixCandidateInput = ""
     self.prefixCandidateTail = ""
     self.prefixCandidateFullInput = ""
-    self.suggestions = self.withPhraseCandidate(phraseCandidate, prependedTo: applyPinnedCandidates(candidates, code: Rime.shared.getInputKeys(), moveHighlight: true))
+    self.setEngineSuggestions(self.withPhraseCandidate(phraseCandidate, prependedTo: applyPinnedCandidates(candidates, code: Rime.shared.getInputKeys(), moveHighlight: true)))
   }
 
   /// 把常用语补全项挂到引擎候选前面 (没有时原样返回)。
@@ -1342,6 +1434,8 @@ public extension RimeContext {
   /// 分页：下一页
   @MainActor
   func nextPage() {
+    // 外部建议 (第 15 轮) 不在引擎菜单里, 没有“下一页”可翻。
+    guard externalSuggestionsKind == .none else { return }
     self.pageIndex += 1
     var highlightIndex = 0
     if let menu = rimeContext?.menu {
@@ -1441,6 +1535,8 @@ public extension RimeContext {
   /// 再选一次同一词会重新学回来。
   @MainActor
   func forgetCandidateAt(index: Int) -> Bool {
+    // 外部建议 (第 15 轮) 没有引擎菜单/userdb 学习可忘。
+    guard externalSuggestionsKind == .none else { return false }
     guard index >= 0, index < suggestions.count else { return false }
     let text = suggestions[index].text
     let code = effectiveCandidateCode
@@ -1472,6 +1568,8 @@ public extension RimeContext {
   func undoLastCommit() -> Bool {
     guard let commit = lastCommit else { return false }
     lastCommit = nil
+    // (第 15 轮) 刚提交的词被删了, 联想链也断开。
+    previousCommitText = nil
     reset()
     for key in commit.code {
       _ = Rime.shared.inputKey(String(key))
@@ -1498,6 +1596,8 @@ public extension RimeContext {
   /// userdb、不写学习。成功返回 true。
   @MainActor
   func pinCandidateAt(index: Int) -> Bool {
+    // 外部建议 (第 15 轮) 不进置顶 (置顶只对同一输入码的引擎候选有意义)。
+    guard externalSuggestionsKind == .none else { return false }
     guard index >= 0, index < suggestions.count else { return false }
     let text = suggestions[index].text
     UserDefaults.hamster.pinCandidate(code: effectiveCandidateCode, text: text)
@@ -1509,6 +1609,7 @@ public extension RimeContext {
   /// 引擎原顺序。成功返回 true。
   @MainActor
   func unpinCandidateAt(index: Int) -> Bool {
+    guard externalSuggestionsKind == .none else { return false }
     guard index >= 0, index < suggestions.count else { return false }
     let text = suggestions[index].text
     UserDefaults.hamster.unpinCandidate(code: effectiveCandidateCode, text: text)
@@ -1519,6 +1620,7 @@ public extension RimeContext {
   /// 该显示下标的候选当前是否已置顶 (供长按菜单显示“置顶/取消置顶”)。
   @MainActor
   func isCandidatePinnedAt(index: Int) -> Bool {
+    guard externalSuggestionsKind == .none else { return false }
     guard index >= 0, index < suggestions.count else { return false }
     return UserDefaults.hamster.isCandidatePinned(code: effectiveCandidateCode, text: suggestions[index].text)
   }
@@ -1625,6 +1727,54 @@ public extension RimeContext {
     }
     let landedMenu = Rime.shared.context().menu
     return landedMenu.map { Int($0.pageSize * $0.pageNo + $0.highlightedCandidateIndex) } ?? -1
+  }
+}
+
+// MARK: - 外部建议 (第 15 轮: 联想词 + 英文纠错)
+
+public extension RimeContext {
+  /// 引擎建议写入候选栏的唯一入口: 写建议的同时把 kind 置回 .none,
+  /// 中文一打字联想/纠错就消失, 不会串台。
+  @MainActor
+  private func setEngineSuggestions(_ candidates: [CandidateSuggestion]) {
+    self.suggestions = candidates
+    self.externalSuggestionsKind = .none
+  }
+
+  /// 把外部建议挂进候选栏 (联想词 / 英文纠错共用)。
+  /// 空列表或 kind == .none 时等于清掉。
+  @MainActor
+  func showExternalSuggestions(_ items: [CandidateSuggestion], kind: ExternalSuggestionKind) {
+    guard kind != .none, !items.isEmpty else {
+      clearExternalSuggestions()
+      return
+    }
+    self.suggestions = items
+    self.externalSuggestionsKind = kind
+  }
+
+  /// 清掉外部建议: 只有当前显示的确实是外部建议时才动 suggestions
+  /// (kind == .none 时 suggestions 是引擎的, 不能清);
+  /// kind 本身永远置回 .none。
+  @MainActor
+  func clearExternalSuggestions() {
+    if externalSuggestionsKind != .none {
+      self.suggestions.removeAll(keepingCapacity: false)
+    }
+    self.externalSuggestionsKind = .none
+  }
+
+  /// 刚提交了一段, 按它查联想挂进候选栏; 没有下一句就不挂
+  /// (栏保持清空收起)。首个标 isAutocomplete, 与现有候选栏
+  /// “首选高亮”的视觉一致。
+  @MainActor
+  func showAssociationSuggestions(afterCommit text: String) {
+    let nexts = AssociationStore.suggestions(after: text)
+    guard !nexts.isEmpty else { return }
+    let items = nexts.enumerated().map { offset, next in
+      CandidateSuggestion(index: -1, label: "", text: next, isAutocomplete: offset == 0)
+    }
+    showExternalSuggestions(items, kind: .association)
   }
 }
 

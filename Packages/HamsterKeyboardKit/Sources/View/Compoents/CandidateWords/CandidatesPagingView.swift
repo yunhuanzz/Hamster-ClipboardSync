@@ -8,6 +8,7 @@
 import Combine
 import HamsterKit
 import OSLog
+import RimeKit
 import UIKit
 
 /// 候选栏手动分页视图
@@ -113,35 +114,69 @@ class CandidatesPagingCollectionView: UICollectionView {
     return dataSource
   }
 
+  /// 外部建议快照是否正显示在 diffable 数据源里 (第 15 轮)。
+  /// 只在外部 -> 引擎的切换瞬间用来重出一次引擎快照, 正常打字时
+  /// $rimeContext 的订阅本来就会出快照, 这里不重复出。
+  private var isShowingExternalSnapshot = false
+
   func combine() {
     rimeContext.$rimeContext
       .receive(on: DispatchQueue.main)
       .sink { [weak self] context in
         guard let self = self else { return }
+        // 外部建议显示期间引擎菜单没变, 不用它覆盖联想词/英文纠错。
+        guard self.rimeContext.externalSuggestionsKind == .none else { return }
         guard let context = context else { return }
-        guard let highlightedIndex = context.menu?.highlightedCandidateIndex else { return }
-        guard let pageCandidates = context.menu?.candidates else { return }
-        let labels = context.labels ?? [String]()
-        let selectKeys = (context.menu?.selectKeys ?? "").map { String($0) }
-        var candidates = [CandidateSuggestion]()
-        for (index, candidate) in pageCandidates.enumerated() {
-          let suggestion = CandidateSuggestion(
-            index: index,
-            label: indexLabel(index, labels: labels, selectKeys: selectKeys),
-            text: candidate.text,
-            title: candidate.text,
-            isAutocomplete: index == highlightedIndex,
-            subtitle: candidate.comment
-          )
-          candidates.append(suggestion)
-        }
-
-        var snapshot = NSDiffableDataSourceSnapshot<Int, CandidateSuggestion>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(candidates, toSection: 0)
-        diffableDataSource.applySnapshotUsingReloadData(snapshot)
+        self.applyEngineSnapshot(context)
       }
       .store(in: &subscriptions)
+
+    // 外部建议 (第 15 轮: 联想词 / 英文纠错) 不走引擎菜单, 直接按
+    // rimeContext.suggestions 出快照; 清掉时 (kind 回 .none) 若当前
+    // 正显示外部快照, 按当前引擎 context 重新出一次, 不留 stale 项。
+    rimeContext.$suggestions
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        guard let self = self else { return }
+        if self.rimeContext.externalSuggestionsKind != .none {
+          var snapshot = NSDiffableDataSourceSnapshot<Int, CandidateSuggestion>()
+          snapshot.appendSections([0])
+          snapshot.appendItems(self.rimeContext.suggestions, toSection: 0)
+          self.diffableDataSource.applySnapshotUsingReloadData(snapshot)
+          self.isShowingExternalSnapshot = true
+        } else if self.isShowingExternalSnapshot {
+          self.isShowingExternalSnapshot = false
+          if let context = self.rimeContext.rimeContext {
+            self.applyEngineSnapshot(context)
+          }
+        }
+      }
+      .store(in: &subscriptions)
+  }
+
+  /// 按当前引擎 context 出候选快照 (原 combine() 里 $rimeContext 订阅的本体)。
+  private func applyEngineSnapshot(_ context: IRimeContext) {
+    guard let highlightedIndex = context.menu?.highlightedCandidateIndex else { return }
+    guard let pageCandidates = context.menu?.candidates else { return }
+    let labels = context.labels ?? [String]()
+    let selectKeys = (context.menu?.selectKeys ?? "").map { String($0) }
+    var candidates = [CandidateSuggestion]()
+    for (index, candidate) in pageCandidates.enumerated() {
+      let suggestion = CandidateSuggestion(
+        index: index,
+        label: indexLabel(index, labels: labels, selectKeys: selectKeys),
+        text: candidate.text,
+        title: candidate.text,
+        isAutocomplete: index == highlightedIndex,
+        subtitle: candidate.comment
+      )
+      candidates.append(suggestion)
+    }
+
+    var snapshot = NSDiffableDataSourceSnapshot<Int, CandidateSuggestion>()
+    snapshot.appendSections([0])
+    snapshot.appendItems(candidates, toSection: 0)
+    diffableDataSource.applySnapshotUsingReloadData(snapshot)
   }
 
   /// 显示 index 对应的 label
@@ -252,6 +287,8 @@ extension CandidatesPagingCollectionView: UICollectionViewDelegateFlowLayout {
 extension CandidatesPagingCollectionView {
   @objc private func handleCandidateLongPress(_ gesture: UILongPressGestureRecognizer) {
     guard gesture.state == .began else { return }
+    // 外部建议 (第 15 轮: 联想词 / 英文纠错) 没有引擎菜单, 忘掉/置顶无意义。
+    guard rimeContext.externalSuggestionsKind == .none else { return }
     let point = gesture.location(in: self)
     guard let indexPath = self.indexPathForItem(at: point),
           indexPath.item < rimeContext.suggestions.count else { return }

@@ -105,6 +105,7 @@ class CustomPhrasesRootView: NibLessView {
     tableView.dataSource = self
     tableView.delegate = self
     tableView.translatesAutoresizingMaskIntoConstraints = false
+    tableView.backgroundColor = SettingsAppearance.pageBackgroundColor
     return tableView
   }()
 

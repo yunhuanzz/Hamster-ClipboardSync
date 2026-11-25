@@ -25,6 +25,7 @@ class BackupRootView: NibLessView {
   let tableView: UITableView = {
     let tableView = UITableView(frame: .zero, style: .insetGrouped)
     tableView.register(FinderViewCell.self, forCellReuseIdentifier: FinderViewCell.identifier)
+    tableView.backgroundColor = SettingsAppearance.pageBackgroundColor
     return tableView
   }()
 
