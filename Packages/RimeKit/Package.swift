@@ -28,9 +28,6 @@ let package = Package(
       name: "boost_regexRIME",
       path: "../../Frameworks/boost_regex.xcframework"),
     .binaryTarget(
-      name: "boost_systemRIME",
-      path: "../../Frameworks/boost_system.xcframework"),
-    .binaryTarget(
       name: "libglogRIME",
       path: "../../Frameworks/libglog.xcframework"),
     .binaryTarget(
@@ -67,7 +64,6 @@ let package = Package(
         "boost_atomicRIME",
         "boost_filesystemRIME",
         "boost_regexRIME",
-        "boost_systemRIME",
         "libglogRIME",
         "libleveldbRIME",
         "libmarisaRIME",
