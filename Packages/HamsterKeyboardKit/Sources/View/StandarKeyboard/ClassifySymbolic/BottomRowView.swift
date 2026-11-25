@@ -112,9 +112,9 @@ class BottomRowView: NibLessView {
     combine()
   }
 
-  /// 初始分类与旧左侧栏一致: 中文键盘默认中文, 否则默认常用。
+  /// 初始分类: 点符号默认进“常用”, 不再按中文/英文区分。
   private func setInitialCategory() {
-    viewModel.currentCategory = keyboardContext.selectKeyboard.isChinese ? .cn : .frequent
+    viewModel.currentCategory = .frequent
     updateCategorySelection()
     scrollSelectedCategoryIntoView(animated: false)
   }

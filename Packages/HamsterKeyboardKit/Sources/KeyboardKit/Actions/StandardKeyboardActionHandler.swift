@@ -337,7 +337,18 @@ open class StandardKeyboardActionHandler: NSObject, KeyboardActionHandler {
   open func tryRegisterSymbol(after gesture: KeyboardGesture, on action: KeyboardAction) {
     guard gesture == .release else { return }
     switch action {
-    case let .symbol(symbol): return SymbolCategory.frequentSymbolProvider.registerSymbol(symbol)
+    case let .symbol(symbol):
+      // “常用”只收真正的符号。英文 26 键字母与数字九宫格数字也是
+      // .symbol 形式, 不能记进来; 只过滤单个 ASCII 字母/数字。
+      // 注意不能用 CharacterSet.letters: 符号菜单里的希腊/俄语/拉丁/
+      // 假名/注音/部首等也都是字母形字符, 那些是真符号, 仍要记录。
+      if symbol.char.count == 1,
+         let ch = symbol.char.first,
+         ch.isASCII,
+         ch.isLetter || ch.isNumber {
+        return
+      }
+      return SymbolCategory.frequentSymbolProvider.registerSymbol(symbol)
     default: return
     }
   }
