@@ -325,12 +325,15 @@ class KeyboardToolbarView: NibLessView {
   /// 临时复制图标: 裸图标, 与其他工具栏工具一致 (无背景, 无边框)。
   /// 微信的白圆按钮成立, 是因为它的工具都有白色背景; 我们的工具没有背景色,
   /// 照搬白圆反而破坏统一, 所以这里只靠图标本身区分:
-  /// 手画的"文档 + 带横线剪贴板" vs 剪贴板的 list.bullet.clipboard。
+  /// SF `doc.on.doc` (两页纸) vs 剪贴板的 `list.bullet.clipboard`
+  /// (带圆点横线的剪贴板)。第 17 轮反馈的手画图标 (文档 + 带横线剪贴板)
+  /// 在真机上显臃肿、与美术不统一, 已删掉, 改回系统图标。
   /// 点按打开复制内容 (分段面板), 打开后无论粘贴与否图标都收掉 (一次性)。
   private lazy var tempCopyButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setImage(Self.makeTempCopyIcon(), for: .normal)
+    button.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
     button.tintColor = .label
     button.backgroundColor = .clear
     button.isHidden = true
@@ -338,46 +341,44 @@ class KeyboardToolbarView: NibLessView {
     return button
   }()
 
-  /// 临时复制图标 (手画, 第 17 轮反馈): 系统图标 doc.on.clipboard 背后那块
-  /// 剪贴板是实心黑块, 用户觉得太黑; 系统图标改不了线条, 所以按同样的
-  /// 构图手画一枚——前面一张白底文档, 后面一块带横线的剪贴板 (描边 + 夹子 + 3 条横线)。
-  /// 显式颜色 (.label 描边 / .systemBackground 文档底), 深浅模式自适应;
-  /// 不是模板图, tintColor 不起作用。
-  private static func makeTempCopyIcon() -> UIImage {
-    let size = CGSize(width: 24, height: 24)
-    let renderer = UIGraphicsImageRenderer(size: size)
-    return renderer.image { context in
-      let ctx = context.cgContext
-      let lineColor = UIColor.label
-      let docFill = UIColor.systemBackground
-      // 后面: 剪贴板 (描边 + 夹子 + 3 条横线)
-      let board = UIBezierPath(
-        roundedRect: CGRect(x: 10, y: 2.5, width: 12, height: 16.5), cornerRadius: 2.5)
-      board.lineWidth = 1.5
-      lineColor.setStroke()
-      board.stroke()
-      let clip = UIBezierPath(
-        roundedRect: CGRect(x: 14, y: 1, width: 5, height: 3.5), cornerRadius: 1.5)
-      lineColor.setFill()
-      clip.fill()
-      ctx.setStrokeColor(lineColor.cgColor)
-      ctx.setLineWidth(1.3)
-      ctx.setLineCap(.round)
-      for y in [8.5, 12.0, 15.5] {
-        ctx.move(to: CGPoint(x: 13, y: y))
-        ctx.addLine(to: CGPoint(x: 19.5, y: y))
-      }
-      ctx.strokePath()
-      // 前面: 文档 (白底 + 描边), 盖住剪贴板左下角
-      let doc = UIBezierPath(
-        roundedRect: CGRect(x: 2, y: 7, width: 11.5, height: 15), cornerRadius: 2)
-      docFill.setFill()
-      doc.fill()
-      doc.lineWidth = 1.5
-      lineColor.setStroke()
-      doc.stroke()
-    }
-  }
+  /// 临时复制图标的纵向锚点 (两条互斥, 见 updateTempCopyVerticalAnchor):
+  /// 候选栏在展示时钉在拼音行内 (top+12, 第 17 轮设计);
+  /// 工具栏在展示时与工具行垂直居中 (commonFunctionBar.centerY)。
+  /// 只钉 top+12 是 build #50 的位置 bug: 打字停后候选栏收起、工具栏
+  /// 回来, 图标还留在拼音行高度, 比工具行高约 13pt, 看着飘在中间。
+  private var tempCopyCenterYPhoneticConstraint: NSLayoutConstraint?
+  private var tempCopyCenterYToolbarConstraint: NSLayoutConstraint?
+
+  /// 临时撤回图标 (上滑回退整段删除后出现, 防误删): 与临时复制图标
+  /// 同一套瞬态模式——不在 toolbarToolDefinitions、不进菜单、不进定制池;
+  /// SF `arrow.uturn.backward`, .label、裸图标。位置在右侧固定工具组左侧,
+  /// 临时复制图标同时在时排在它左边 (见 updateTransientButtonsLayout)。
+  /// 点按把快照文本原样插回光标处 (走 insertPastedText, 不经过 RIME)。
+  private lazy var undoDeleteButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "arrow.uturn.backward"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.tintColor = .label
+    button.backgroundColor = .clear
+    button.isHidden = true
+    button.addTarget(self, action: #selector(undoDeleteButtonTapped), for: .touchUpInside)
+    return button
+  }()
+
+  /// 撤回快照的横向锚点 (两条互斥, 见 updateTransientButtonsLayout):
+  /// 临时复制图标在时贴它左边, 不在时直接贴右侧工具组左边。
+  private var undoTrailingToTempCopyConstraint: NSLayoutConstraint?
+  private var undoTrailingToRightStackConstraint: NSLayoutConstraint?
+
+  /// 撤回图标对应的删除快照 (与控制器里的 undoDeleteSnapshot 同步,
+  /// 以控制器的通知为准; 只在图标展示时有值)。
+  private var undoDeleteText: String?
+
+  // 临时复制图标: SF `doc.on.doc` (见 tempCopyButton)。
+  // 不用 `doc.on.clipboard`: 它的剪贴板底是实心黑块, 用户觉得太黑
+  // (第 17 轮反馈); 手画版 (文档 + 带横线剪贴板) 在真机上显臃肿、
+  // 与美术不统一, 已删掉。
 
   /// 折叠进临时图标的那条复制内容 (nil 表示没有折叠态)。
   private var tempCopyText: String?
@@ -419,6 +420,12 @@ class KeyboardToolbarView: NibLessView {
     NotificationCenter.default.addObserver(
       self, selector: #selector(syncDidFinish),
       name: ClipboardSyncService.didFinishNotification, object: nil)
+
+    // 上滑回退整段删除后控制器发来撤回快照变化 (出现/消失): 工具栏
+    // 据此展示或收掉临时撤回图标 (不经过 RIME, 也不进工具栏菜单/定制池)。
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(undoDeleteSnapshotDidChange(_:)),
+      name: KeyboardInputViewController.didChangeUndoDeleteSnapshotNotification, object: nil)
   }
 
   deinit {
@@ -460,6 +467,11 @@ class KeyboardToolbarView: NibLessView {
       }
       hideClipboardChip()
       hideTempCopyIcon()
+      // 键盘收起/关闭: 撤回快照作废 (临时撤回图标随之消失)。
+      // 只清图标不够——控制器的快照是单一事实来源, 不清掉的话
+      // 下次打开键盘还会把图标推出来。
+      hideUndoDeleteButton()
+      keyboardInputController?.invalidateUndoDeleteSnapshot()
       dismissAllPanels()
     }
   }
@@ -504,21 +516,39 @@ class KeyboardToolbarView: NibLessView {
     addSubview(commonFunctionBar)
     setupPasteRow()
     setupTempCopyButton()
+    setupUndoDeleteButton()
     rebuildToolbarButtons()
   }
 
-  /// 临时复制图标: 钉在候选栏拼音行内、右侧固定工具组的左侧
+  /// 临时复制图标: 钉在右侧固定工具组的左侧
   /// (2026-11-26 用户要求: 临时复制排在固定工具左侧, 右端不再贴边;
   /// 横向锚点挂在 setupToolsStackLayoutIfNeeded 里, 右侧工具组建好之后才有共同祖先)。
-  /// 高 24pt、中心在拼音行内 (拼音行默认高 15pt, 图标上下各探出几 pt,
+  /// 高 24pt。纵向锚点分两种状态 (见 updateTempCopyVerticalAnchor):
+  /// 候选栏在展示时钉在拼音行内 (top+12: 拼音行默认高 15pt, 图标上下各探出几 pt,
   /// 只盖住候选字行顶缘与展开 chevron 的顶端空白, 不盖候选字本身);
+  /// 工具栏在展示时与工具行垂直居中 (commonFunctionBar.centerY)。
   /// 内嵌模式下没有拼音行, 同样贴在顶部, 位置不变。
   private func setupTempCopyButton() {
     addSubview(tempCopyButton)
+    tempCopyCenterYPhoneticConstraint = tempCopyButton.centerYAnchor.constraint(equalTo: topAnchor, constant: 12)
+    tempCopyCenterYToolbarConstraint = tempCopyButton.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor)
     NSLayoutConstraint.activate([
-      tempCopyButton.centerYAnchor.constraint(equalTo: topAnchor, constant: 12),
+      tempCopyCenterYPhoneticConstraint,
       tempCopyButton.heightAnchor.constraint(equalToConstant: 24),
       tempCopyButton.widthAnchor.constraint(equalToConstant: 24),
+    ].compactMap { $0 })
+    updateTempCopyVerticalAnchor()
+  }
+
+  /// 临时撤回图标: 钉在右侧固定工具组的左侧 (或临时复制图标左侧,
+  /// 见 updateTransientButtonsLayout); 纵向与临时复制图标对齐
+  /// (centerY == tempCopyButton.centerY, 所以跟它一样随状态切换锚点)。
+  private func setupUndoDeleteButton() {
+    addSubview(undoDeleteButton)
+    NSLayoutConstraint.activate([
+      undoDeleteButton.centerYAnchor.constraint(equalTo: tempCopyButton.centerYAnchor),
+      undoDeleteButton.heightAnchor.constraint(equalToConstant: 24),
+      undoDeleteButton.widthAnchor.constraint(equalToConstant: 24),
     ])
   }
 
@@ -634,6 +664,9 @@ class KeyboardToolbarView: NibLessView {
         let showCandidateBar = kind != .none || !self.rimeContext.userInputKey.isEmpty
         self.commonFunctionBar.isHidden = showCandidateBar
         self.candidateBarView.isHidden = !showCandidateBar
+        // 临时图标的纵向锚点跟随当前在展示的是工具栏还是候选栏
+        // (build #50 反馈: 只钉拼音行时, 栏收起后图标飘在工具行上方)。
+        self.updateTempCopyVerticalAnchor()
         if showCandidateBar, self.candidateBarView.superview == nil {
           candidateBarView.setStyle(self.style)
           addSubview(candidateBarView)
@@ -651,6 +684,10 @@ class KeyboardToolbarView: NibLessView {
           // 折成临时复制图标 (第 17 轮第 5 项)。
           self.collapsePasteRowToTempIconIfNeeded()
           self.hideClipboardChip()
+          // 有输入/联想出现时文档要么已变、要么将变: 撤回快照作废
+          // (hideUndoIfDocumentChanged 用光标前文字比对, 不会误伤
+          // 删除批次自己的回声)。
+          self.hideUndoIfDocumentChanged()
         }
       }
       .store(in: &subscriptions)
@@ -663,6 +700,11 @@ class KeyboardToolbarView: NibLessView {
     let isEmpty = inputText.isEmpty && rimeContext.phraseCompletionInput.isEmpty && rimeContext.externalSuggestionsKind == .none
     self.commonFunctionBar.isHidden = !isEmpty
     self.candidateBarView.isHidden = isEmpty
+
+    // 临时图标纵向锚点跟随当前栏 (build #50 反馈);
+    // 撤回快照在文档变化后作废 (光标前文字比对, 不误伤删除回声)。
+    updateTempCopyVerticalAnchor()
+    hideUndoIfDocumentChanged()
 
     if self.candidateBarView.superview == nil {
       candidateBarView.setStyle(self.style)
@@ -1037,6 +1079,11 @@ class KeyboardToolbarView: NibLessView {
     commonFunctionBar.addSubview(leftToolsStackView)
     commonFunctionBar.addSubview(rightToolsStackView)
     commonFunctionBar.addSubview(dismissKeyboardButton)
+    // 临时撤回图标的横向锚点 (两条互斥): 临时复制图标在时贴它左边,
+    // 不在时直接贴右侧工具组左边。这里只创建不激活——激活由
+    // updateTransientButtonsLayout 按当前状态切换 (同时只激活一条)。
+    undoTrailingToTempCopyConstraint = undoDeleteButton.trailingAnchor.constraint(equalTo: tempCopyButton.leadingAnchor, constant: -12)
+    undoTrailingToRightStackConstraint = undoDeleteButton.trailingAnchor.constraint(equalTo: rightToolsStackView.leadingAnchor, constant: -12)
     NSLayoutConstraint.activate([
       iconButton.leadingAnchor.constraint(equalTo: commonFunctionBar.leadingAnchor),
       iconButton.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
@@ -1063,6 +1110,9 @@ class KeyboardToolbarView: NibLessView {
       dismissKeyboardButton.topAnchor.constraint(lessThanOrEqualTo: commonFunctionBar.topAnchor),
       commonFunctionBar.bottomAnchor.constraint(greaterThanOrEqualTo: dismissKeyboardButton.bottomAnchor),
     ])
+    // 工具组建好后把临时图标的横向锚点按当前状态落一次
+    // (撤回通知可能比工具组建好先到)。
+    updateTransientButtonsLayout()
   }
 
   /// 按左右侧重建工具栏按钮: 左侧菜单按钮常驻 (配置开启时),
@@ -1827,9 +1877,13 @@ class KeyboardToolbarView: NibLessView {
 
   /// 显示临时复制图标 (钉在候选栏拼音行右端, 打字时够得着;
   /// 候选栏是后加的子视图, 需提到最前才不会被盖住)。
+  /// 纵向锚点与横向排布按当前状态落一次 (见 updateTempCopyVerticalAnchor
+  /// 与 updateTransientButtonsLayout)。
   private func showTempCopyIcon() {
     tempCopyButton.isHidden = false
     bringSubviewToFront(tempCopyButton)
+    updateTempCopyVerticalAnchor()
+    updateTransientButtonsLayout()
   }
 
   /// 收掉临时复制图标并清掉折叠的内容 (内存 + 持久化折叠态)。
@@ -1838,6 +1892,88 @@ class KeyboardToolbarView: NibLessView {
     tempCopyText = nil
     UserDefaults.hamster.tempCopyFoldedText = nil
     UserDefaults.hamster.tempCopyFoldedChangeCount = -1
+    // 撤回图标若在显示, 它的横向锚点要从"贴临时复制图标"改回"贴工具组"。
+    updateTransientButtonsLayout()
+  }
+
+  /// 临时复制图标的纵向锚点 (两条互斥, build #50 反馈修):
+  /// 候选栏在展示 (commonFunctionBar 隐藏) 时钉拼音行内 (top+12);
+  /// 工具栏在展示时与工具行垂直居中 (commonFunctionBar.centerY)。
+  /// build #50 只钉 top+12: 打字停后候选栏收起、工具栏回来,
+  /// 图标还留在拼音行高度, 比工具行高约 13pt, 看着飘在中间偏上。
+  /// 撤回图标 centerY 钉在临时复制图标上, 跟着一起切换, 不用单独处理。
+  private func updateTempCopyVerticalAnchor() {
+    let typing = commonFunctionBar.isHidden
+    tempCopyCenterYPhoneticConstraint?.isActive = typing
+    tempCopyCenterYToolbarConstraint?.isActive = !typing
+  }
+
+  /// 两个临时图标的横向排布 (只在图标显隐变化时调, 约束切换本身便宜):
+  /// 撤回图标在时, 临时复制图标在 → 撤回贴它左边 (-12);
+  /// 临时复制图标不在 → 撤回直接贴右侧工具组左边 (-12)。
+  /// 两条约束同时只激活一条, 且始终有一条激活: 撤回不在时也保持
+  /// 右锚点激活, 否则撤回按钮横向位置无约束 (布局歧义)。
+  /// 工具组还没建好时 (setupToolsStackLayoutIfNeeded 未跑) 约束是 nil,
+  /// 直接返回, 建好后那头会补调一次。
+  private func updateTransientButtonsLayout() {
+    guard undoTrailingToTempCopyConstraint != nil,
+          undoTrailingToRightStackConstraint != nil else { return }
+    let undoVisible = undoDeleteText != nil
+    let tempCopyVisible = !tempCopyButton.isHidden
+    undoTrailingToTempCopyConstraint?.isActive = undoVisible && tempCopyVisible
+    undoTrailingToRightStackConstraint?.isActive = !(undoVisible && tempCopyVisible)
+  }
+
+  /// 撤回快照变化 (控制器发来的通知): 有快照 → 展示撤回图标;
+  /// 快照没了 → 收掉图标。
+  @objc private func undoDeleteSnapshotDidChange(_ notification: Notification) {
+    if let text = notification.userInfo?["text"] as? String, !text.isEmpty {
+      undoDeleteText = text
+      showUndoDeleteButton()
+    } else {
+      hideUndoDeleteButton()
+    }
+  }
+
+  /// 显示临时撤回图标 (钉在右侧固定工具组左侧, 或临时复制图标左侧)。
+  private func showUndoDeleteButton() {
+    undoDeleteButton.isHidden = false
+    bringSubviewToFront(undoDeleteButton)
+    updateTransientButtonsLayout()
+  }
+
+  /// 收掉临时撤回图标并清掉本地快照 (不碰控制器的快照——控制器
+  /// 那头是单一事实来源, 它发通知时这里也会收到)。
+  private func hideUndoDeleteButton() {
+    undoDeleteButton.isHidden = true
+    undoDeleteText = nil
+    updateTransientButtonsLayout()
+  }
+
+  /// 撤回快照的失效兜底 (选词/输入/粘贴后文档变了): 光标前文字
+  /// 非空、且与快照不同 → 说明是删除之后的改动, 快照作废。
+  /// 删除批次自己的回声不会误判: "" 回声在第一批删除前到达,
+  /// 那时光标前仍等于快照全文; 删完后光标前是空的。
+  /// 比对失败时不主动清控制器快照——控制器的 textDidChange 兜底
+  /// 与各入口的直接失效会处理; 这里只负责收图标。
+  private func hideUndoIfDocumentChanged() {
+    guard let snapshot = undoDeleteText, !snapshot.isEmpty else { return }
+    let before = keyboardContext.textDocumentProxy.documentContextBeforeInput ?? ""
+    if !before.isEmpty && before != snapshot {
+      hideUndoDeleteButton()
+    }
+  }
+
+  /// 点按临时撤回图标: 把快照文本原样插回光标处 (走控制器的
+  /// restoreDeletedTextBeforeCursor → insertPastedText, 不经过 RIME),
+  /// 图标随快照清除而消失 (通知回路)。
+  @objc private func undoDeleteButtonTapped() {
+    keyboardInputController?.restoreDeletedTextBeforeCursor()
+  }
+
+  /// 经 actionHandler 拿到控制器 (与 insertPanelText 同一路)。
+  private var keyboardInputController: KeyboardController? {
+    (actionHandler as? StandardKeyboardActionHandler)?.keyboardController
   }
 
   /// 打开粘贴内容分段展开面板 (覆盖在键盘根视图上):

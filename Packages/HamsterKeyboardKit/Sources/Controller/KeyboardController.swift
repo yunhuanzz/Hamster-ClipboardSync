@@ -58,6 +58,27 @@ public protocol KeyboardController: AnyObject {
   func deleteTextBeforeCursor()
 
   /**
+   Restore the text deleted by the last swipe-up delete-all
+   (deleteTextBeforeCursor), inserting the snapshot back at the
+   cursor without going through RIME. Does nothing when there
+   is no snapshot.
+
+   恢复上一次上滑整段删除删掉的文字 (快照原样插回光标处, 不经过
+   RIME)。没有快照时什么都不做。
+   */
+  func restoreDeletedTextBeforeCursor()
+
+  /**
+   Drop the swipe-delete snapshot (the temporary undo icon goes
+   away with it). Called when the user types, deletes, picks a
+   candidate, or the keyboard hides.
+
+   丢掉上滑删除的快照 (临时撤回图标随之消失)。用户输入、删除、
+   选词或键盘收起时调用。
+   */
+  func invalidateUndoDeleteSnapshot()
+
+  /**
    Dismiss the keyboard.
 
    关闭键盘。

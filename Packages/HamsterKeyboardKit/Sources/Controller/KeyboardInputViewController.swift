@@ -512,6 +512,18 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     if keyboardContext.keyboardType.isAlphabetic {
       performAutocomplete()
     }
+
+    // 撤回快照的兜底失效 (选词/粘贴/外部改动后文档变了, 各入口的
+    // 直接失效没覆盖到的情况): 删除刚完成时光标前是空的; 若光标前
+    // 出现了与快照不同的文字, 说明是删除之后的改动, 快照作废。
+    // 进行中标志 + 0.3s 宽限期挡住删除批次自己的回声 (回声到达时
+    // 光标前仍是空的, 本来也不会误判, 标志是双保险)。
+    if !isPerformingSwipeDelete, let snapshot = undoDeleteSnapshot, !snapshot.isEmpty {
+      let before = textDocumentProxy.documentContextBeforeInput ?? ""
+      if !before.isEmpty && before != snapshot {
+        invalidateUndoDeleteSnapshot()
+      }
+    }
   }
 
   /// 直输键盘判定: 字母/数字不进 RIME 组字、直接上屏的键盘,
@@ -568,6 +580,10 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
   }
 
   open func deleteBackward() {
+    // 再删任何内容, 撤回快照作废 (上滑整段删除的临时撤回图标随之消失)。
+    // 与 round 14 的 undoLastCommit 互不干扰: 那是 RIME 学习层,
+    // 这里只清文档层快照。
+    invalidateUndoDeleteSnapshot()
     guard !rimeContext.userInputKey.isEmpty else {
       // 获取光标前后上下文，用于删除需要光标居中的符号
       let beforeInput = self.textDocumentProxy.documentContextBeforeInput ?? ""
@@ -614,34 +630,121 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
     textDocumentProxy.deleteBackward(times: times)
   }
 
+  /// 上滑回退整段删除的撤回快照 (单级、仅内存、键盘会话内有效)。
+  /// 删除前取光标前文本; 上限 undoDeleteSnapshotMaxCharacters 字,
+  /// 超了截断存最后这么多字, 恢复时照样插回截断后的内容。
+  /// 只在上滑整段删除后出现; 普通点按退格不触发 (deleteBackward
+  /// 不写它)。新的上滑整段删除替换旧快照。
+  /// 与 round 14 的 undoLastCommit (RIME 学习层: 退格删掉刚上屏的
+  /// 词时取消学习) 互不干扰: 恢复走 insertPastedText 直接写文档,
+  /// 不经过 RIME, 也不读写 lastCommit; 全删完后光标前是空的,
+  /// deleteBackward 的 hasSuffix(lastCommit) 判定也不会误触。
+  static let undoDeleteSnapshotMaxCharacters = 10000
+
+  /// 撤回快照变化通知 (userInfo["text"]: 快照文本; 无快照时无该键)。
+  /// 工具栏据此展示/收掉临时撤回图标。
+  static let didChangeUndoDeleteSnapshotNotification = Notification.Name("KeyboardInputViewController.didChangeUndoDeleteSnapshotNotification")
+
+  /// 当前撤回快照 (nil 表示没有可撤回的删除)。
+  private(set) var undoDeleteSnapshot: String?
+
+  /// 整段删除的代数: 新的上滑删除 / 恢复操作使旧批次停下来
+  /// (deleteTextBeforeCursorBatch 每次进入都比对, 不一致即返回)。
+  private var undoDeleteGeneration = 0
+
+  /// 整段删除进行中 (批次串行删除时为 true, 删完后 0.3s 宽限期
+  /// 内也为 true): textDidChange 兜底在此期间不失效快照,
+  /// 避免删除批次自己的回声把快照清掉。
+  private var isPerformingSwipeDelete = false
+
+  /// 删除前取快照并发布 (有文本才换快照; 光标前已空时不碰旧快照,
+  /// 新的删除什么都没删, 旧的撤回仍有效)。
+  private func takeUndoDeleteSnapshot() {
+    undoDeleteGeneration += 1
+    let before = textDocumentProxy.documentContextBeforeInput ?? ""
+    guard !before.isEmpty else { return }
+    undoDeleteSnapshot = String(before.suffix(Self.undoDeleteSnapshotMaxCharacters))
+    isPerformingSwipeDelete = true
+    postUndoDeleteSnapshotChanged()
+  }
+
+  /// 清掉快照并发布 (恢复 / 失效入口共用; 已空时不发通知)。
+  open func invalidateUndoDeleteSnapshot() {
+    guard undoDeleteSnapshot != nil else { return }
+    undoDeleteSnapshot = nil
+    postUndoDeleteSnapshotChanged()
+  }
+
+  /// 把快照文本原样插回光标处 (走 insertPastedText, 不经过 RIME),
+  /// 然后清掉快照。恢复操作使进行中的旧删除批次停下来 (代数+1)。
+  open func restoreDeletedTextBeforeCursor() {
+    guard let snapshot = undoDeleteSnapshot, !snapshot.isEmpty else { return }
+    undoDeleteGeneration += 1
+    undoDeleteSnapshot = nil
+    postUndoDeleteSnapshotChanged()
+    insertPastedText(snapshot)
+  }
+
+  /// 发布快照变化通知 (工具栏的临时撤回图标据此显隐)。
+  private func postUndoDeleteSnapshotChanged() {
+    let userInfo: [AnyHashable: Any] = undoDeleteSnapshot.map { ["text": $0] } ?? [:]
+    NotificationCenter.default.post(
+      name: Self.didChangeUndoDeleteSnapshotNotification,
+      object: self, userInfo: userInfo)
+  }
+
+  /// 整段删除收尾: 0.3s 宽限期后把进行中标志清掉, 期间
+  /// textDidChange 的回声不失效快照。宽限期按代数认领,
+  /// 新的删除开始后旧定时器不再清标志。
+  private func finishSwipeDelete() {
+    let generation = undoDeleteGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+      guard let self = self, self.undoDeleteGeneration == generation else { return }
+      self.isPerformingSwipeDelete = false
+    }
+  }
+
   /// 上滑回退键: 删除光标前的全部文字, 光标后的文字保留,
   /// 光标停在剩余文字的开头 (被删与保留的分界处)。
   /// 先重置 RIME (清空候选/输入状态), 再分批删光标前的文字,
   /// 每批最多 100 字, 用 main.async 串行, 避免一次删除过长阻塞键盘。
   /// 光标在文末时等同于清空全部; 光标在文首时不删除任何文字。
   open func deleteTextBeforeCursor() {
+    takeUndoDeleteSnapshot()
     rimeContext.reset()
-    deleteTextBeforeCursorBatch(remainingAttempts: 100)
+    deleteTextBeforeCursorBatch(remainingAttempts: 100, generation: undoDeleteGeneration)
   }
 
-  private func deleteTextBeforeCursorBatch(remainingAttempts: Int, nilFallbackUsed: Bool = false) {
-    guard remainingAttempts > 0 else { return }
+  private func deleteTextBeforeCursorBatch(remainingAttempts: Int, nilFallbackUsed: Bool = false, generation: Int) {
+    // 旧删除的批次: 新的删除/恢复开始后停下来 (代数不一致即返回,
+    // 不调 finishSwipeDelete——进行中标志归新操作管)。
+    guard generation == undoDeleteGeneration else { return }
+    guard remainingAttempts > 0 else {
+      finishSwipeDelete()
+      return
+    }
     if let before = textDocumentProxy.documentContextBeforeInput {
       // 只以光标前是否还有文字为准: 光标后还有文字时 hasText 仍为
       // true, 不能用它做停止条件 (否则光标后有字就一直删到 cap)。
-      guard !before.isEmpty else { return }
+      guard !before.isEmpty else {
+        finishSwipeDelete()
+        return
+      }
       let batch = min(100, before.count)
       textDocumentProxy.deleteBackward(times: batch)
       DispatchQueue.main.async { [weak self] in
-        self?.deleteTextBeforeCursorBatch(remainingAttempts: remainingAttempts - 1)
+        self?.deleteTextBeforeCursorBatch(remainingAttempts: remainingAttempts - 1, generation: generation)
       }
     } else if !nilFallbackUsed {
       // 拿不到前文长度: 删一批尽力而为 (无前文时 deleteBackward 是
       // 空操作); 若下一轮仍拿不到, 停止, 不空转。
       textDocumentProxy.deleteBackward(times: 100)
       DispatchQueue.main.async { [weak self] in
-        self?.deleteTextBeforeCursorBatch(remainingAttempts: remainingAttempts - 1, nilFallbackUsed: true)
+        self?.deleteTextBeforeCursorBatch(remainingAttempts: remainingAttempts - 1, nilFallbackUsed: true, generation: generation)
       }
+    } else {
+      // 两轮都拿不到前文: 停止, 不空转。
+      finishSwipeDelete()
     }
   }
 
@@ -675,6 +778,9 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
   }
 
   open func insertText(_ text: String) {
+    // 输入任何字符, 撤回快照作废 (上滑整段删除的临时撤回图标随之消失)。
+    // 放在分支前: 英文/数字直输与中文 RIME 路都覆盖。
+    invalidateUndoDeleteSnapshot()
     if keyboardContext.keyboardType.isAlphabetic {
       textDocumentProxy.insertText(text)
       // 英文键盘直输不走 RIME, 补全不能只靠 textDidChange:
@@ -718,6 +824,10 @@ open class KeyboardInputViewController: UIInputViewController, KeyboardControlle
   /// 用户粘贴的文本。
   open func insertPastedText(_ text: String) {
     guard !text.isEmpty else { return }
+    // 粘贴 (剪贴板/常用语/分段面板) 是删除之后的新输入, 撤回快照作废。
+    // 恢复操作本身也走这里: 那时快照已在 restoreDeletedTextBeforeCursor
+    // 里清掉, 这里是空操作。
+    invalidateUndoDeleteSnapshot()
     if !rimeContext.userInputKey.isEmpty {
       textDocumentProxy.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
       rimeContext.reset()
@@ -1302,6 +1412,8 @@ private extension KeyboardInputViewController {
 
   /// 上屏补丁：增加了成对符号/光标回退/返回主键盘的支持
   func insertTextPatch(_ insertText: String) {
+    // 输入任何字符 (成对符号、选词上屏都走这里), 撤回快照作废。
+    invalidateUndoDeleteSnapshot()
     // 成对符号 (第 17 轮反馈): 开括号/开引号按一下时,
     // 光标后面没字 → 打一对, 光标移到中间; 光标后面有字 → 只打一边。
     // 闭符号 + 后面正好是它 → 直接越过, 不重复打。

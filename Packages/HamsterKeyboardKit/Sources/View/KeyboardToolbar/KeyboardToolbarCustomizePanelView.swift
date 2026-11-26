@@ -286,8 +286,12 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       poolContainerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       poolContainerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       containerHeightConstraint!,
-      // 面板矮时容器底不顶穿安全区 (与上面 defaultHigh 的高约束配合压缩)。
-      poolContainerView.bottomAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.bottomAnchor, constant: -10),
+      // 容器底钉在面板底边 −10, 不要钉安全区底边: 面板底 = 键盘底,
+      // 安全区底边比面板底高约 24pt (Home Indicator 区), required 的
+      // 底约束会与 defaultHigh 的容器高 (186pt) 打架, 容器被压到
+      // 162pt, 第二行贴纸的文字被白卡下沿切掉一半 (build #50 反馈)。
+      // 面板是盖在按键区上的覆盖层, 容器底落在键盘底部留白区, 不压按键。
+      poolContainerView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
 
       poolScrollView.topAnchor.constraint(equalTo: poolContainerView.topAnchor, constant: Self.poolContainerPadding),
       poolScrollView.leadingAnchor.constraint(equalTo: poolContainerView.leadingAnchor, constant: Self.poolContainerPadding),
