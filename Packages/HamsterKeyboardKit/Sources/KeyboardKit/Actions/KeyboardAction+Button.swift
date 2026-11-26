@@ -38,9 +38,10 @@ public extension KeyboardAction {
     case .shift(let currentCasing):
       return currentCasing.standardButtonImage
     case .shortCommand(let command):
-      // 26 键底行中/英键 (第 17 轮第 4 项, .shortCommand(#中英切换)):
-      // 与旧的 .keyboardType(.alphabetic) 中/英键用同一张 chineseState
-      // 图标 (大“中”+小“英”); 其他快捷指令键没有图标, 保持 nil。
+      // #中英切换快捷指令 (空格上滑用, 不再有可见按键用它: 26 键底行中/英键
+      // 已改回 .keyboardType(.alphabetic), 图标走 KeyboardType 那一路):
+      // 仍给 chineseState 图标 (大“中”+小“英”), 与布局切换键同一张;
+      // 其他快捷指令键没有图标, 保持 nil。
       if command == .switchChineseOrEnglish { return HamsterUIImage.shared.keyboardStateChinese }
       return nil
     case .systemImage(_, let imageName, _): return UIImage(systemName: imageName)

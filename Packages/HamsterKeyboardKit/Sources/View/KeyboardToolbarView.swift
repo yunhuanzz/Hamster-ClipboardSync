@@ -26,7 +26,10 @@ import UIKit
  工具栏按钮: 6 个工具 (剪贴板 / 常用语 / 切换26键·九宫格 /
  立即同步 / 设置 / 常用语管理) 都可上栏, 通过"定制工具栏"
  自由拖动排序、⊖ 拿掉 (回工具池)、点按加入; 顺序存在共享
- UserDefaults (toolbarToolsOrder)。
+ UserDefaults (toolbarToolsOrder), 且顺序是工具栏成员的唯一事实来源
+ (ITEM 2 修复: 拿掉 = 从顺序里删掉, 渲染/池子绿底只看顺序, 不再另由
+ 可见集合决定, 任何重建/迁移/拖动保存都不会把已拿掉的工具复活;
+ 只有显式点按加入 / 池子拖入 / 点"恢复默认" 能把它加回来)。
  第 14 轮起"立即同步剪贴板"和"常用语管理"不在菜单宫格里
  (剪贴板面板里本来就有立即同步药丸按钮, 常用语面板里本来就
  能编辑/删除, 添加走常用语管理面板), 但仍是可上栏的工具 (工具池里还在),
@@ -1145,6 +1148,10 @@ class KeyboardToolbarView: NibLessView {
   /// 已保存的配置里是关的, 之前导致收起键盘在工具栏上根本不出现。
   /// 重建时退出定制态 (晃动 + ⊖ 一并清掉)。
   func rebuildToolbarButtons() {
+    // 一次性迁移 (ITEM 2 修复): 旧模型下藏在顺序里 (可见开关关着) 的
+    // 已拿掉工具先清掉, 再跑后面的迁移——顺序从此是成员的唯一事实来源,
+    // 渲染只看顺序, 任何重建/迁移都不会把已拿掉的工具复活 (只跑一次)。
+    UserDefaults.hamster.migrateToolbarOrderPruneHiddenIfNeeded()
     // 一次性迁移: 分区顺序展平成自由顺序 (只跑一次, 见 UserDefaults+)。
     UserDefaults.hamster.migrateToolbarToolsOrderFromZonesIfNeeded()
     // 一次性迁移 (第 12 轮): 默认工具误记进"亲手加上去"集合的清掉 (只跑一次)。
@@ -1172,8 +1179,10 @@ class KeyboardToolbarView: NibLessView {
       }
     }
 
-    // 在顺序里的工具按顺序、按侧上栏 (可见开关与顺序保持同步, 见定制面板回调)。
-    for toolID in UserDefaults.hamster.toolbarToolsOrder where UserDefaults.hamster.isToolbarToolVisible(toolID) {
+    // 在顺序里的工具按顺序、按侧上栏 (ITEM 2 修复: 顺序是成员的唯一
+    // 事实来源, 不再另用可见集合过滤——那个集合未设置过时默认全部显示,
+    // 会把已拿掉的工具复活; 拿掉 = 从顺序里删掉, 见 removeToolbarToolFromBar)。
+    for toolID in UserDefaults.hamster.toolbarToolsOrder {
       guard let button = buttonForTool(toolID) else { continue }
       button.isHidden = isPasteRowVisible
       attachToolbarToolLongPress(to: button)
@@ -1198,8 +1207,9 @@ class KeyboardToolbarView: NibLessView {
   }
 
   /// 按当前两个容器的实际排列保存整栏布局 (左组 id + 右组 id,
-  /// 见 UserDefaults.saveToolbarLayout: 顺序 + 两侧属性一起写盘,
-  /// 藏起来的工具保持原相对顺序跟在最后、不丢)。
+  /// 见 UserDefaults.saveToolbarLayout: 顺序 + 两侧属性一起写盘;
+  /// ITEM 2 修复: 只存栏上这两个组, 不在栈里的工具不进顺序、
+  /// 回工具池, 不会借这次保存复活)。
   private func saveToolbarLayoutFromStacks() {
     let leftIDs = leftToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { toolID(for: $0) } }
     let rightIDs = rightToolsStackView.arrangedSubviews.compactMap { ($0 as? UIButton).flatMap { toolID(for: $0) } }
@@ -1500,7 +1510,10 @@ class KeyboardToolbarView: NibLessView {
   }
 
   /// 从工具栏拿掉一个工具 (⊖ / 池子绿贴纸点按关掉共用, 同一语义):
-  /// 顺序里删掉 + 隐藏 (回工具池) + 清掉"亲手加上去"标记。
+  /// 顺序里删掉 (回工具池) + 隐藏镜像集合同步清掉 + 清掉"亲手加上去"标记。
+  /// 顺序是成员的唯一事实来源 (ITEM 2 修复): 只要顺序里没它, 任何重建 /
+  /// 迁移 / 拖动保存都不会把它加回来; 只有显式点按加入 / 池子拖入 /
+  /// 点"恢复默认" 能恢复。
   /// 留在定制态 (可连续删几个), 重新计时 3 秒自动退出;
   /// 定制面板开着时被删的工具回池, 池子里它的绿底跟着去掉。
   private func removeToolbarToolFromBar(_ toolID: String) {
@@ -1541,13 +1554,13 @@ class KeyboardToolbarView: NibLessView {
 
   /// 当前在工具栏上的工具 (按保存的顺序, 只含实际在栏上的工具)。
   /// 第 13 轮起只用来算池子绿底 (customizeOnToolbarIDs)。
-  /// 注意: 老模型下藏起来的工具仍在顺序里 (可见开关关着), 这里按可见性过滤,
-  /// 让它回到工具池、可以点按重新上栏, 而不是卡在"当前工具栏"里却不在栏上。
+  /// 注意 (ITEM 2 修复): 顺序是成员的唯一事实来源, 这里只按顺序取、
+  /// 不再另用可见集合过滤 (那个集合默认全部显示, 会把已拿掉的
+  /// 旧模型残留工具算成"在栏上"、池子里一直绿着)。
   private func customizeTools() -> [(id: String, title: String, systemImage: String)] {
     let definitions = toolbarToolDefinitions()
     return UserDefaults.hamster.toolbarToolsOrder.compactMap { id in
-      guard UserDefaults.hamster.isToolbarToolVisible(id) else { return nil }
-      return definitions.first { $0.id == id }
+      definitions.first { $0.id == id }
     }
   }
 
@@ -1581,8 +1594,8 @@ class KeyboardToolbarView: NibLessView {
     panel.onClose = { [weak self] in self?.dismissCustomizePanel() }
     // 点按加入: 从工具池放回工具栏, 追加到左侧末尾 (默认左;
     // 收起键盘是固定按钮, 不在顺序里, 不用再"插在它前面")。
-    // 拖动可再调位置/换侧。老模型下藏起来的工具仍在顺序里:
-    // 只需重新置为显示, 不用再插一次。
+    // 拖动可再调位置/换侧。拿掉的工具不在顺序里, 这里把它追加回去
+    // (ITEM 2 修复: 顺序是成员的唯一事实来源)。
     panel.onAddTool = { [weak self] toolID in
       var order = UserDefaults.hamster.toolbarToolsOrder
       if !order.contains(toolID) {

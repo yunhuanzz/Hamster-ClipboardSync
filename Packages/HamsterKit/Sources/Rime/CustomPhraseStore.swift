@@ -82,7 +82,13 @@ public enum CustomPhraseStore {
 
   /// 读出全部自定义词组。文件不存在时返回空数组 (不报错)。
   public static func load() -> [CustomPhrase] {
-    guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
+    load(from: FileManager.appGroupUserDataDirectoryURL)
+  }
+
+  /// 读出指定目录下的全部自定义词组 (供 BuiltInCustomPhrases.seed()
+  /// 两目录播种用; 沙盒目录那份是部署时从 App Group 拷过去的)。
+  public static func load(from directory: URL) -> [CustomPhrase] {
+    guard let content = try? String(contentsOf: directory.appendingPathComponent(fileName), encoding: .utf8) else {
       return []
     }
     return parse(content)
@@ -93,33 +99,68 @@ public enum CustomPhraseStore {
   /// 转不出的词组 (如含 t9 映射表里没有的音节) 只进 26 键那份,
   /// 九宫格那份跳过, 不写错码。
   public static func save(_ phrases: [CustomPhrase]) throws {
+    try save(phrases, to: FileManager.appGroupUserDataDirectoryURL)
+  }
+
+  /// 保存全部自定义词组到指定目录 (供 BuiltInCustomPhrases.seed()
+  /// 两目录播种用)。
+  public static func save(_ phrases: [CustomPhrase], to directory: URL) throws {
     var content = fileHeader
     for phrase in phrases {
       content += "\(phrase.word)\t\(phrase.code)\t\(phrase.weight)\n"
     }
-    try content.write(to: fileURL, atomically: true, encoding: .utf8)
+    try content.write(to: directory.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
 
     var t9Content = t9FileHeader
     for phrase in phrases {
       guard let digits = pinyinCodeToT9Digits(phrase.code) else { continue }
       t9Content += "\(phrase.word)\t\(digits)\t\(phrase.weight)\n"
     }
-    try t9Content.write(to: t9FileURL, atomically: true, encoding: .utf8)
+    try t9Content.write(to: directory.appendingPathComponent(t9FileName), atomically: true, encoding: .utf8)
   }
 
   /// 拼音码 (音节用空格分隔, 如 "ni hao") 转九宫格数字码 (如 "6426"):
   /// 逐音节查 pinyinToT9Mapping, 任一音节查不到就返回 nil (整条跳过)。
   /// 码里有大写/多余空格时先归一化成小写单空格; ü 按输入法惯例当 v 查。
+  /// 例外 (第 3 项): 查不到的音节如果是纯字母 (如内置短语的首字母码
+  /// "qq"/"kk"/"jd", 或 "sh s" 里的 "sh"), 按九宫格键位逐字母转
+  /// (q->7, k->5, j->5/d->3, s->7/h->4), 不再整条跳过——否则 QQ
+  /// 这类非拼音码永远进不了 custom_phrase_t9.txt, 九宫格下不生效。
+  /// 含非字母的码 (数字、符号) 仍返回 nil。
   static func pinyinCodeToT9Digits(_ code: String) -> String? {
     let syllables = code.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
     guard !syllables.isEmpty else { return nil }
     var digits = ""
     for syllable in syllables {
       let normalized = syllable.replacingOccurrences(of: "ü", with: "v")
-      guard let digit = pinyinToT9Mapping[normalized] else { return nil }
-      digits += digit
+      if let digit = pinyinToT9Mapping[normalized] {
+        digits += digit
+      } else if normalized.allSatisfy({ $0.isASCII && $0.isLetter }) {
+        for letter in normalized {
+          guard let digit = t9Digit(for: letter) else { return nil }
+          digits.append(digit)
+        }
+      } else {
+        return nil
+      }
     }
     return digits
+  }
+
+  /// 单个字母的九宫格键位 (a/b/c->2, d/e/f->3, g/h/i->4, j/k/l->5,
+  /// m/n/o->6, p/q/r/s->7, t/u/v->8, w/x/y/z->9)。
+  private static func t9Digit(for letter: Character) -> Character? {
+    switch letter {
+    case "a", "b", "c": return "2"
+    case "d", "e", "f": return "3"
+    case "g", "h", "i": return "4"
+    case "j", "k", "l": return "5"
+    case "m", "n", "o": return "6"
+    case "p", "q", "r", "s": return "7"
+    case "t", "u", "v": return "8"
+    case "w", "x", "y", "z": return "9"
+    default: return nil
+    }
   }
 
   /// 解析 RIME table 文本: 跳过 # 开头的注释行和空行,

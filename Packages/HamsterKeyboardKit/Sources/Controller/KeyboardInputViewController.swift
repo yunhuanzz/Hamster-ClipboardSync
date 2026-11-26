@@ -1297,6 +1297,26 @@ private extension KeyboardInputViewController {
       }
       .store(in: &cancellables)
 
+    // 切入中文主键盘 (26 键/九宫格/自定义) 时强制退出 asciiMode:
+    // asciiMode 是 RIME 引擎级状态, 只在 switchEnglishChinese() 里翻转,
+    // 切布局 (工具栏 26/9 切换直接调 keyboardContext.setKeyboardType、
+    // 表情返回、大小写回落) 完全不碰它; 残留的 asciiMode 会让九宫格数字键
+    // 直出数字、不组拼音。26 键中/英键已改回布局切换 (不再开 asciiMode),
+    // 这里是兜底: 任何路子 (如空格上滑 #中英切换) 开的 asciiMode, 进中文
+    // 主键盘即清掉, 九宫格拼音永不被 stale asciiMode 卡住。
+    // 订阅 keyboardTypePublished 而不是只改 setKeyboardType: 所有切布局
+    // 的路子都经过 KeyboardContext.setKeyboardType 发这个 subject, 一个
+    // 点全覆盖。注意只认中文主键盘, 不含 123/符号页——英文时进 123 再回来
+    // 不应丢英文态; 回中文主键盘那一下才会清。
+    keyboardContext.keyboardTypePublished
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] type in
+        guard let self = self else { return }
+        guard type.isChinesePrimaryKeyboard || type.isChineseNineGrid || type.isCustom else { return }
+        self.rimeContext.exitAsciiMode()
+      }
+      .store(in: &cancellables)
+
     // 英文纠错候选 -> RIME 候选栏 (第 15 轮第 2 项 b): 把 KeyboardKit 的
     // autocomplete 建议映射进候选栏 (复用同一套 cell/样式/点选)。
     // 只在英文键盘下生效; 中文键盘的建议永远走 RIME 引擎。

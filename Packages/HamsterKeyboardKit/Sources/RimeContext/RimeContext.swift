@@ -495,6 +495,17 @@ public extension RimeContext {
       Logger.statistics.error("RIME deploy t9 syllable initials patch error \(error.localizedDescription)")
     }
 
+    // 内置自定义短语 (第 3 项: 44 哈哈 / 77 QQ 的系统性修复):
+    // 把低权重日常词 + QQ + 设施播进 custom_phrase.txt /
+    // custom_phrase_t9.txt (常开, 不跟开关走; 位置跟
+    // T9SyllableInitials.apply() 同一处, 部署/同步/重置都播)。
+    // 失败不阻断部署, 只记日志, 下次部署再试。
+    do {
+      try BuiltInCustomPhrases.seed()
+    } catch {
+      Logger.statistics.error("RIME deploy built-in custom phrases seed error \(error.localizedDescription)")
+    }
+
     // 本地语言模型 (第 15 轮第 1 项): 把 grammar 补丁打进 rime_ice.custom.yaml /
     // t9.custom.yaml (常开, 两边都写; 理由同模糊音)。
     // 失败不阻断部署, 只记日志, 下次部署再试。
@@ -731,6 +742,17 @@ public extension RimeContext {
       Logger.statistics.error("RIME sync t9 syllable initials patch error \(error.localizedDescription)")
     }
 
+    // 内置自定义短语 (第 3 项: 44 哈哈 / 77 QQ 的系统性修复):
+    // 把低权重日常词 + QQ + 设施播进 custom_phrase.txt /
+    // custom_phrase_t9.txt (常开, 不跟开关走; 位置跟
+    // T9SyllableInitials.apply() 同一处, 部署/同步/重置都播)。
+    // 失败不阻断部署, 只记日志, 下次部署再试。
+    do {
+      try BuiltInCustomPhrases.seed()
+    } catch {
+      Logger.statistics.error("RIME sync built-in custom phrases seed error \(error.localizedDescription)")
+    }
+
     // 本地语言模型 (第 15 轮第 1 项, 理由同 deployment)。
     // 失败不阻断同步, 只记日志, 下次部署再试。
     do {
@@ -852,6 +874,17 @@ public extension RimeContext {
       try T9SyllableInitials.apply()
     } catch {
       Logger.statistics.error("RIME reset t9 syllable initials patch error \(error.localizedDescription)")
+    }
+
+    // 内置自定义短语 (第 3 项: 44 哈哈 / 77 QQ 的系统性修复):
+    // 把低权重日常词 + QQ + 设施播进 custom_phrase.txt /
+    // custom_phrase_t9.txt (常开, 不跟开关走; 位置跟
+    // T9SyllableInitials.apply() 同一处, 部署/同步/重置都播)。
+    // 失败不阻断部署, 只记日志, 下次部署再试。
+    do {
+      try BuiltInCustomPhrases.seed()
+    } catch {
+      Logger.statistics.error("RIME reset built-in custom phrases seed error \(error.localizedDescription)")
     }
 
     // 部署后将方案copy至AppGroup下供keyboard使用
@@ -1041,6 +1074,19 @@ public extension RimeContext {
     self.reset()
     self.asciiMode.toggle()
     Rime.shared.asciiMode(asciiMode)
+  }
+
+  /// 退出字母模式 (asciiMode), 回到中文输入。
+  /// 注意 setAsciiMode(_:) 只改本地标志、不碰引擎, 这里必须两者一起改
+  /// (与 switchEnglishChinese 同款: 标志 + Rime.shared.asciiMode)。
+  /// 调用点: 切入中文主键盘时 (见 KeyboardInputViewController 对
+  /// keyboardTypePublished 的订阅)——asciiMode 是引擎级状态, 切布局不
+  /// 自动清它, 残留会让九宫格数字键直出数字、不组拼音。
+  @MainActor
+  func exitAsciiMode() {
+    guard asciiMode else { return }
+    asciiMode = false
+    Rime.shared.asciiMode(false)
   }
 }
 

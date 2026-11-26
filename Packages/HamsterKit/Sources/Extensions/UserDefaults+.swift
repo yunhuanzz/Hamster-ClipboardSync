@@ -687,8 +687,11 @@ public extension UserDefaults {
 
   /// 工具栏工具顺序: 在工具栏上的工具 id 按显示顺序排列 (不在顺序里的工具
   /// 在定制面板的工具池里, 点按加入)。未设置过时默认 ["clipboard", "phrases"]。
-  /// 可见性仍由 toolbarVisibleTools 集合单独控制,
-  /// 与顺序保持同步 (加入工具栏时置为显示, 从工具栏拿掉时置为隐藏)。
+  /// 这个顺序是工具栏成员的唯一事实来源 (ITEM 2 修复):
+  /// 工具在不在栏上只看它在不在这个顺序里, 不再另由 toolbarVisibleTools
+  /// 集合决定——两个键必须时刻一致, 一旦其中一个丢了/旧了, 被拿掉的工具
+  /// 就会借另一个键复活。拿掉 = 从这个顺序里删掉 (单键写盘),
+  /// 加回 = 显式点按加入 / 池子拖入 / 点"恢复默认" (见 resetToolbarToolsOrder)。
   /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口), 不在列表里。
   /// 收起键盘 (⌄) 不在列表里: 第 7 轮起它是钉死在工具栏最右的固定按钮,
   /// 不再是可定制工具 (用户: 放菜单/定制里毫无意义); 已存顺序里的
@@ -713,8 +716,16 @@ public extension UserDefaults {
   /// 工具栏默认顺序: 剪贴板、常用语 (收起键盘是固定按钮, 不在顺序里)。
   static let toolbarToolDefaultOrder: [String] = ["clipboard", "phrases"]
 
-  /// 工具栏工具可见性: 存放"显示"的工具 id 集合。
-  /// 未设置过时全部显示; 工具 id: "clipboard"(剪贴板)、"phrases"(常用语)。
+  /// 工具栏工具可见性 (旧模型遗留的镜像集合, 仅作兼容保留):
+  /// 存放"显示"的工具 id 集合。未设置过时全部显示。
+  /// 注意 (ITEM 2 修复): 渲染与池子绿底不再读这个集合——成员唯一看
+  /// toolbarToolsOrder (见 isToolbarToolVisible)。旧模型下被拿掉的工具
+  /// 仍留在顺序里、只靠这个集合藏起来, 一旦这个键丢了/没写盘,
+  /// 它的 getter 就回落到"全部显示", 藏着的工具会自己回到工具栏上;
+  /// 新模型下拿掉即从顺序里删掉, 这个集合只是同步写一份、永不作为
+  /// 渲染依据, 丢了也不影响。调用方仍可通过 setToolbarToolVisible
+  /// 读写它, 但是否显示以顺序为准。
+  /// 工具 id: "clipboard"(剪贴板)、"phrases"(常用语)。
   /// 左侧菜单按钮本身不可隐藏 (它是打开菜单/恢复显示的入口)。
   var toolbarVisibleTools: Set<String> {
     get {
@@ -774,12 +785,17 @@ public extension UserDefaults {
     toolbarUserAddedToolIDs = ids
   }
 
-  /// 某个工具栏工具是否显示 (未设置过默认显示)
+  /// 某个工具栏工具是否显示: 只看它在不在 toolbarToolsOrder 里
+  /// (ITEM 2 修复: 顺序是成员的唯一事实来源; 不再读 toolbarVisibleTools
+  /// 集合——那个集合未设置过时默认"全部显示", 会把已拿掉的工具复活)。
   func isToolbarToolVisible(_ toolID: String) -> Bool {
-    toolbarVisibleTools.contains(toolID)
+    toolbarToolsOrder.contains(toolID)
   }
 
-  /// 设置某个工具栏工具是否显示
+  /// 设置某个工具栏工具是否显示 (只同步写旧模型的镜像集合,
+  /// 见 toolbarVisibleTools; 是否显示以 toolbarToolsOrder 为准,
+  /// 调用方加/拿工具时须同时改顺序, 见 KeyboardToolbarView 的
+  /// onAddTool / removeToolbarToolFromBar)。
   func setToolbarToolVisible(_ toolID: String, visible: Bool) {
     var tools = toolbarVisibleTools
     if visible {
@@ -833,12 +849,15 @@ public extension UserDefaults {
 
   /// 一次保存整栏布局 (拖动换侧 / 定制面板拖拽后调用):
   /// 左组 id + 右组 id 按组内顺序拼成 toolbarToolsOrder,
-  /// 顺序里藏起来的工具 (可见开关关着) 保持原相对顺序跟在最后,
-  /// 不丢; 两侧属性同步写盘。调用方不用再分开写顺序和侧。
+  /// 两侧属性同步写盘。调用方不用再分开写顺序和侧。
+  /// 注意 (ITEM 2 修复): 只存栏上这两个组, 不再把"顺序里有、栈里没有"
+  /// 的工具跟在最后 (旧逻辑 "藏起来的工具不丢")——顺序是成员的唯一
+  /// 事实来源, 跟在最后的藏起来的工具就是还没删干净的已拿掉工具,
+  /// 下次重建/迁移会把它当成栏上工具复活。不在栈里的工具一律回工具池,
+  /// 只能由显式点按加入 / 池子拖入 / "恢复默认" 加回来。
   func saveToolbarLayout(leftIDs: [String], rightIDs: [String]) {
-    let visibleIDs = Set(leftIDs + rightIDs)
-    let hiddenIDs = toolbarToolsOrder.filter { !visibleIDs.contains($0) }
-    toolbarToolsOrder = leftIDs + rightIDs + hiddenIDs
+    // 只存栏上的工具: 不在栈里的不写进顺序 (见上面注释)。
+    toolbarToolsOrder = leftIDs + rightIDs
     var sides = toolbarToolSides
     for id in leftIDs { sides[id] = .left }
     for id in rightIDs { sides[id] = .right }
@@ -857,6 +876,8 @@ public extension UserDefaults {
   /// 恢复默认顺序并全部显示 (工具栏工具恢复默认; 菜单格子开关
   /// 第 10 轮已删, 5 个格子永远全显, 这里不再管菜单格子)。
   /// 默认两工具 (剪贴板/常用语) 不是亲手加的, 亲手加的集合也清空。
+  /// 注意 (ITEM 2 修复): 这是唯一能把已拿掉的工具加回来的非显式加入
+  /// 路径——重建 / 迁移 / 拖动保存一律不复活已拿掉的工具。
   func resetToolbarToolsOrder() {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
     toolbarVisibleTools = Set(Self.toolbarToolDefaultOrder)
@@ -865,6 +886,22 @@ public extension UserDefaults {
     removeObject(forKey: Self.toolbarToolSidesKey)
     // 分区也恢复默认 (剪贴板左、常用语左)。
     removeObject(forKey: Self.toolbarToolZonesKey)
+  }
+
+  /// 一次性迁移 (ITEM 2 修复: 旧模型残留 -> 顺序唯一事实来源):
+  /// 旧模型下被拿掉的工具仍留在 toolbarToolsOrder 里、只靠
+  /// toolbarVisibleTools 集合藏起来; 渲染改成只看顺序后, 这些残留
+  /// 会直接回到工具栏上, 所以先按已存的可见集合把顺序里藏着的工具
+  /// 一次性清掉 (清掉 = 回工具池, 点按可再加回来, 不是删除数据)。
+  /// 只有可见集合键真实存在时才清: 从未设置过表示用户从没定制过,
+  /// 默认全部显示, 没有什么可清的。跑过一次后写 flag, 不重复跑。
+  /// 注意: 显式 public——调用方在 HamsterKeyboardKit 模块 (跨模块)。
+  public func migrateToolbarOrderPruneHiddenIfNeeded() {
+    guard object(forKey: Self.toolbarOrderHiddenPrunedMigrationKey) == nil else { return }
+    set(true, forKey: Self.toolbarOrderHiddenPrunedMigrationKey)
+    guard object(forKey: Self.toolbarVisibleToolsKey) != nil else { return }
+    let visible = toolbarVisibleTools
+    toolbarToolsOrder = toolbarToolsOrder.filter { visible.contains($0) }
   }
 
   /// 一次性迁移 (第 6 轮, 分区模型 -> 自由拖动模型): 把现有的分区顺序
@@ -1136,6 +1173,7 @@ extension UserDefaults {
   private static let toolbarToolSidesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarToolSides"
   private static let toolbarUserAddedToolIDsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarUserAddedToolIDs"
   private static let toolbarUserAddedDefaultsMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarUserAddedDefaultsMigrated"
+  private static let toolbarOrderHiddenPrunedMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.toolbarOrderHiddenPruned"
 
   // MARK: - 剪贴板历史 / 常用语
 

@@ -65,9 +65,9 @@ open class iPhoneChineseKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
       return bottomSystemButtonWidth(for: context)
     case .nextKeyboard: return bottomSystemButtonWidth(for: context)
     case .shortCommand:
-      // 底行中/英键 (.shortCommand(#中英切换), 第 17 轮第 4 项):
-      // 与 123/表情键同宽 (系统键宽); 默认分支是 .available 会把
-      // 剩余宽度全吃掉, 必须显式给宽。
+      // 快捷指令键与 123/表情键同宽 (系统键宽); 默认分支是 .available 会把
+      // 剩余宽度全吃掉, 必须显式给宽。(26 键中/英键已改回 .keyboardType
+      // (.alphabetic), 走上面的 .keyboardType 分支, 同宽, 不受影响。)
       return bottomSystemButtonWidth(for: context)
     case .primary:
       if row == 3 && actions[row].count == 3 {
@@ -217,16 +217,20 @@ open class iPhoneChineseKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
       result.append(action)
     }
 
-    // 中/英键 (第 17 轮第 4 项, 仿微信底行位置, 空格右侧):
-    // .shortCommand(#中英切换) 只切 asciiMode、不切键盘类型, 与空格
-    // 上滑 #中英切换同一机制 (见 KeyboardInputViewController.switchEnglishChinese);
-    // 之前这里的 .keyboardType(.alphabetic) 键 (needsChineseEnglishSwitchAction,
-    // 受 displayChineseEnglishSwitchButton 开关控制, hamster.yaml 里是 false)
-    // 是切到英文 26 键布局, 不是中英切换——第 17 轮起 26 键底行固定用
-    // asciiMode 切换, 布局保持中文 26 键。图标是 chineseState (中/英),
-    // 见 KeyboardAction.standardButtonImage。
+    // 中/英键 (空格右侧, 仿微信底行位置):
+    // .keyboardType(.alphabetic(.lowercased)) 切到英文 26 键布局, 与九宫格
+    // 底行中/英键同一个 action (见 ChineseNineGridLayoutProvider); 英文侧
+    // 的“中”键是 .keyboardType(selectKeyboard), 按它切回中文主键盘。
+    // 第 17 轮这里曾改成 .shortCommand(#中英切换) (只切 asciiMode、不切
+    // 布局): asciiMode 是 RIME 引擎级状态, 切布局不碰它, 残留的 asciiMode
+    // 会让切过去的九宫格数字键直出数字、不组拼音 (26 键切英文→切九宫格必现,
+    // 用户反馈); 且该键图标是静态 chineseState, 看不出当前是中文还是英文。
+    // 所以改回布局切换: 图标随布局走 (中文侧 chineseState、英文侧
+    // englishState, 见 KeyboardType.standardButtonImage), 状态不可能残留。
+    // 空格上滑 #中英切换仍保留 (见 switchEnglishChinese), 它开的 asciiMode
+    // 由切入中文主键盘时的兜底清理负责 (见 KeyboardInputViewController)。
     if context.keyboardType.isChinesePrimaryKeyboard {
-      result.append(.shortCommand(.switchChineseOrEnglish))
+      result.append(.keyboardType(.alphabetic(.lowercased)))
     }
 
 //    if context.textDocumentProxy.keyboardType == .emailAddress {
