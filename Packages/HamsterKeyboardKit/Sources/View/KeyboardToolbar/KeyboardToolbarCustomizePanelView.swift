@@ -98,33 +98,42 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
 
   /// 每列贴纸数 (池子只有两行高, 每列最多 2 个; 列数 = 工具数向上取整
   /// 除以 2, 见 rebuildPool)。9 个工具 = 5 列, 内容 5*84+4*12=468pt;
-  /// 390pt 屏上池子可视宽 338pt (屏宽 - 两侧 16pt 边距 - 两侧 10pt
-  /// 内边距), 可滑 468-338=130pt, 第 4 列露半边、提示可以左滑。
+  /// 390pt 屏上池子可视宽 342pt (屏宽 - 两侧 16pt 边距 - 两侧 8pt
+  /// 内边距), 可滑 468-342=126pt, 第 4 列露半边、提示可以左滑。
   /// 之前列数固定封顶 4 列、6 个工具时内容只有 372pt、可滑约 34pt
   /// (不到半列), 用户说的"几乎滑不动"就是这个数。
   private static let poolRowsPerColumn = 2
   /// 每列宽度 (贴纸宽)。
   private static let poolColumnWidth: CGFloat = 84
-  /// 工具池格高: 圆图标 46pt + 名称 (7 字名如“立即同步剪贴板”要放得下
-  /// 两行, 46+4+28=78)。
+  /// 工具池格高: 圆图标 36pt + 间距 3pt + 名称 11pt 两行 (26.4pt)
+  /// + 底边 6pt = 71.4, 取整 72。
+  /// 7 字名如“立即同步剪贴板”在 11pt 下一行放得下 (7×11=77 < 列宽
+  /// 84 − 两侧 2pt), 两行是给更长名字的兜底; 格内留给名称的空间
+  /// 是 72−36−3−6=27pt ≥ 两行 26.4pt, 不会把第二行挤掉。
   /// PoolToolView 的格高约束也用这个值 (fileprivate, 同文件共享)。
-  /// 两排时 78*2+10=166pt。
-  fileprivate static let poolCellHeight: CGFloat = 78
+  /// 两排时 72*2+8=152pt。
+  /// (build #51 反馈: 面板实测只有 223.7pt 高, 顶行 44pt + 底边 6pt,
+  /// 容器最多 173.7pt; 旧格高 78 时容器要 186pt, 被压到 161.7pt,
+  /// 第二行贴纸的文字被白卡下沿切掉。池子改紧凑后容器 152+16=168pt,
+  /// 余 5.7pt。)
+  fileprivate static let poolCellHeight: CGFloat = 72
   /// 工具池圆图标直径 (PoolToolView 也用这个值, 同文件共享)。
-  static let poolCircleDiameter: CGFloat = 46
-  /// 两行池高: 78*2+10=166pt。
-  private static let poolHeight: CGFloat = poolCellHeight * 2 + 10
+  /// 46 -> 36 (build #51 反馈: 池子改紧凑, 见 poolCellHeight)。
+  static let poolCircleDiameter: CGFloat = 36
+  /// 两行池高: 72*2+8=152pt (8 是列内两行间距, 见 makePoolColumn)。
+  private static let poolHeight: CGFloat = poolCellHeight * 2 + 8
   /// 工具池容器圆角 (微信式白色大圆角容器)。
   private static let poolContainerCornerRadius: CGFloat = 16
-  /// 工具池容器内边距。
-  private static let poolContainerPadding: CGFloat = 10
+  /// 工具池容器内边距 (10 -> 8, build #51 反馈: 池子改紧凑)。
+  private static let poolContainerPadding: CGFloat = 8
   /// ✓ 确认圆钮直径 (与真实工具栏按钮同级大小, 不是原来 56pt 的大圆)。
-  private static let checkmarkDiameter: CGFloat = 32
+  /// 32 -> 28 (build #51 反馈: 顶行省 4pt 给池子)。
+  private static let checkmarkDiameter: CGFloat = 28
   /// 池子长按拿起的按住时长: 0.35 秒 (比默认 0.5 秒灵敏一点,
   /// 拿贴纸的手感更跟手; 手指直接滑动时滚动手势先走, 长按因移动
   /// 超限自动失败, 不会误拿)。
   private static let poolLongPressDuration: TimeInterval = 0.35
-  /// 池子贴纸落到真实工具栏上时的缩放: 贴纸格 78pt 高, 落到 ~30pt
+  /// 池子贴纸落到真实工具栏上时的缩放: 贴纸格 72pt 高, 落到 ~30pt
   /// 的工具按钮上约缩到一半。
   private static let poolDropLandingScale: CGFloat = 0.5
 
@@ -269,7 +278,7 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
     containerHeightConstraint = poolContainerView.heightAnchor.constraint(equalToConstant: Self.poolHeight + Self.poolContainerPadding * 2)
     containerHeightConstraint?.priority = .defaultHigh
     NSLayoutConstraint.activate([
-      checkmarkCircleButton.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 10),
+      checkmarkCircleButton.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
       checkmarkCircleButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       checkmarkCircleButton.widthAnchor.constraint(equalToConstant: Self.checkmarkDiameter),
       checkmarkCircleButton.heightAnchor.constraint(equalToConstant: Self.checkmarkDiameter),
@@ -282,16 +291,19 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
       resetButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       resetButton.heightAnchor.constraint(equalToConstant: 32),
 
-      poolContainerView.topAnchor.constraint(equalTo: checkmarkCircleButton.bottomAnchor, constant: 10),
+      poolContainerView.topAnchor.constraint(equalTo: checkmarkCircleButton.bottomAnchor, constant: 8),
       poolContainerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       poolContainerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       containerHeightConstraint!,
-      // 容器底钉在面板底边 −10, 不要钉安全区底边: 面板底 = 键盘底,
+      // 容器底钉在面板底边 −6, 不要钉安全区底边: 面板底 = 键盘底,
       // 安全区底边比面板底高约 24pt (Home Indicator 区), required 的
-      // 底约束会与 defaultHigh 的容器高 (186pt) 打架, 容器被压到
-      // 162pt, 第二行贴纸的文字被白卡下沿切掉一半 (build #50 反馈)。
+      // 底约束会与 defaultHigh 的容器高打架。
+      // build #51 实测: 面板高只有 223.7pt (九宫格竖屏, 17 Pro Max),
+      // 顶行 8+28+8=44pt + 底边 6pt, 容器最多 173.7pt; 旧容器
+      // 186pt 时被压到 161.7pt, 第二行贴纸的文字被白卡下沿切掉。
+      // 池子改紧凑后容器 168pt, 余 5.7pt, 不再顶着底约束。
       // 面板是盖在按键区上的覆盖层, 容器底落在键盘底部留白区, 不压按键。
-      poolContainerView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
+      poolContainerView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -6),
 
       poolScrollView.topAnchor.constraint(equalTo: poolContainerView.topAnchor, constant: Self.poolContainerPadding),
       poolScrollView.leadingAnchor.constraint(equalTo: poolContainerView.leadingAnchor, constant: Self.poolContainerPadding),
@@ -474,7 +486,7 @@ class KeyboardToolbarCustomizePanelView: NibLessView {
   private func makePoolColumn(with tools: [Tool]) -> UIStackView {
     let column = UIStackView()
     column.axis = .vertical
-    column.spacing = 10
+    column.spacing = 8
     column.translatesAutoresizingMaskIntoConstraints = false
     column.widthAnchor.constraint(equalToConstant: Self.poolColumnWidth).isActive = true
     for tool in tools {
@@ -557,7 +569,7 @@ private class PoolToolView: UIView {
   private let titleLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 12)
+    label.font = .systemFont(ofSize: 11)
     label.textColor = .label
     label.textAlignment = .center
     // 7 字工具名 ("立即同步剪贴板") 在列宽 84 的格子里也可能折行, 允许两行。
@@ -583,7 +595,7 @@ private class PoolToolView: UIView {
       circleView.backgroundColor = KeyboardToolbarCustomizePanelView.onToolbarTileBackgroundColor
       iconImageView.tintColor = KeyboardToolbarCustomizePanelView.onToolbarIconColor
     }
-    // 格子高与 poolCellHeight 一致 (78pt: 圆 46 + 间距 4 + 两行名称);
+    // 格子高与 poolCellHeight 一致 (72pt: 圆 36 + 间距 3 + 两行名称 11pt);
     // 是期望值, 不是硬性: 面板矮时 (小屏/横屏) 可压缩,
     // 避免“无法同时满足约束”的警告 (菜单面板 MenuTileButton 同款)。
     let tileHeightConstraint = heightAnchor.constraint(equalToConstant: KeyboardToolbarCustomizePanelView.poolCellHeight)
@@ -598,10 +610,10 @@ private class PoolToolView: UIView {
 
       iconImageView.centerXAnchor.constraint(equalTo: circleView.centerXAnchor),
       iconImageView.centerYAnchor.constraint(equalTo: circleView.centerYAnchor),
-      iconImageView.heightAnchor.constraint(equalToConstant: 26),
-      iconImageView.widthAnchor.constraint(equalToConstant: 26),
+      iconImageView.heightAnchor.constraint(equalToConstant: 22),
+      iconImageView.widthAnchor.constraint(equalToConstant: 22),
 
-      titleLabel.topAnchor.constraint(equalTo: circleView.bottomAnchor, constant: 4),
+      titleLabel.topAnchor.constraint(equalTo: circleView.bottomAnchor, constant: 3),
       titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
       titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
       // 第 14 轮: 底边留 6pt (原来 -2pt): 面板矮时格高被压缩
@@ -613,7 +625,7 @@ private class PoolToolView: UIView {
     titleLabel.text = tool.title
     iconImageView.image = UIImage(
       systemName: tool.systemImage,
-      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 24)))
+      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 20)))
     let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
     addGestureRecognizer(tap)
   }

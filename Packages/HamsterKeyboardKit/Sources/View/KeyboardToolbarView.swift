@@ -188,15 +188,16 @@ class KeyboardToolbarView: NibLessView {
     return view
   }()
 
-  /// 粘贴提示行左侧标识图标: 小剪贴板 (list.bullet.clipboard, 灰色), 一眼看出
-  /// 这行是剪贴板来的内容, 不是 RIME 候选词。纯展示, 不接收触摸。
+  /// 粘贴提示行左侧标识图标: 小剪贴板 (list.bullet.clipboard, 与工具栏
+  /// 其他图标一致的黑色 .label, build #51 反馈: 全栏图标统一黑色),
+  /// 一眼看出这行是剪贴板来的内容, 不是 RIME 候选词。纯展示, 不接收触摸。
   private lazy var pasteRowIconView: UIImageView = {
     let imageView = UIImageView()
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.image = UIImage(
       systemName: "list.bullet.clipboard",
       withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 15, weight: .medium)))
-    imageView.tintColor = .secondaryLabel
+    imageView.tintColor = .label
     imageView.contentMode = .scaleAspectFit
     imageView.isUserInteractionEnabled = false
     return imageView
@@ -210,7 +211,7 @@ class KeyboardToolbarView: NibLessView {
     button.translatesAutoresizingMaskIntoConstraints = false
     button.setImage(UIImage(systemName: "chevron.down"), for: .normal)
     button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 16, weight: .semibold), scale: .default), forImageIn: .normal)
-    button.tintColor = .secondaryLabel
+    button.tintColor = .label
     button.addTarget(self, action: #selector(pasteRowExpandTapped), for: .touchUpInside)
     return button
   }()
@@ -236,7 +237,7 @@ class KeyboardToolbarView: NibLessView {
     button.translatesAutoresizingMaskIntoConstraints = false
     button.setImage(UIImage(systemName: "xmark"), for: .normal)
     button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 14), scale: .default), forImageIn: .normal)
-    button.tintColor = .secondaryLabel
+    button.tintColor = .label
     button.addTarget(self, action: #selector(pasteRowCloseTapped), for: .touchUpInside)
     return button
   }()
@@ -673,15 +674,24 @@ class KeyboardToolbarView: NibLessView {
           candidateBarView.fillSuperview()
         }
         // 联想链走完、栏收起后回到“没输入”态, 粘贴提示按老逻辑恢复
-        // (折叠态在时不收图标、不恢复提示行, 第 17 轮反馈修)。
+        // (折叠态在时不恢复提示行, 第 17 轮反馈修)。
         if !showCandidateBar, self.rimeContext.userInputKey.isEmpty {
           if self.tempCopyText == nil {
             self.hideTempCopyIcon()
             self.showClipboardChipFromCache()
+          } else if UserDefaults.hamster.tempCopyFoldedChangeCount == self.currentPasteboardChangeCount {
+            // 折叠态在: 输入清空后图标回到工具栏
+            // (build #51 反馈: 打字时不展示图标, 清空后才回来)。
+            self.showTempCopyIcon()
+          } else {
+            // 折叠的内容已过期 (打字期间剪贴板换了新内容): 清掉折叠态, 走正常恢复。
+            self.hideTempCopyIcon()
+            self.showClipboardChipFromCache()
           }
         } else if showCandidateBar {
-          // 联想/纠错出现 (或正在输入): 工具栏收起, 粘贴提示行随之收起,
-          // 折成临时复制图标 (第 17 轮第 5 项)。
+          // 联想/纠错出现 (或正在输入): 工具栏收起, 粘贴提示行随之收起并折叠;
+          // 临时复制图标打字时不展示 (build #51 反馈), 只存折叠内容。
+          self.hideTempCopyIconKeepingFold()
           self.collapsePasteRowToTempIconIfNeeded()
           self.hideClipboardChip()
           // 有输入/联想出现时文档要么已变、要么将变: 撤回快照作废
@@ -713,15 +723,25 @@ class KeyboardToolbarView: NibLessView {
     }
 
     // 未输入时用缓存展示粘贴提示 (绝不读剪贴板, 打字不再弹"粘贴自xxx"横幅);
-    // 开始输入后工具栏隐藏, 提示随之隐藏 (折成临时复制图标, 第 17 轮第 5 项)。
+    // 开始输入后工具栏隐藏, 提示随之隐藏并折叠 (第 17 轮第 5 项)。
     if isEmpty {
-      // 折叠态在时不收图标、不恢复提示行 (第 17 轮反馈修): 打字后
-      // 提示行不再弹出来, 图标一直留着直到点开。
+      // 折叠态在时不恢复提示行 (第 17 轮反馈修): 打字后
+      // 提示行不再弹出来。
+      // (build #51 反馈: 打字时图标藏起来, 输入清空后才回到工具栏。)
       if self.tempCopyText == nil {
+        self.hideTempCopyIcon()
+        self.showClipboardChipFromCache()
+      } else if UserDefaults.hamster.tempCopyFoldedChangeCount == currentPasteboardChangeCount {
+        self.showTempCopyIcon()
+      } else {
+        // 折叠的内容已过期 (打字期间剪贴板换了新内容): 清掉折叠态, 走正常恢复。
         self.hideTempCopyIcon()
         self.showClipboardChipFromCache()
       }
     } else {
+      // 打字时临时复制图标不展示 (build #51 反馈): 折叠只存内容,
+      // 图标藏起来; 输入清空后上面的分支再把它请回来。
+      self.hideTempCopyIconKeepingFold()
       self.collapsePasteRowToTempIconIfNeeded()
       self.hideClipboardChip()
     }
@@ -1862,9 +1882,12 @@ class KeyboardToolbarView: NibLessView {
     showPasteSegmentsPanel(text: text)
   }
 
-  /// 粘贴提示行正在展示时用户开始打字: 把提示行折叠成临时复制图标
-  /// (第 17 轮第 5 项), 内容留在 tempCopyText 里, 提示行本身随即收掉。
+  /// 粘贴提示行正在展示时用户开始打字: 把提示行折叠起来 (第 17 轮第 5 项),
+  /// 内容留在 tempCopyText 里并持久化, 提示行本身随即收掉。
   /// 只折叠一次 (已折叠时不再重复); 提示行没在展示时什么都不做。
+  /// (build #51 反馈: 打字的时候不要展示临时复制图标——折叠只存内容,
+  /// 图标不亮出来, 等输入清空后再由 updateCandidateBar / 外部建议
+  /// sink 里的折叠恢复分支把它请回来。)
   private func collapsePasteRowToTempIconIfNeeded() {
     guard tempCopyText == nil, isPasteRowVisible, let text = clipboardChipText, !text.isEmpty else { return }
     tempCopyText = text
@@ -1872,11 +1895,11 @@ class KeyboardToolbarView: NibLessView {
     // 提示行不再把同一条内容重新推出来。
     UserDefaults.hamster.tempCopyFoldedText = text
     UserDefaults.hamster.tempCopyFoldedChangeCount = currentPasteboardChangeCount
-    showTempCopyIcon()
+    hideTempCopyIconKeepingFold()
   }
 
-  /// 显示临时复制图标 (钉在候选栏拼音行右端, 打字时够得着;
-  /// 候选栏是后加的子视图, 需提到最前才不会被盖住)。
+  /// 显示临时复制图标 (只在工具栏展示时调用: 输入为空, build #51 反馈
+  /// 规定打字时不展示; 候选栏是后加的子视图, 需提到最前才不会被盖住)。
   /// 纵向锚点与横向排布按当前状态落一次 (见 updateTempCopyVerticalAnchor
   /// 与 updateTransientButtonsLayout)。
   private func showTempCopyIcon() {
@@ -1896,12 +1919,28 @@ class KeyboardToolbarView: NibLessView {
     updateTransientButtonsLayout()
   }
 
+  /// 只藏起临时复制图标 (视觉), 不清折叠的内容: tempCopyText 和持久化
+  /// 折叠态都保留, 输入清空后图标原样回来 (见 updateCandidateBar /
+  /// 外部建议 sink 里的折叠恢复分支, 以及 showClipboardChipFromCache
+  /// 的折叠恢复路径)。
+  /// (build #51 反馈: 打字的时候不要展示临时复制图标。)
+  /// 与 hideTempCopyIcon() 的区别: 后者是"这条内容作废" (点开、关闭键盘、
+  /// 剪贴板换新内容时用); 这里只是"正在输入, 先藏起来"。
+  private func hideTempCopyIconKeepingFold() {
+    tempCopyButton.isHidden = true
+    // 撤回图标若在显示, 它的横向锚点要从"贴临时复制图标"改回"贴工具组"。
+    updateTransientButtonsLayout()
+  }
+
   /// 临时复制图标的纵向锚点 (两条互斥, build #50 反馈修):
   /// 候选栏在展示 (commonFunctionBar 隐藏) 时钉拼音行内 (top+12);
   /// 工具栏在展示时与工具行垂直居中 (commonFunctionBar.centerY)。
   /// build #50 只钉 top+12: 打字停后候选栏收起、工具栏回来,
   /// 图标还留在拼音行高度, 比工具行高约 13pt, 看着飘在中间偏上。
   /// 撤回图标 centerY 钉在临时复制图标上, 跟着一起切换, 不用单独处理。
+  /// (build #51 反馈: 临时复制图标打字时不展示, 所以拼音行锚点现在
+  /// 实际只影响撤回图标的纵向位置; 保留两条锚点, 撤回图标在任何栏
+  /// 状态下都有确定的纵向位置, 不改它的行为。)
   private func updateTempCopyVerticalAnchor() {
     let typing = commonFunctionBar.isHidden
     tempCopyCenterYPhoneticConstraint?.isActive = typing

@@ -233,7 +233,12 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
         candidateLabelFont: candidateLabelFont,
         candidateTextFont: candidateTextFont,
         candidateCommentFont: candidateCommentFont,
-        toolbarButtonFrontColor: hamsterColor.buttonFrontColor,
+        // 工具栏图标统一 .label (build #51 反馈: 新图标 doc.on.doc /
+        // arrow.uturn.backward 是 .label 黑色, 旧图标走配色方案的
+        // buttonFrontColor 是灰色, 同一行深浅不一; 改这里一处,
+        // 工具栏 8 个按钮 + setupAppearance 里重设的 4 个全跟着变)。
+        // 注意: 只改工具栏图标色, 按键本身的前景仍用 buttonFrontColor。
+        toolbarButtonFrontColor: .label,
         toolbarButtonBackgroundColor: .clear,
         toolbarButtonPressedBackgroundColor: hamsterColor.buttonPressedBackColor
       )
@@ -253,7 +258,9 @@ open class StandardKeyboardAppearance: KeyboardAppearance {
       candidateLabelFont: candidateLabelFont,
       candidateTextFont: candidateTextFont,
       candidateCommentFont: candidateCommentFont,
-      toolbarButtonFrontColor: .secondaryLabel,
+      // 无配色方案时工具栏图标也是 .label (与上面配色方案分支一致,
+      // build #51 反馈: 全栏图标统一黑色, 对比度高一点)。
+      toolbarButtonFrontColor: .label,
       toolbarButtonBackgroundColor: .clear,
       toolbarButtonPressedBackgroundColor: .secondarySystemFill
     )
