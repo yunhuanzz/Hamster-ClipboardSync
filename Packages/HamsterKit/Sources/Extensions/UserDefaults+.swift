@@ -1070,6 +1070,49 @@ public extension UserDefaults {
     Logger.statistics.info("common phrases migrated: removed \(beforeCount - phrases.count) builtin defaults, kept \(phrases.count) user phrases")
   }
 
+  /// 一次性迁移 (build #53 回归修复): 清掉 #53 播进 custom_phrase.txt
+  /// 的 22 个内置种子词。种子词以 initial_quality 99 编进
+  /// custom_phrase.userdb, 在最短 9 键码 (如 96 在哪) 上压过一切
+  /// 词典词和用户学习, 导致“我”怎么打都上不了 #1、长按忘词删不掉
+  /// (delete_candidate 只动 userdb, 不动 custom_phrase 的 stabledb)、
+  /// 置顶也只改显示。播种本身已在同批下线, 这里只清残留。
+  /// 只删 (词, 码) 与种子完全一致的条目: 用户自己加的同名不同码短语
+  /// (如自己加的“亲亲 qin qin”) 一律保留; 用户自己加的同词同码条目
+  /// 与种子无法区分, 也会一并清掉 (重加只需几秒)。
+  /// 两目录 (沙盒 + App Group) 都清, 只在内容变了时重写 (重写会同步
+  /// 生成 custom_phrase_t9.txt, 九宫格侧一起清干净)。
+  /// 幂等: flag 只在两目录都处理成功后才写, 失败下次部署再试; 编进词库
+  /// 要点「重新部署」才生效 (跟“我的词组”一样)。
+  /// 注意: 显式 public——调用方在 HamsterKeyboardKit 模块 (跨模块)。
+  /// 调用点: RimeContext 部署/同步/重置 (原来调 seed() 的三处)。
+  public func migrateCustomPhrasesRemoveSeededBuiltinsIfNeeded() {
+    guard object(forKey: Self.customPhrasesSeededBuiltinsRemovedMigrationKey) == nil else { return }
+    let seeds = BuiltInCustomPhrases.phrases
+    var removedTotal = 0
+    var cleaned = true
+    for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
+      var existing = CustomPhraseStore.load(from: dir)
+      let beforeCount = existing.count
+      existing.removeAll { entry in
+        seeds.contains { $0.word == entry.word && $0.code == entry.code }
+      }
+      removedTotal += beforeCount - existing.count
+      if existing.count != beforeCount {
+        do {
+          try CustomPhraseStore.save(existing, to: dir)
+        } catch {
+          Logger.statistics.error("custom phrases migration save error \(error.localizedDescription)")
+          cleaned = false
+        }
+      }
+    }
+    guard cleaned else { return }
+    set(true, forKey: Self.customPhrasesSeededBuiltinsRemovedMigrationKey)
+    if removedTotal > 0 {
+      Logger.statistics.info("custom phrases migrated: removed \(removedTotal) seeded builtin entries, kept user phrases")
+    }
+  }
+
   /// 常用语列表。未设置过时返回空 (2026-11-24 B2: 默认常用语全部
   /// 下线, 不再内置任何句子); 设置过后返回保存的值
   /// (即使删空也返回保存的空数组, 不会重置回内置)。
@@ -1181,6 +1224,7 @@ extension UserDefaults {
   private static let clipboardHistoryMaxCount = 20
   private static let commonPhrasesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.commonPhrases"
   private static let commonPhrasesBuiltinsRemovedMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.commonPhrasesBuiltinsRemoved"
+  private static let customPhrasesSeededBuiltinsRemovedMigrationKey = "com.ihsiao.apps.Hamster.UserDefault.keys.customPhrasesSeededBuiltinsRemoved"
 
   // MARK: - 补丁
 

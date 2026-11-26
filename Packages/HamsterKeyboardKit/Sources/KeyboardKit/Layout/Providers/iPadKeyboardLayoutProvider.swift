@@ -127,7 +127,10 @@ open class iPadKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
    应用于键盘中间行的附加 leading 操作。
    */
   open func middleLeadingActions(for context: KeyboardContext) -> KeyboardActions {
-    return [.keyboardType(context.selectKeyboard)]
+    // 英文键盘“中”键: 回到切英文前所在的中文布局 (26 键/九宫格),
+    // 没记录时回配置主键盘 (见 KeyboardContext.returnToChineseKeyboardType)。
+    // 中文布局下 lastChineseKeyboardType 是 nil, 等价于原来的 selectKeyboard。
+    return [.keyboardType(context.returnToChineseKeyboardType)]
   }
 
   /**

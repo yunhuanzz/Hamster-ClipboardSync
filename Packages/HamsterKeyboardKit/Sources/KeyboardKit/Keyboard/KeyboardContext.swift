@@ -129,6 +129,17 @@ public class KeyboardContext: ObservableObject {
   /// 主键盘类型栈：用来做返回主键盘的栈结构
   private lazy var primaryKeyboardStack = [KeyboardType]()
 
+  /// 切英文前所在的中文布局 (26 键/九宫格): 英文键盘“中”键要回到的地方。
+  /// 只在内存里记 (扩展进程重建后键盘回到主键盘, 无记录时回配置主键盘)。
+  /// setKeyboardType 里维护: 进英文时记下当前中文布局, 进中文布局时清掉。
+  private(set) var lastChineseKeyboardType: KeyboardType?
+
+  /// 英文键盘“中”键要回到的中文布局: 切英文前所在的中文布局,
+  /// 没记录 (如刚启动、或从非中文布局进英文) 时回配置主键盘。
+  var returnToChineseKeyboardType: KeyboardType {
+    lastChineseKeyboardType ?? selectKeyboard
+  }
+
   private lazy var keyboardTypeSubject = PassthroughSubject<KeyboardType, Never>()
   public var keyboardTypePublished: AnyPublisher<KeyboardType, Never> {
     keyboardTypeSubject.eraseToAnyPublisher()
@@ -722,6 +733,16 @@ public extension KeyboardContext {
    设置键盘类型
    */
   func setKeyboardType(_ type: KeyboardType) {
+    // 中/英往返 (build #53 反馈第 4 项): 进英文时记下当前中文布局,
+    // 英文侧“中”键按它回去 (见 returnToChineseKeyboardType); 进中文
+    // 布局时清掉 (记录已消费, 下次进英文再记)。只记 26 键/九宫格——
+    // 只有这两个布局有中/英键; 123/符号页不记不清除。空格上滑
+    // #中英切换不走这里 (它只切 asciiMode、不切布局, 见 switchEnglishChinese)。
+    if type.isAlphabetic && (keyboardType.isChinesePrimaryKeyboard || keyboardType.isChineseNineGrid) {
+      lastChineseKeyboardType = keyboardType
+    } else if type.isChinesePrimaryKeyboard || type.isChineseNineGrid {
+      lastChineseKeyboardType = nil
+    }
     if type.isPrimaryKeyboard(keyboards) {
       // 切换回 selectKeyboard 时，清空键盘 stack
       if type == selectKeyboard {

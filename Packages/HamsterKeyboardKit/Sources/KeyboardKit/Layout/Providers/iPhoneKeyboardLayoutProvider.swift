@@ -192,8 +192,9 @@ open class iPhoneKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
     }
 
     if context.keyboardType.isAlphabetic, context.chineseEnglishSwitchButtonIsOnLeftOfSpaceButton {
-      // 自定义键盘：返回主键盘
-      result.append(.keyboardType(context.selectKeyboard))
+      // 英文键盘“中”键: 回到切英文前所在的中文布局 (26 键/九宫格),
+      // 没记录时回配置主键盘 (见 KeyboardContext.returnToChineseKeyboardType)。
+      result.append(.keyboardType(context.returnToChineseKeyboardType))
     }
 
     // 地球（系统输入法切换键）
@@ -202,8 +203,9 @@ open class iPhoneKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
     result.append(.space)
 
     if context.keyboardType.isAlphabetic, !context.chineseEnglishSwitchButtonIsOnLeftOfSpaceButton {
-      // 自定义键盘：返回主键盘
-      result.append(.keyboardType(context.selectKeyboard))
+      // 英文键盘“中”键: 回到切英文前所在的中文布局 (26 键/九宫格),
+      // 没记录时回配置主键盘 (见 KeyboardContext.returnToChineseKeyboardType)。
+      result.append(.keyboardType(context.returnToChineseKeyboardType))
     }
 
     if context.textDocumentProxy.keyboardType == .emailAddress {

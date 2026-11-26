@@ -495,15 +495,24 @@ public extension RimeContext {
       Logger.statistics.error("RIME deploy t9 syllable initials patch error \(error.localizedDescription)")
     }
 
-    // 内置自定义短语 (第 3 项: 44 哈哈 / 77 QQ 的系统性修复):
-    // 把低权重日常词 + QQ + 设施播进 custom_phrase.txt /
-    // custom_phrase_t9.txt (常开, 不跟开关走; 位置跟
-    // T9SyllableInitials.apply() 同一处, 部署/同步/重置都播)。
+    // 内置种子词清理 (build #53 回归修复): #53 播进 custom_phrase.txt
+    // 的 22 个内置词以 quality 99 压过了词典词和用户学习 (96 在哪盖住
+    // “我”), 播种已下线; 这里一次性清掉残留 (只删与种子 (词, 码) 完全
+    // 一致的条目, 用户自己的短语保留)。位置跟 T9SyllableInitials.apply()
+    // 同一处, 部署/同步/重置都跑; 清完要点「重新部署」才生效。
+    UserDefaults.hamster.migrateCustomPhrasesRemoveSeededBuiltinsIfNeeded()
+
+    // 补充词典 (build #53 回归修复第 3 项: QQ 走正经词典机制):
+    // 把安装包里的 hamster_supplemental.dict.yaml/.schema.yaml 拷进
+    // 两个用户数据目录, 再把翻译器补丁打进 rime_ice.custom.yaml /
+    // t9.custom.yaml (翻译器排在列表最前, 见 SupplementalDictionary)。
+    // 位置跟 T9SyllableInitials.apply() 同一处, 部署/同步/重置都跑。
     // 失败不阻断部署, 只记日志, 下次部署再试。
     do {
-      try BuiltInCustomPhrases.seed()
+      try SupplementalDictionary.ensureFiles()
+      try SupplementalDictionary.apply()
     } catch {
-      Logger.statistics.error("RIME deploy built-in custom phrases seed error \(error.localizedDescription)")
+      Logger.statistics.error("RIME deploy supplemental dictionary error \(error.localizedDescription)")
     }
 
     // 本地语言模型 (第 15 轮第 1 项): 把 grammar 补丁打进 rime_ice.custom.yaml /
@@ -742,15 +751,20 @@ public extension RimeContext {
       Logger.statistics.error("RIME sync t9 syllable initials patch error \(error.localizedDescription)")
     }
 
-    // 内置自定义短语 (第 3 项: 44 哈哈 / 77 QQ 的系统性修复):
-    // 把低权重日常词 + QQ + 设施播进 custom_phrase.txt /
-    // custom_phrase_t9.txt (常开, 不跟开关走; 位置跟
-    // T9SyllableInitials.apply() 同一处, 部署/同步/重置都播)。
-    // 失败不阻断部署, 只记日志, 下次部署再试。
+    // 内置种子词清理 (build #53 回归修复): #53 播进 custom_phrase.txt
+    // 的 22 个内置词以 quality 99 压过了词典词和用户学习 (96 在哪盖住
+    // “我”), 播种已下线; 这里一次性清掉残留 (只删与种子 (词, 码) 完全
+    // 一致的条目, 用户自己的短语保留)。位置跟 T9SyllableInitials.apply()
+    // 同一处, 部署/同步/重置都跑; 清完要点「重新部署」才生效。
+    UserDefaults.hamster.migrateCustomPhrasesRemoveSeededBuiltinsIfNeeded()
+
+    // 补充词典 (build #53 回归修复第 3 项: QQ 走正经词典机制, 理由同 deployment)。
+    // 失败不阻断同步, 只记日志, 下次部署再试。
     do {
-      try BuiltInCustomPhrases.seed()
+      try SupplementalDictionary.ensureFiles()
+      try SupplementalDictionary.apply()
     } catch {
-      Logger.statistics.error("RIME sync built-in custom phrases seed error \(error.localizedDescription)")
+      Logger.statistics.error("RIME sync supplemental dictionary error \(error.localizedDescription)")
     }
 
     // 本地语言模型 (第 15 轮第 1 项, 理由同 deployment)。
@@ -876,15 +890,22 @@ public extension RimeContext {
       Logger.statistics.error("RIME reset t9 syllable initials patch error \(error.localizedDescription)")
     }
 
-    // 内置自定义短语 (第 3 项: 44 哈哈 / 77 QQ 的系统性修复):
-    // 把低权重日常词 + QQ + 设施播进 custom_phrase.txt /
-    // custom_phrase_t9.txt (常开, 不跟开关走; 位置跟
-    // T9SyllableInitials.apply() 同一处, 部署/同步/重置都播)。
-    // 失败不阻断部署, 只记日志, 下次部署再试。
+    // 内置种子词清理 (build #53 回归修复): #53 播进 custom_phrase.txt
+    // 的 22 个内置词以 quality 99 压过了词典词和用户学习 (96 在哪盖住
+    // “我”), 播种已下线; 这里一次性清掉残留 (只删与种子 (词, 码) 完全
+    // 一致的条目, 用户自己的短语保留)。位置跟 T9SyllableInitials.apply()
+    // 同一处, 部署/同步/重置都跑; 清完要点「重新部署」才生效。
+    UserDefaults.hamster.migrateCustomPhrasesRemoveSeededBuiltinsIfNeeded()
+
+    // 补充词典 (build #53 回归修复第 3 项: QQ 走正经词典机制, 理由同 deployment;
+    // 重置清空了沙盒用户数据目录, 这里把文件和补丁打回来, 否则下面沙盒 ->
+    // App Group 的同步会把 App Group 里的文件和补丁也删掉)。
+    // 失败不阻断重置, 只记日志, 下次部署再试。
     do {
-      try BuiltInCustomPhrases.seed()
+      try SupplementalDictionary.ensureFiles()
+      try SupplementalDictionary.apply()
     } catch {
-      Logger.statistics.error("RIME reset built-in custom phrases seed error \(error.localizedDescription)")
+      Logger.statistics.error("RIME reset supplemental dictionary error \(error.localizedDescription)")
     }
 
     // 部署后将方案copy至AppGroup下供keyboard使用

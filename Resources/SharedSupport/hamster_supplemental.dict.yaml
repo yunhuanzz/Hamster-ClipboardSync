@@ -1,0 +1,18 @@
+# Rime dictionary
+# encoding: utf-8
+#
+# Hamster 补充词典: 只放正经词典机制里缺失、又不能走 custom_phrase
+# (initial_quality 99 会压过一切学习) 的词。目前只有 QQ:
+# en.dict 里有 QQ (QQ QQ, 无权重), 但 t9 的 melt_eng 是注释掉的,
+# 且英文词条是大写码、无权重, 数字派生规则又是小写, 77 永远推不出它。
+# 这里给它一个真实权重, 按权重正常排 (build #53 回归修复)。
+# 权重 1000000: 77 的顶栏对手是事实 510349 / 商品 502008,
+# 1M 刚好压过它们; 26 键 qq 的对手更多 (全球 500709 等),
+# 靠翻译器排在列表最前 (见 SupplementalDictionary 的 @before 0)
+# + 这个权重拿 #1。
+---
+name: hamster_supplemental
+version: "2026-11-26"
+sort: by_weight
+...
+QQ	qq	1000000

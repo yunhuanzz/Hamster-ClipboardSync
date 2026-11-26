@@ -1,0 +1,18 @@
+# Hamster 补充词典的方案文件: 唯一作用是让部署器编译
+# hamster_supplemental.dict.yaml + hamster_supplemental.prism.bin。
+# 不作为输入方案 (不在设置里出现, 用户也选不到它; 部署时
+# RimeContext 的 schema_list 补齐逻辑会自动把它并进 schema_list,
+# 只加不减)。
+# __include t9: 借 t9 的 speller 代数建 prism (数字 77 要能查到 QQ);
+# translator/prism 必须显式写自己的名字——继承 t9 的 prism: t9 会把
+# t9.prism.bin 覆盖成 1440 字节 (r53 rig 实测)。
+__include: t9.schema.yaml:/
+
+schema:
+  schema_id: hamster_supplemental
+  name: hamster_supplemental
+  version: "2026-11-26"
+
+translator:
+  dictionary: hamster_supplemental
+  prism: hamster_supplemental

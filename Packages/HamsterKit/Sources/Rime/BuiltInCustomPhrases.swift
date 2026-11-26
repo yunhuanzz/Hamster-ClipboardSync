@@ -2,6 +2,15 @@
 //  BuiltInCustomPhrases.swift
 //  HamsterKit
 //
+//  【已下线】播种已删除 (build #53 回归修复, 2026-11-26):
+//  这 22 个词曾由 seed() 播进 custom_phrase.txt, 结果 custom_phrase
+//  的 initial_quality 99 让它们在最短 9 键码上压过词典词和用户学习
+//  (96“在哪”盖住“我”, 打多少次都上不了 #1; 忘词删不掉; 置顶没用),
+//  seed() 已删除, 本文件只剩清理清单的用途:
+//  migrateCustomPhrasesRemoveSeededBuiltinsIfNeeded() 按 (词, 码)
+//  精确匹配清掉残留。哈哈走 T9SyllableInitials 的 derive 规则,
+//  QQ 走正经词典机制, 不再走 quality 99 的补位。
+//
 //  内置自定义短语 (第 3 项: 44 哈哈 / 77 QQ 的系统性修复):
 //  一组日常词, 靠 T9SyllableInitials 的 derive 规则出不来
 //  (不是权重低, 是机制问题——见下), 所以走 custom_phrase 补位。
@@ -51,24 +60,21 @@
 //  29 的 14 个阿字名字 (阿伟/阿星等): 权重低、候选池变大后被挤到
 //    3000 名开外, 是深度问题不是机制问题, 名字不值得逐个补位。
 //
-//  行为:
-//  seed() 在部署/同步/重置时由 RimeContext 调用 (跟
-//  T9SyllableInitials.apply() 同位置), 把缺失的内置词写进两个
-//  用户数据目录 (沙盒 + App Group) 的 custom_phrase.txt, 再由
+//  行为 (已下线, 仅留档说明为什么不能播种):
+//  seed() 曾在部署/同步/重置时由 RimeContext 调用, 把缺失的内置词
+//  写进两个用户数据目录的 custom_phrase.txt, 再由
 //  CustomPhraseStore.save() 同步生成 custom_phrase_t9.txt。
-//  已存在的词 (用户改过码/权重, 或用户自己加过同名) 不动;
-//  用户删掉的内置词下次部署会回来 (按词名合并, 无法区分“没播过”
-//  和“用户删了”——接受这点, 这些词本来就是用户要的)。
-//  内容没变不重写 (不碰 mtime, 免得下次部署误判配置变了)。
-//  失败由调用方记日志、不阻断部署 (跟 T9SyllableInitials 同款)。
-//  改完需要点「重新部署」才生效 (跟“我的词组”一样)。
-//  注意: 播进去的词在 26 键下也生效 (同名同码): 如 26 键 qq
-//  出 QQ #1、kk 出 哭哭 #1, 是同一批词, 不是两套。
+//  已存在的词不动; 用户删掉的内置词下次部署会回来 (按词名合并)。
+//  这正是回归的根: 种子词编进 custom_phrase.userdb 后 quality ≈ 99,
+//  在短码上压过一切, 且忘词/置顶都动不了它。
+//  现在: seed() 已删除; 清理走
+//  migrateCustomPhrasesRemoveSeededBuiltinsIfNeeded(), 按 (词, 码)
+//  精确匹配删残留, 用户自己的短语保留; 清完要点「重新部署」才生效。
 //
 
 import Foundation
 
-/// 内置自定义短语 (第 3 项补位)。code 是首字母码
+/// 内置种子词表 (仅作清理清单, 不再播种)。code 是首字母码
 /// (设施例外, 见上); weight 只是标记, 不影响排名。
 public enum BuiltInCustomPhrases {
   public static let phrases: [CustomPhrase] = [
@@ -98,21 +104,4 @@ public enum BuiltInCustomPhrases {
     // 的 must-not-regress 项), 所以补位 (33 #1-2, 与 嗯嗯 并列顶栏)。
     CustomPhrase(word: "都得", code: "dd"),
   ]
-
-  /// 把缺失的内置词播进两个用户数据目录 (沙盒 + App Group),
-  /// 与 T9SyllableInitials.apply() 同款两目录写法。
-  public static func seed() throws {
-    for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
-      try FileManager.createDirectory(override: false, dst: dir)
-      var existing = CustomPhraseStore.load(from: dir)
-      var changed = false
-      for phrase in phrases where !existing.contains(where: { $0.word == phrase.word }) {
-        existing.append(phrase)
-        changed = true
-      }
-      if changed {
-        try CustomPhraseStore.save(existing, to: dir)
-      }
-    }
-  }
 }

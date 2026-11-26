@@ -85,8 +85,8 @@ public enum CustomPhraseStore {
     load(from: FileManager.appGroupUserDataDirectoryURL)
   }
 
-  /// 读出指定目录下的全部自定义词组 (供 BuiltInCustomPhrases.seed()
-  /// 两目录播种用; 沙盒目录那份是部署时从 App Group 拷过去的)。
+  /// 读出指定目录下的全部自定义词组 (供清理迁移两目录读写用;
+  /// 沙盒目录那份是部署时从 App Group 拷过去的)。
   public static func load(from directory: URL) -> [CustomPhrase] {
     guard let content = try? String(contentsOf: directory.appendingPathComponent(fileName), encoding: .utf8) else {
       return []
@@ -102,8 +102,7 @@ public enum CustomPhraseStore {
     try save(phrases, to: FileManager.appGroupUserDataDirectoryURL)
   }
 
-  /// 保存全部自定义词组到指定目录 (供 BuiltInCustomPhrases.seed()
-  /// 两目录播种用)。
+  /// 保存全部自定义词组到指定目录 (供清理迁移两目录读写用)。
   public static func save(_ phrases: [CustomPhrase], to directory: URL) throws {
     var content = fileHeader
     for phrase in phrases {
