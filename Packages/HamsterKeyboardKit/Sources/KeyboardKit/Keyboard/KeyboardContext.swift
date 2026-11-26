@@ -492,20 +492,44 @@ public class KeyboardContext: ObservableObject {
     hamsterConfiguration?.keyboard?.lockShiftState ?? true
   }
 
-  /// 光标回退
+  /// 内置成对符号全表 (第 17 轮反馈): 用户配置 (hamster.yaml) 优先,
+  /// 代码表兜底——老用户配置不自动更新, 只改 YAML 不够
+  /// (见 swipeUpDistanceThreshold 的教训)。
+  /// ASCII 单引号 '' 不在表里: 英文里它是缩写撇 (don't), 配对会打坏单词;
+  /// 中文单引号 ‘’ 是独立开闭符, 可以配对。
+  static let builtinPairSymbols: [String] = [
+    "[]", "()", "{}", "（）", "【】", "「」", "『』",
+    "《》", "〈〉", "〔〕", "［］", "\"\"", "“”", "‘’",
+  ]
+
+  /// 光标回退: 成对符号上屏后光标回到中间。
+  /// 配置表优先, 内置表兜底 (与 getPairSymbols 同理)。
   func cursorBackOfSymbols(key: String) -> Bool {
     if hamsterConfiguration?.keyboard?.symbolsOfCursorBack?.contains(key) ?? false {
       return true
     }
-    return false
+    return Self.builtinPairSymbols.contains(key)
   }
 
-  /// 成对上屏符号
+  /// 成对上屏符号: 输入是某对符号的开符号时返回整对, 否则原样返回。
+  /// 配置表优先, 内置表兜底。空键直接原样返回 (空串是所有串的前缀,
+  /// 不守住会误配成第一对)。
   func getPairSymbols(_ key: String) -> String {
+    guard !key.isEmpty else { return key }
     if let pairValue = hamsterConfiguration?.keyboard?.pairsOfSymbols?.first(where: { $0.hasPrefix(key) }) {
       return pairValue
     }
+    if let pairValue = Self.builtinPairSymbols.first(where: { $0.hasPrefix(key) }) {
+      return pairValue
+    }
     return key
+  }
+
+  /// 该键是不是某个成对符号的闭符号 (按到闭符号时越过用)。
+  func isPairedSymbolCloser(_ key: String) -> Bool {
+    guard key.count == 1 else { return false }
+    let pairs = (hamsterConfiguration?.keyboard?.pairsOfSymbols ?? []) + Self.builtinPairSymbols
+    return pairs.contains(where: { $0.hasSuffix(key) && $0.count == 2 })
   }
 
   /// 返回主键盘

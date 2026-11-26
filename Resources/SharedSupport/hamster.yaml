@@ -96,9 +96,20 @@ keyboard:
   enableEmbeddedInputMode: false
   widthOfOneHandedKeyboard: 80
   symbolsOfCursorBack:
+    - "[]"
+    - "()"
+    - "{}"
+    - "（）"
+    - "【】"
+    - "「」"
+    - "『』"
+    - "《》"
+    - "〈〉"
+    - "〔〕"
+    - "［］"
     - '""'
     - "“”"
-    - "[]"
+    - "‘’"
   symbolsOfReturnToMainKeyboard:
     - "，"
     - "。"
@@ -114,8 +125,19 @@ keyboard:
     - "、"
   pairsOfSymbols:
     - "[]"
-    - ()
+    - "()"
+    - "{}"
+    - "（）"
+    - "【】"
+    - "「」"
+    - "『』"
+    - "《》"
+    - "〈〉"
+    - "〔〕"
+    - "［］"
+    - '""'
     - "“”"
+    - "‘’"
   enableSymbolKeyboard: true
   lockForSymbolKeyboard: false
 

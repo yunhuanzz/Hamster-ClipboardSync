@@ -321,23 +321,63 @@ class KeyboardToolbarView: NibLessView {
   /// 关闭后回到底下的剪贴板面板, 第 17 轮第 6 项)
   private var expandedClipboardView: KeyboardClipboardExpandedView?
 
-  /// 临时复制工具图标 (第 17 轮第 5 项): 粘贴提示行正在展示时用户开始打字,
+  /// 临时复制工具图标 (第 17 轮第 5 项, 反馈修): 粘贴提示行正在展示时用户开始打字,
   /// 临时复制图标: 裸图标, 与其他工具栏工具一致 (无背景, 无边框)。
   /// 微信的白圆按钮成立, 是因为它的工具都有白色背景; 我们的工具没有背景色,
   /// 照搬白圆反而破坏统一, 所以这里只靠图标本身区分:
-  /// 粘贴形图标 doc.on.clipboard vs 剪贴板的 list.bullet.clipboard。
+  /// 手画的"文档 + 带横线剪贴板" vs 剪贴板的 list.bullet.clipboard。
   /// 点按打开复制内容 (分段面板), 打开后无论粘贴与否图标都收掉 (一次性)。
   private lazy var tempCopyButton: UIButton = {
     let button = UIButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setImage(UIImage(systemName: "doc.on.clipboard"), for: .normal)
-    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 14, weight: .semibold), scale: .default), forImageIn: .normal)
+    button.setImage(Self.makeTempCopyIcon(), for: .normal)
     button.tintColor = .label
     button.backgroundColor = .clear
     button.isHidden = true
     button.addTarget(self, action: #selector(tempCopyButtonTapped), for: .touchUpInside)
     return button
   }()
+
+  /// 临时复制图标 (手画, 第 17 轮反馈): 系统图标 doc.on.clipboard 背后那块
+  /// 剪贴板是实心黑块, 用户觉得太黑; 系统图标改不了线条, 所以按同样的
+  /// 构图手画一枚——前面一张白底文档, 后面一块带横线的剪贴板 (描边 + 夹子 + 3 条横线)。
+  /// 显式颜色 (.label 描边 / .systemBackground 文档底), 深浅模式自适应;
+  /// 不是模板图, tintColor 不起作用。
+  private static func makeTempCopyIcon() -> UIImage {
+    let size = CGSize(width: 24, height: 24)
+    let renderer = UIGraphicsImageRenderer(size: size)
+    return renderer.image { context in
+      let ctx = context.cgContext
+      let lineColor = UIColor.label
+      let docFill = UIColor.systemBackground
+      // 后面: 剪贴板 (描边 + 夹子 + 3 条横线)
+      let board = UIBezierPath(
+        roundedRect: CGRect(x: 10, y: 2.5, width: 12, height: 16.5), cornerRadius: 2.5)
+      board.lineWidth = 1.5
+      lineColor.setStroke()
+      board.stroke()
+      let clip = UIBezierPath(
+        roundedRect: CGRect(x: 14, y: 1, width: 5, height: 3.5), cornerRadius: 1.5)
+      lineColor.setFill()
+      clip.fill()
+      ctx.setStrokeColor(lineColor.cgColor)
+      ctx.setLineWidth(1.3)
+      ctx.setLineCap(.round)
+      for y in [8.5, 12.0, 15.5] {
+        ctx.move(to: CGPoint(x: 13, y: y))
+        ctx.addLine(to: CGPoint(x: 19.5, y: y))
+      }
+      ctx.strokePath()
+      // 前面: 文档 (白底 + 描边), 盖住剪贴板左下角
+      let doc = UIBezierPath(
+        roundedRect: CGRect(x: 2, y: 7, width: 11.5, height: 15), cornerRadius: 2)
+      docFill.setFill()
+      doc.fill()
+      doc.lineWidth = 1.5
+      lineColor.setStroke()
+      doc.stroke()
+    }
+  }
 
   /// 折叠进临时图标的那条复制内容 (nil 表示没有折叠态)。
   private var tempCopyText: String?
@@ -599,10 +639,13 @@ class KeyboardToolbarView: NibLessView {
           addSubview(candidateBarView)
           candidateBarView.fillSuperview()
         }
-        // 联想链走完、栏收起后回到“没输入”态, 粘贴提示按老逻辑恢复。
+        // 联想链走完、栏收起后回到“没输入”态, 粘贴提示按老逻辑恢复
+        // (折叠态在时不收图标、不恢复提示行, 第 17 轮反馈修)。
         if !showCandidateBar, self.rimeContext.userInputKey.isEmpty {
-          self.hideTempCopyIcon()
-          self.showClipboardChipFromCache()
+          if self.tempCopyText == nil {
+            self.hideTempCopyIcon()
+            self.showClipboardChipFromCache()
+          }
         } else if showCandidateBar {
           // 联想/纠错出现 (或正在输入): 工具栏收起, 粘贴提示行随之收起,
           // 折成临时复制图标 (第 17 轮第 5 项)。
@@ -630,8 +673,12 @@ class KeyboardToolbarView: NibLessView {
     // 未输入时用缓存展示粘贴提示 (绝不读剪贴板, 打字不再弹"粘贴自xxx"横幅);
     // 开始输入后工具栏隐藏, 提示随之隐藏 (折成临时复制图标, 第 17 轮第 5 项)。
     if isEmpty {
-      self.hideTempCopyIcon()
-      self.showClipboardChipFromCache()
+      // 折叠态在时不收图标、不恢复提示行 (第 17 轮反馈修): 打字后
+      // 提示行不再弹出来, 图标一直留着直到点开。
+      if self.tempCopyText == nil {
+        self.hideTempCopyIcon()
+        self.showClipboardChipFromCache()
+      }
     } else {
       self.collapsePasteRowToTempIconIfNeeded()
       self.hideClipboardChip()
@@ -1693,6 +1740,18 @@ class KeyboardToolbarView: NibLessView {
       hideClipboardChip()
       return
     }
+    // 打字折进临时图标的内容: 键盘重建后图标还在, 提示行不再重推同一条
+    // 内容 (第 17 轮反馈修)。
+    #if canImport(UIKit)
+      if let folded = UserDefaults.hamster.tempCopyFoldedText,
+         folded == text,
+         UserDefaults.hamster.tempCopyFoldedChangeCount == UIPasteboard.general.changeCount
+      {
+        tempCopyText = folded
+        showTempCopyIcon()
+        return
+      }
+    #endif
     // 已粘贴/忽略过的内容不再重复提示, 直到剪贴板换成新内容。
     // 忽略记录持久化在共享 UserDefaults 里, 键盘重建 (隐藏再打开) 也不会丢。
     #if canImport(UIKit)
@@ -1745,6 +1804,11 @@ class KeyboardToolbarView: NibLessView {
       return
     }
     hideTempCopyIcon()
+    // 点开以后不管粘不粘贴都不再显示 (第 17 轮反馈修): 先把这条内容
+    // 记为已忽略, 关面板不粘贴也不会让提示行把它重新推出来。
+    UserDefaults.hamster.markClipboardChipDismissed(
+      hash: ClipboardSyncService.sha256(text),
+      changeCount: currentPasteboardChangeCount)
     showPasteSegmentsPanel(text: text)
   }
 
@@ -1754,6 +1818,10 @@ class KeyboardToolbarView: NibLessView {
   private func collapsePasteRowToTempIconIfNeeded() {
     guard tempCopyText == nil, isPasteRowVisible, let text = clipboardChipText, !text.isEmpty else { return }
     tempCopyText = text
+    // 折叠态持久化 (第 17 轮反馈修): 输入清空、键盘重建后图标都还在,
+    // 提示行不再把同一条内容重新推出来。
+    UserDefaults.hamster.tempCopyFoldedText = text
+    UserDefaults.hamster.tempCopyFoldedChangeCount = currentPasteboardChangeCount
     showTempCopyIcon()
   }
 
@@ -1764,10 +1832,12 @@ class KeyboardToolbarView: NibLessView {
     bringSubviewToFront(tempCopyButton)
   }
 
-  /// 收掉临时复制图标并清掉折叠的内容。
+  /// 收掉临时复制图标并清掉折叠的内容 (内存 + 持久化折叠态)。
   private func hideTempCopyIcon() {
     tempCopyButton.isHidden = true
     tempCopyText = nil
+    UserDefaults.hamster.tempCopyFoldedText = nil
+    UserDefaults.hamster.tempCopyFoldedChangeCount = -1
   }
 
   /// 打开粘贴内容分段展开面板 (覆盖在键盘根视图上):
@@ -1923,6 +1993,14 @@ class KeyboardToolbarView: NibLessView {
       UserDefaults.hamster.commonPhrases = phrases
       self?.refreshClipboardPhrasesPanel()
     }
+    panel.onAddClipboardToPhrases = { [weak self] text in
+      guard !text.isEmpty else { return }
+      var phrases = UserDefaults.hamster.commonPhrases
+      guard !phrases.contains(text) else { return }
+      phrases.append(text)
+      UserDefaults.hamster.commonPhrases = phrases
+      self?.refreshClipboardPhrasesPanel()
+    }
     panel.onEditPhrase = { [weak self] index in
       guard let self else { return }
       self.dismissTextListPanel()
@@ -1981,13 +2059,6 @@ class KeyboardToolbarView: NibLessView {
       self.dismissTextListPanel()
       self.insertPanelText(selected)
       UserDefaults.hamster.recordClipboardHistory(selected)
-    }
-    panel.onPasteAll = { [weak self] in
-      guard let self else { return }
-      self.dismissExpandedClipboardView()
-      self.dismissTextListPanel()
-      self.insertPanelText(text)
-      UserDefaults.hamster.recordClipboardHistory(text)
     }
     panel.onClose = { [weak self] in self?.dismissExpandedClipboardView() }
     panel.translatesAutoresizingMaskIntoConstraints = false

@@ -4,7 +4,9 @@
 //  键盘内剪贴板 / 常用语二合一面板 (仿微信输入法剪贴板工具, 第 13 轮重做)。
 //  顶部是 [剪贴板 | 常用语] 分段切换 (UISegmentedControl), 两页共用一个面板:
 //  每条内容一张白底圆角卡片 (浅色下 .systemBackground 白底、圆角 12pt),
-//  每条右上角 ⋮ 菜单 (粘贴 / 删除; 常用语页另有编辑)。
+//  每条右上角 ⋮ 菜单 (剪贴板页: + 常用语 / 删除; 常用语页: 编辑 / 删除;
+//  自定义弹出菜单, 字号 14——系统 UIMenu 字号改不了, 且挂在 cell 上会被
+//  同步每秒一拍的 reloadData() 杀掉, 点开就自动关闭, 见 showMoreMenu)。
 //  点卡片把文本输入到当前输入框 (并关闭面板); 剪贴板页保留同步状态行
 //  ("11:03 同步成功" + "立即同步"药丸按钮, 不再是两行裸链接); 常用语页
 //  的操作行是"管理常用语"药丸按钮 (打开键盘内常用语管理面板)。
@@ -43,6 +45,8 @@ class KeyboardTextListPanelView: NibLessView {
   var onExpandClipboardItem: ((String) -> Void)?
   /// 剪贴板页删一条时的回调 (由调用方从存储中删除并刷新列表, 面板保持打开)。
   var onDeleteClipboardItem: ((Int) -> Void)?
+  /// 剪贴板页 ⋮→+ 常用语时的回调 (由调用方把文本加入 commonPhrases 并刷新列表)。
+  var onAddClipboardToPhrases: ((String) -> Void)?
   /// 选中常用语页的一条时的回调 (由调用方把文本输入到输入框并关闭面板)。
   var onSelectPhrase: ((String) -> Void)?
   /// 常用语页删一条时的回调 (由调用方从存储中删除并刷新列表, 面板保持打开)。
@@ -62,6 +66,12 @@ class KeyboardTextListPanelView: NibLessView {
   private var currentPage: Page
   private var clipboardItems: [String] = []
   private var phraseItems: [String] = []
+
+  /// 自定义 ⋮ 弹出菜单与点外收掉的透明遮罩 (挂在面板上, 不是 cell 里,
+  /// 所以列表 reloadData() 关不掉它——第 17 轮反馈修)。
+  private var moreMenuView: KeyboardTextListMoreMenuView?
+  private var moreMenuDismissOverlay: UIButton?
+  private weak var moreMenuAnchorCell: KeyboardTextListCardCell?
 
   /// 当前页的数据源 (切段时换, 回调按页分流, 不会串味)。
   private var currentItems: [String] {
@@ -334,6 +344,7 @@ class KeyboardTextListPanelView: NibLessView {
   }
 
   @objc private func segmentChanged() {
+    dismissMoreMenu()
     currentPage = segmentedControl.selectedSegmentIndex == 0 ? .clipboard : .phrases
     updateActionRow()
     reloadCurrentPage()
@@ -361,32 +372,87 @@ class KeyboardTextListPanelView: NibLessView {
     return indexPath.row
   }
 
-  /// 某条卡片的 ⋮ 菜单: 粘贴 / 删除; 常用语页另有编辑。
+  /// 点卡片右上角 ⋮: 弹出自定义菜单 (第 17 轮反馈修, 替代系统 UIMenu)。
+  /// 换掉的原因: 系统菜单挂在 cell 的按钮上, 同步每秒一拍的
+  /// reloadData() 会重建 cell、把菜单一起杀掉, 点开就自动关闭;
+  /// 自定义菜单挂在面板上 (不是 cell 的一部分), 列表刷新也关不掉它,
+  /// 而且字号能自己定 (14pt, 系统菜单改不了字号)。
+  /// 剪贴板页: [+ 常用语, 删除] (粘贴没必要——点卡片就是粘贴);
+  /// 常用语页: [编辑, 删除] (粘贴同样没必要)。
   /// 行号不在建菜单时定死, 点下时按 cell 反查最新行号 (见 resolveRow)。
-  private func moreMenu(for cell: KeyboardTextListCardCell, text: String) -> UIMenu {
-    let paste = UIAction(title: "粘贴", image: UIImage(systemName: "doc.on.clipboard")) { [weak self, weak cell] _ in
-      guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
-      self.selectItem(at: row)
+  private func showMoreMenu(for cell: KeyboardTextListCardCell, text: String) {
+    // 同一行的菜单已开着: 再点 ⋮ 就收掉 (开关)。
+    if moreMenuView != nil, moreMenuAnchorCell === cell {
+      dismissMoreMenu()
+      return
     }
-    let delete = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self, weak cell] _ in
-      guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
-      switch self.currentPage {
-      case .clipboard:
-        self.onDeleteClipboardItem?(row)
-      case .phrases:
-        self.onDeletePhrase?(row)
-      }
-    }
+    dismissMoreMenu()
+    let rows: [KeyboardTextListMoreMenuView.Row]
     switch currentPage {
     case .clipboard:
-      return UIMenu(title: "", children: [paste, delete])
+      rows = [
+        .init(title: "+ 常用语", systemImageName: "plus", isDestructive: false) { [weak self, weak cell] in
+          guard let self, let cell, self.resolveRow(for: cell, expectedText: text) != nil else { return }
+          self.dismissMoreMenu()
+          self.onAddClipboardToPhrases?(text)
+        },
+        .init(title: "删除", systemImageName: "trash", isDestructive: true) { [weak self, weak cell] in
+          guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
+          self.dismissMoreMenu()
+          self.onDeleteClipboardItem?(row)
+        },
+      ]
     case .phrases:
-      let edit = UIAction(title: "编辑", image: UIImage(systemName: "square.and.pencil")) { [weak self, weak cell] _ in
-        guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
-        self.onEditPhrase?(row)
-      }
-      return UIMenu(title: "", children: [paste, edit, delete])
+      rows = [
+        .init(title: "编辑", systemImageName: "square.and.pencil", isDestructive: false) { [weak self, weak cell] in
+          guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
+          self.dismissMoreMenu()
+          self.onEditPhrase?(row)
+        },
+        .init(title: "删除", systemImageName: "trash", isDestructive: true) { [weak self, weak cell] in
+          guard let self, let cell, let row = self.resolveRow(for: cell, expectedText: text) else { return }
+          self.dismissMoreMenu()
+          self.onDeletePhrase?(row)
+        },
+      ]
     }
+    // 点外收掉的透明遮罩 (盖住整个面板, 在菜单下面)。
+    let overlay = UIButton(type: .custom)
+    overlay.backgroundColor = .clear
+    overlay.translatesAutoresizingMaskIntoConstraints = false
+    overlay.addTarget(self, action: #selector(dismissMoreMenu), for: .touchUpInside)
+    addSubview(overlay)
+    overlay.fillSuperview()
+    moreMenuDismissOverlay = overlay
+    // 菜单: 宽 180, 贴在 ⋮ 按钮右下角; 下面不够就翻到按钮上面。
+    let menu = KeyboardTextListMoreMenuView(rows: rows)
+    addSubview(menu)
+    let menuWidth: CGFloat = 180
+    let menuHeight = CGFloat(rows.count * 40 + 12)
+    let buttonFrame = cell.moreButton.convert(cell.moreButton.bounds, to: self)
+    var x = buttonFrame.maxX - menuWidth
+    x = max(12, min(x, bounds.width - menuWidth - 12))
+    var y = buttonFrame.maxY + 6
+    if y + menuHeight > bounds.height - 12 {
+      y = buttonFrame.minY - 6 - menuHeight
+    }
+    y = max(12, y)
+    NSLayoutConstraint.activate([
+      menu.leadingAnchor.constraint(equalTo: leadingAnchor, constant: x),
+      menu.topAnchor.constraint(equalTo: topAnchor, constant: y),
+      menu.widthAnchor.constraint(equalToConstant: menuWidth),
+    ])
+    moreMenuView = menu
+    moreMenuAnchorCell = cell
+  }
+
+  /// 收掉自定义 ⋮ 菜单 (点外 / 点选项 / 切段时调)。
+  @objc private func dismissMoreMenu() {
+    moreMenuView?.removeFromSuperview()
+    moreMenuView = nil
+    moreMenuDismissOverlay?.removeFromSuperview()
+    moreMenuDismissOverlay = nil
+    moreMenuAnchorCell = nil
   }
 
   /// 同步完成: 刷新状态文字, 并通知调用方刷新列表 (下载的新内容可能已写入剪贴板)。
@@ -434,8 +500,10 @@ extension KeyboardTextListPanelView: UITableViewDataSource {
     cardCell.onExtractedItemTap = { [weak self] itemText in
       self?.onSelectExtractedItem?(itemText)
     }
-    // ⋮ 菜单按当前行现建 (复用时重建, 不会串到上一行); 点下时再反查最新行号。
-    cardCell.moreButton.menu = moreMenu(for: cardCell, text: text)
+    // ⋮ 点按弹出自定义菜单 (挂在面板上, 列表刷新也关不掉它; 第 17 轮反馈修)。
+    cardCell.onMoreButtonTap = { [weak self] cell in
+      self?.showMoreMenu(for: cell, text: text)
+    }
     return cardCell
   }
 }
@@ -444,6 +512,64 @@ extension KeyboardTextListPanelView: UITableViewDelegate {
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
     tableView.deselectRow(at: indexPath, animated: true)
     selectItem(at: indexPath.row)
+  }
+}
+
+/// 卡片右上角 ⋮ 的自定义弹出菜单 (第 17 轮反馈修, 替代系统 UIMenu)。
+/// 白底圆角卡片 + 图标 + 14pt 文字, 与剪贴板卡片同一套样式;
+/// 点选项执行动作后收掉, 点外面 (面板上的透明遮罩) 也收掉。
+private final class KeyboardTextListMoreMenuView: UIView {
+  struct Row {
+    let title: String
+    let systemImageName: String
+    let isDestructive: Bool
+    let action: () -> Void
+  }
+
+  private let stackView: UIStackView = {
+    let stack = UIStackView()
+    stack.axis = .vertical
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }()
+
+  init(rows: [Row]) {
+    super.init(frame: .zero)
+    backgroundColor = .systemBackground
+    layer.cornerRadius = 12
+    layer.borderWidth = 1
+    layer.borderColor = UIColor.systemGray4.cgColor
+    layer.shadowColor = UIColor.black.cgColor
+    layer.shadowOpacity = 0.15
+    layer.shadowRadius = 8
+    layer.shadowOffset = CGSize(width: 0, height: 2)
+    translatesAutoresizingMaskIntoConstraints = false
+    addSubview(stackView)
+    NSLayoutConstraint.activate([
+      stackView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+      stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+      stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+      stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+    ])
+    for row in rows {
+      let button = UIButton(type: .system)
+      button.setTitle(row.title, for: .normal)
+      button.setImage(UIImage(systemName: row.systemImageName), for: .normal)
+      button.titleLabel?.font = .systemFont(ofSize: 14)
+      button.contentHorizontalAlignment = .left
+      button.imageEdgeInsets = UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 0)
+      button.titleEdgeInsets = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+      button.tintColor = row.isDestructive ? .systemRed : .label
+      button.translatesAutoresizingMaskIntoConstraints = false
+      button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+      button.addAction(UIAction { _ in row.action() }, for: .touchUpInside)
+      stackView.addArrangedSubview(button)
+    }
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
   }
 }
 
@@ -539,22 +665,28 @@ private final class KeyboardTextListCardCell: UITableViewCell {
     extractedStackHeightConstraint?.constant = items.isEmpty ? 0 : 22
   }
 
-  /// 右上角 ⋮: 点按弹出菜单 (UIMenu, iOS 14+; 部署目标 15.0)。
-  /// 菜单由面板在 cellForRowAt 里按当前行现建。
+  /// 点右上角 ⋮ 时的回调 (由面板弹出自定义菜单, 见 showMoreMenu)。
+  var onMoreButtonTap: ((KeyboardTextListCardCell) -> Void)?
+
+  /// 右上角 ⋮: 点按弹出自定义菜单 (面板上的浮层, 不是系统 UIMenu)。
   let moreButton: UIButton = {
     let button = UIButton(type: .system)
     button.setTitle("⋮", for: .normal)
     button.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
     button.setTitleColor(.secondaryLabel, for: .normal)
-    button.showsMenuAsPrimaryAction = true
     button.translatesAutoresizingMaskIntoConstraints = false
     return button
   }()
+
+  @objc private func moreButtonTapped() {
+    onMoreButtonTap?(self)
+  }
 
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
     super.init(style: style, reuseIdentifier: reuseIdentifier)
     backgroundColor = .clear
     selectionStyle = .none
+    moreButton.addTarget(self, action: #selector(moreButtonTapped), for: .touchUpInside)
     contentView.addSubview(cardView)
     cardView.addSubview(contentLabel)
     cardView.addSubview(extractedStackView)
@@ -593,8 +725,8 @@ private final class KeyboardTextListCardCell: UITableViewCell {
   override func prepareForReuse() {
     super.prepareForReuse()
     contentLabel.text = nil
-    moreButton.menu = nil
     setExtractedItems([])
     onExtractedItemTap = nil
+    onMoreButtonTap = nil
   }
 }

@@ -1302,27 +1302,49 @@ private extension KeyboardInputViewController {
 
   /// 上屏补丁：增加了成对符号/光标回退/返回主键盘的支持
   func insertTextPatch(_ insertText: String) {
-    // 替换为成对符号
-    let text = keyboardContext.getPairSymbols(insertText)
+    // 成对符号 (第 17 轮反馈): 开括号/开引号按一下时,
+    // 光标后面没字 → 打一对, 光标移到中间; 光标后面有字 → 只打一边。
+    // 闭符号 + 后面正好是它 → 直接越过, 不重复打。
+    // 有选区时开符号包住选区 (沿用老逻辑)。
+    let afterText = textDocumentProxy.documentContextAfterInput ?? ""
+    let isTypeOver =
+      insertText.count == 1
+      && keyboardContext.isPairedSymbolCloser(insertText)
+      && afterText.first.map(String.init) == insertText
+    if isTypeOver {
+      // 闭符号越过: 后面正好是同一个闭符号, 光标右移一位, 不插入。
+      adjustTextPosition(byCharacterOffset: 1)
+    } else {
+      // 开符号配对: 有选区 → 包住选区; 后面没字 → 打一对; 后面有字 → 只打一边。
+      let pair = keyboardContext.getPairSymbols(insertText)
+      let isOpener = insertText.count == 1 && pair != insertText
+      let selectedText = textDocumentProxy.selectedText ?? ""
+      let text: String
+      if isOpener, (!selectedText.isEmpty || afterText.isEmpty) {
+        text = pair
+      } else {
+        text = insertText
+      }
 
-    // 检测光标是否需要回退
-    if keyboardContext.cursorBackOfSymbols(key: text) {
-      // 检测是否有选中的文字，可以居中的光标将自动包裹选中的文本
-      if text.count > 0, text.count % 2 == 0 {
-        let selectText = textDocumentProxy.selectedText ?? ""
-        let halfLength = text.count / 2
-        let firstHalf = String(text.prefix(halfLength))
-        let secondHalf = String(text.suffix(halfLength))
-        textDocumentProxy.insertText("\(firstHalf)\(selectText)\(secondHalf)")
-        // 如果选中的文字为空，将光标挪到中间，否则不用移动
-        let offset = selectText.count == 0 ? halfLength : 0
-        self.adjustTextPosition(byCharacterOffset: -offset)
+      // 检测光标是否需要回退
+      if keyboardContext.cursorBackOfSymbols(key: text) {
+        // 检测是否有选中的文字，可以居中的光标将自动包裹选中的文本
+        if text.count > 0, text.count % 2 == 0 {
+          let selectText = textDocumentProxy.selectedText ?? ""
+          let halfLength = text.count / 2
+          let firstHalf = String(text.prefix(halfLength))
+          let secondHalf = String(text.suffix(halfLength))
+          textDocumentProxy.insertText("\(firstHalf)\(selectText)\(secondHalf)")
+          // 如果选中的文字为空，将光标挪到中间，否则不用移动
+          let offset = selectText.count == 0 ? halfLength : 0
+          self.adjustTextPosition(byCharacterOffset: -offset)
+        } else {
+          textDocumentProxy.insertText(text)
+          self.adjustTextPosition(byCharacterOffset: -1)
+        }
       } else {
         textDocumentProxy.insertText(text)
-        self.adjustTextPosition(byCharacterOffset: -1)
       }
-    } else {
-      textDocumentProxy.insertText(text)
     }
 
     // 检测是否需要返回主键盘

@@ -526,6 +526,33 @@ public extension UserDefaults {
     set { set(newValue, forKey: Self.clipboardLastSeenTextTruncatedKey) }
   }
 
+  // MARK: - 临时复制图标折叠态 (第 17 轮反馈修: 打字后折叠的图标不再消失)
+
+  /// 打字时折进临时复制图标的那条剪贴板文本 (持久化)。
+  /// 用户一打字, 粘贴提示行就折成图标; 之后输入清空、键盘重建,
+  /// 图标都还在, 提示行不再把同一条内容重新推出来; 直到点开图标、
+  /// 粘贴、忽略, 或剪贴板换了新内容, 折叠态才清掉。
+  var tempCopyFoldedText: String? {
+    get { string(forKey: Self.tempCopyFoldedTextKey) }
+    set {
+      if let newValue {
+        set(newValue, forKey: Self.tempCopyFoldedTextKey)
+      } else {
+        removeObject(forKey: Self.tempCopyFoldedTextKey)
+      }
+    }
+  }
+
+  /// 折叠时对应的 UIPasteboard.changeCount: 剪贴板一换内容折叠态即失效。
+  /// -1 表示没有折叠态。
+  var tempCopyFoldedChangeCount: Int {
+    get {
+      guard object(forKey: Self.tempCopyFoldedChangeCountKey) != nil else { return -1 }
+      return integer(forKey: Self.tempCopyFoldedChangeCountKey)
+    }
+    set { set(newValue, forKey: Self.tempCopyFoldedChangeCountKey) }
+  }
+
   /// 剪贴板文本缓存的字符数上限 (超长不存, 只记 truncated 标记)。
   static let clipboardLastSeenTextMaxLength = 262_144
 
@@ -1093,6 +1120,8 @@ extension UserDefaults {
   private static let clipboardLastSeenChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenChangeCount"
   private static let clipboardLastSeenTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenText"
   private static let clipboardLastSeenTextTruncatedKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenTextTruncated"
+  private static let tempCopyFoldedTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempCopyFoldedText"
+  private static let tempCopyFoldedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempCopyFoldedChangeCount"
   private static let pinnedCandidatesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.pinnedCandidates"
   private static let pinnedCandidatesMaxCount = 50
   private static let learnedAssociationsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.learnedAssociations"
