@@ -261,12 +261,14 @@ class KeyboardCommonPhrasesEditorPanelView: NibLessView {
   }
 
   @objc private func pasteButtonTapped() {
-    #if canImport(UIKit)
-      if let text = UIPasteboard.general.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        inputTextField.text = text
-        inputTextChanged()
-      }
-    #endif
+    // 第 17 轮第 7 项: 经统一门读剪贴板——内容没变时用持久化缓存,
+    // 不读 UIPasteboard、不弹"粘贴自xxx"横幅; 只有内容真的变了才读一次。
+    if let text = ClipboardSyncService.cachedPasteboardText(),
+       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      inputTextField.text = text
+      inputTextChanged()
+    }
   }
 
   /// 添加 (新增) 或保存 (编辑): 写入共享 UserDefaults 并刷新列表。

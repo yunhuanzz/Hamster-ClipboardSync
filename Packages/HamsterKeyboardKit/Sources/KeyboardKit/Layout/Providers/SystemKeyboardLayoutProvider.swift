@@ -219,12 +219,16 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
       //   划动设置编辑; 若它含一条上滑, withDefaultAlphabeticUpSwipe 会以为
       //   已有上滑而不补默认, 导致英文上滑没反应 (build #18-#20 实测问题)。
       //   所以先丢弃配置里的上滑, 再补默认映射。
-      // 中文: YAML 给的上滑是另一套符号 (a->`、b->《》...), 用户要的是跟英文
-      //   同一套数字/符号; 第 2 轮只留顶行数字角标后, 符号上滑还在但看不见。
-      //   同样先丢弃配置上滑、再补默认映射。下滑保留 (YAML 的), 只隐藏角标。
+      // 中文: YAML 给的上滑是另一套符号 (a->`、b->《》...), 第 17 轮第 4 项
+      //   起用户要的是中文标点 (，。、；：？！“”''（）《》……), 不再是
+      //   英文符号; 同样先丢弃配置上滑, 再补中文默认映射
+      //   (withDefaultChineseAlphabeticUpSwipe)。下滑保留 (YAML 的), 只隐藏角标。
       // 九宫格等其他键盘类型不受影响。
       let swipes: [KeySwipe]
-      if keyboardTypeKey == .chinese(.lowercased) || keyboardTypeKey.isAlphabetic {
+      if keyboardTypeKey == .chinese(.lowercased) {
+        let withoutUp = swipe.filter { $0.direction != .up }
+        swipes = KeySwipe.withDefaultChineseAlphabeticUpSwipe(withoutUp, for: action)
+      } else if keyboardTypeKey.isAlphabetic {
         let withoutUp = swipe.filter { $0.direction != .up }
         swipes = KeySwipe.withDefaultAlphabeticUpSwipe(withoutUp, for: action)
       } else {
@@ -248,17 +252,21 @@ open class SystemKeyboardLayoutProvider: KeyboardLayoutProvider {
       }
       // 空格默认上滑 0 (第 8 轮, 与九宫格一致; 中文 26 键 YAML 里空格的
       // “次选上屏”上滑在上面已被归一化丢掉, 这里不会把它顶回来)。
-      return KeySwipe.withDefaultSpaceUpSwipe(KeySwipe.withDefaultBackspaceUpSwipe(displaySwipes, for: action), for: action)
+      // 逗号键默认上滑 。(第 17 轮第 4 项, 底行 ， 键)。
+      return KeySwipe.withDefaultCommaUpSwipe(KeySwipe.withDefaultSpaceUpSwipe(KeySwipe.withDefaultBackspaceUpSwipe(displaySwipes, for: action), for: action), for: action)
     }
-    // 无配置时: 英文/中文 26 键同样补默认上滑 (顶行字母 -> 数字 1~0, 其余行 -> 常用符号);
+    // 无配置时: 英文 26 键补英文默认上滑, 中文 26 键补中文默认上滑
+    // (顶行字母 -> 数字 1~0, 其余行 -> 常用符号/中文标点);
     // 其他类型无上滑。空格同样补默认上滑 0 (第 8 轮)。
     let swipes: [KeySwipe]
-    if keyboardTypeKey == .chinese(.lowercased) || keyboardTypeKey.isAlphabetic {
+    if keyboardTypeKey == .chinese(.lowercased) {
+      swipes = KeySwipe.withDefaultChineseAlphabeticUpSwipe([], for: action)
+    } else if keyboardTypeKey.isAlphabetic {
       swipes = KeySwipe.withDefaultAlphabeticUpSwipe([], for: action)
     } else {
       swipes = []
     }
-    return KeySwipe.withDefaultSpaceUpSwipe(KeySwipe.withDefaultBackspaceUpSwipe(swipes, for: action), for: action)
+    return KeySwipe.withDefaultCommaUpSwipe(KeySwipe.withDefaultSpaceUpSwipe(KeySwipe.withDefaultBackspaceUpSwipe(swipes, for: action), for: action), for: action)
   }
 
   /**

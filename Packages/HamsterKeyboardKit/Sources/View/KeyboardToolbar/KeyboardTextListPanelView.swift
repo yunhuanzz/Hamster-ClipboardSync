@@ -13,7 +13,8 @@
 //  (按键输入只会写到宿主 App 的输入框), 输入框里根本打不出字,
 //  粘贴添加也不好用, 不如不要; 添加常用语走键盘内常用语管理面板
 //  或主 App 设置页 (同一条 commonPhrases 保存路径)。
-//  长按一条删除 (旧行为, 保留)。
+//  长按剪贴板条目展开全文 (第 17 轮第 6 项, 可长按拖选一段粘贴);
+//  长按常用语条目仍是删除。删除剪贴板条目走卡片右上角 ⋮ 菜单。
 //  两个页面各接自己的数据与回调, 互不串味: 剪贴板页读写 clipboardHistory,
 //  常用语页读写 commonPhrases; 切段只换数据源, 不重建面板。
 //  所有失败静默处理, 不弹框、不阻塞打字。
@@ -34,6 +35,12 @@ class KeyboardTextListPanelView: NibLessView {
 
   /// 选中剪贴板页的一条时的回调 (由调用方把文本输入到输入框并关闭面板)。
   var onSelectClipboardText: ((String) -> Void)?
+  /// 点剪贴板卡片内的提取条目 (链接 / 验证码) 时的回调 (只粘贴该部分),
+  /// 由调用方把该部分输入到输入框并关闭面板 (第 17 轮第 6 项)。
+  var onSelectExtractedItem: ((String) -> Void)?
+  /// 长按剪贴板页的一条时的回调 (由调用方打开全文展开视图; 第 17 轮第 6 项)。
+  /// 长按不再是删除 (删除仍在卡片右上角 ⋮ 菜单里)。
+  var onExpandClipboardItem: ((String) -> Void)?
   /// 剪贴板页删一条时的回调 (由调用方从存储中删除并刷新列表, 面板保持打开)。
   var onDeleteClipboardItem: ((Int) -> Void)?
   /// 选中常用语页的一条时的回调 (由调用方把文本输入到输入框并关闭面板)。
@@ -171,12 +178,14 @@ class KeyboardTextListPanelView: NibLessView {
     return label
   }()
 
-  /// 蓝底浅色药丸按钮 (同步行 / 管理行共用): 旧"立即同步"蓝色文字链的样式收进药丸里。
+  /// 浅灰药丸按钮 (同步行 / 管理行共用): 旧"立即同步"文字链的样式收进药丸里。
+  /// 键盘走白灰极简, 不用彩色。
   private static func makePillButton(title: String) -> UIButton {
     let button = UIButton(type: .system)
     button.setTitle(title, for: .normal)
+    button.setTitleColor(.label, for: .normal)
     button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
-    button.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
+    button.backgroundColor = UIColor.systemGray6
     button.layer.cornerRadius = 13
     button.contentEdgeInsets = UIEdgeInsets(top: 4, left: 12, bottom: 4, right: 12)
     button.translatesAutoresizingMaskIntoConstraints = false
@@ -394,7 +403,11 @@ class KeyboardTextListPanelView: NibLessView {
     guard let indexPath = tableView.indexPathForRow(at: point) else { return }
     switch currentPage {
     case .clipboard:
-      onDeleteClipboardItem?(indexPath.row)
+      // 第 17 轮第 6 项: 长按剪贴板条目展开全文 (可长按拖选一段粘贴),
+      // 不再是删除——删除仍在卡片右上角 ⋮ 菜单里。
+      let items = currentItems
+      guard items.indices.contains(indexPath.row) else { return }
+      onExpandClipboardItem?(items[indexPath.row])
     case .phrases:
       onDeletePhrase?(indexPath.row)
     }
@@ -411,6 +424,16 @@ extension KeyboardTextListPanelView: UITableViewDataSource {
     guard let cardCell = cell as? KeyboardTextListCardCell else { return cell }
     let text = currentItems[indexPath.row]
     cardCell.contentLabel.text = text
+    // 剪贴板页: 卡片内出提取条目药丸 (链接 / 验证码, 第 17 轮第 6 项);
+    // 常用语页没有提取项。
+    if currentPage == .clipboard {
+      cardCell.setExtractedItems(ClipboardContentExtractor.extract(from: text))
+    } else {
+      cardCell.setExtractedItems([])
+    }
+    cardCell.onExtractedItemTap = { [weak self] itemText in
+      self?.onSelectExtractedItem?(itemText)
+    }
     // ⋮ 菜单按当前行现建 (复用时重建, 不会串到上一行); 点下时再反查最新行号。
     cardCell.moreButton.menu = moreMenu(for: cardCell, text: text)
     return cardCell
@@ -427,7 +450,12 @@ extension KeyboardTextListPanelView: UITableViewDelegate {
 /// 卡片式列表行: 白底圆角卡片 + 内容文字 + 右上角 ⋮ 按钮。
 /// 卡片与面板底色拉开层次 (浅色下白卡片配灰底, 与微信剪贴板工具一致);
 /// 深色下 .systemBackground 自动变深, 不会刺眼。
+/// 剪贴板页的卡片在内容下方另有一行提取条目药丸 (链接 / 验证码,
+/// 第 17 轮第 6 项), 点药丸只粘贴该部分; 无提取项时该行高度为 0。
 private final class KeyboardTextListCardCell: UITableViewCell {
+  /// 点卡片内提取条目药丸时的回调 (只粘贴该部分), 由面板在 cellForRowAt 里接上。
+  var onExtractedItemTap: ((String) -> Void)?
+
   let cardView: UIView = {
     let view = UIView()
     // 浅色白底、深色自动变深; 圆角 12pt 向微信/菜单宫格看齐。
@@ -447,6 +475,70 @@ private final class KeyboardTextListCardCell: UITableViewCell {
     return label
   }()
 
+  /// 提取条目药丸行 (横向, 最多 5+5 项; 无提取项时高度约束为 0)。
+  private lazy var extractedStackView: UIStackView = {
+    let stack = UIStackView()
+    stack.axis = .horizontal
+    stack.spacing = 6
+    stack.alignment = .center
+    stack.distribution = .fill
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }()
+
+  private var extractedStackHeightConstraint: NSLayoutConstraint?
+
+  /// 提取条目小气泡: 白底 + 细边框, 与正文用间距隔开, 不用背景色区分;
+  /// 网址/验证码用图标区分 (link / key.fill) + 截断文字; 点按只粘贴该部分。
+  private func makeExtractedChip(for item: ClipboardContentExtractor.ExtractedItem) -> UIButton {
+    let button = UIButton(type: .system)
+    let iconName = item.kind == .url ? "link" : "key.fill"
+    let displayText: String
+    if item.kind == .url {
+      displayText = item.text.count > 28
+        ? String(item.text.prefix(20)) + "…" + String(item.text.suffix(6)) : item.text
+    } else {
+      displayText = item.text
+    }
+    button.setTitle(displayText, for: .normal)
+    button.setImage(UIImage(systemName: iconName), for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 12, weight: .medium)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 11, weight: .medium), scale: .default), forImageIn: .normal)
+    button.tintColor = .label
+    button.backgroundColor = UIColor.systemBackground
+    button.layer.cornerRadius = 11
+    button.layer.borderColor = UIColor.systemGray4.cgColor
+    button.layer.borderWidth = 1
+    button.contentEdgeInsets = UIEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.addTarget(self, action: #selector(extractedChipTapped(_:)), for: .touchUpInside)
+    return button
+  }
+
+  @objc private func extractedChipTapped(_ sender: UIButton) {
+    // 药丸按提取项下标编号 (tag), 点按时取对应项的原文。
+    guard extractedItems.indices.contains(sender.tag) else { return }
+    onExtractedItemTap?(extractedItems[sender.tag].text)
+  }
+
+  private var extractedItems: [ClipboardContentExtractor.ExtractedItem] = []
+
+  /// 按提取结果重建卡片内的药丸行 (复用时重建, 不会串到上一行)。
+  func setExtractedItems(_ items: [ClipboardContentExtractor.ExtractedItem]) {
+    extractedItems = items
+    extractedStackView.arrangedSubviews.forEach {
+      extractedStackView.removeArrangedSubview($0)
+      $0.removeFromSuperview()
+    }
+    for (index, item) in items.enumerated() {
+      let chip = makeExtractedChip(for: item)
+      chip.tag = index
+      extractedStackView.addArrangedSubview(chip)
+    }
+    extractedStackView.isHidden = items.isEmpty
+    extractedStackHeightConstraint?.constant = items.isEmpty ? 0 : 22
+  }
+
   /// 右上角 ⋮: 点按弹出菜单 (UIMenu, iOS 14+; 部署目标 15.0)。
   /// 菜单由面板在 cellForRowAt 里按当前行现建。
   let moreButton: UIButton = {
@@ -465,7 +557,9 @@ private final class KeyboardTextListCardCell: UITableViewCell {
     selectionStyle = .none
     contentView.addSubview(cardView)
     cardView.addSubview(contentLabel)
+    cardView.addSubview(extractedStackView)
     cardView.addSubview(moreButton)
+    extractedStackHeightConstraint = extractedStackView.heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
       cardView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
       cardView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
@@ -474,8 +568,15 @@ private final class KeyboardTextListCardCell: UITableViewCell {
 
       contentLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 16),
       contentLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 12),
-      contentLabel.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -12),
       contentLabel.trailingAnchor.constraint(lessThanOrEqualTo: moreButton.leadingAnchor, constant: -4),
+      // 内容底边: 药丸行在时贴药丸行, 无药丸时贴卡片底 (两条 <=, 紧的那条生效)。
+      contentLabel.bottomAnchor.constraint(lessThanOrEqualTo: extractedStackView.topAnchor, constant: -6),
+      contentLabel.bottomAnchor.constraint(lessThanOrEqualTo: cardView.bottomAnchor, constant: -12),
+
+      extractedStackView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 16),
+      extractedStackView.trailingAnchor.constraint(lessThanOrEqualTo: moreButton.leadingAnchor, constant: -4),
+      extractedStackView.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -10),
+      extractedStackHeightConstraint!,
 
       moreButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8),
       moreButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
@@ -493,5 +594,7 @@ private final class KeyboardTextListCardCell: UITableViewCell {
     super.prepareForReuse()
     contentLabel.text = nil
     moreButton.menu = nil
+    setExtractedItems([])
+    onExtractedItemTap = nil
   }
 }

@@ -64,6 +64,11 @@ open class iPhoneChineseKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
       }
       return bottomSystemButtonWidth(for: context)
     case .nextKeyboard: return bottomSystemButtonWidth(for: context)
+    case .shortCommand:
+      // 底行中/英键 (.shortCommand(#中英切换), 第 17 轮第 4 项):
+      // 与 123/表情键同宽 (系统键宽); 默认分支是 .available 会把
+      // 剩余宽度全吃掉, 必须显式给宽。
+      return bottomSystemButtonWidth(for: context)
     case .primary:
       if row == 3 && actions[row].count == 3 {
         return largeBottomWidth(for: context)
@@ -185,8 +190,15 @@ open class iPhoneChineseKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
       result.append(.keyboardType(.classifySymbolic))
     }
 
-    if context.keyboardType.isChinesePrimaryKeyboard, context.chineseEnglishSwitchButtonIsOnLeftOfSpaceButton, let action = needsChineseEnglishSwitchAction(for: context) {
-      result.append(action)
+    // 26 键中文主键盘底行 (第 17 轮第 4 项, 仿微信):
+    // [123][😀][，][空格][中/英][发送]。只在中文主键盘 (.chinese)
+    // 上加这三键, 数字/符号键盘 (chineseNumeric/chineseSymbolic
+    // 也走本 provider 的 bottomActions) 的底行不动。
+    // 表情键: .keyboardType(.emojis), 与九宫格右列 😊 键同一机制。
+    // 逗号键: .symbol(，), 上滑是 。(见 KeySwipe.withDefaultCommaUpSwipe)。
+    if context.keyboardType.isChinesePrimaryKeyboard {
+      result.append(.keyboardType(.emojis))
+      result.append(.symbol(Symbol(char: "，")))
     }
 
     if context.displaySpaceLeftButton {
@@ -205,8 +217,16 @@ open class iPhoneChineseKeyboardLayoutProvider: SystemKeyboardLayoutProvider {
       result.append(action)
     }
 
-    if context.keyboardType.isChinesePrimaryKeyboard, !context.chineseEnglishSwitchButtonIsOnLeftOfSpaceButton, let action = needsChineseEnglishSwitchAction(for: context) {
-      result.append(action)
+    // 中/英键 (第 17 轮第 4 项, 仿微信底行位置, 空格右侧):
+    // .shortCommand(#中英切换) 只切 asciiMode、不切键盘类型, 与空格
+    // 上滑 #中英切换同一机制 (见 KeyboardInputViewController.switchEnglishChinese);
+    // 之前这里的 .keyboardType(.alphabetic) 键 (needsChineseEnglishSwitchAction,
+    // 受 displayChineseEnglishSwitchButton 开关控制, hamster.yaml 里是 false)
+    // 是切到英文 26 键布局, 不是中英切换——第 17 轮起 26 键底行固定用
+    // asciiMode 切换, 布局保持中文 26 键。图标是 chineseState (中/英),
+    // 见 KeyboardAction.standardButtonImage。
+    if context.keyboardType.isChinesePrimaryKeyboard {
+      result.append(.shortCommand(.switchChineseOrEnglish))
     }
 
 //    if context.textDocumentProxy.keyboardType == .emailAddress {

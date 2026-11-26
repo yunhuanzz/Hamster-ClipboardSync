@@ -485,6 +485,64 @@ public extension UserDefaults {
     return clipboardChipDismissedHashes.contains(hash)
   }
 
+  // MARK: - 剪贴板读取门 (第 17 轮第 7 项: 修"每次打开键盘都弹粘贴横幅")
+
+  /// 上次 (自动) 读取剪贴板时的 UIPasteboard.changeCount, 持久化在共享 defaults。
+  /// 根因: 同步服务与粘贴提示之前都只把 changeCount 记在内存里, 键盘扩展进程
+  /// 每次弹出都可能重建, 内存记录一丢, 每次打开都以为"剪贴板变了"而重读,
+  /// iOS 便每次都在顶部弹"粘贴自 xxx"横幅。持久化后只有内容真的变了才读一次,
+  /// 横幅最多随一次真正的新复制出现一次, 再也不会在每次打开键盘时出现。
+  /// -1 表示从未读过。
+  var clipboardLastSeenChangeCount: Int {
+    get {
+      // 未存过返回 -1 (不是 integer(forKey:) 默认的 0: changeCount 本身
+      // 从 0 起计, 0 是合法值, 不能拿它当"从未读过")。
+      guard object(forKey: Self.clipboardLastSeenChangeCountKey) != nil else { return -1 }
+      return integer(forKey: Self.clipboardLastSeenChangeCountKey)
+    }
+    set { set(newValue, forKey: Self.clipboardLastSeenChangeCountKey) }
+  }
+
+  /// 与上次 changeCount 对应的剪贴板文本原文 (读剪贴板时一并存下)。
+  /// changeCount 未变时, 各处 (粘贴提示、粘贴键、常用语粘贴按钮、剪贴板面板)
+  /// 直接用这份缓存展示 / 粘贴, 不读 UIPasteboard、不弹横幅。
+  /// 超长文本不存 (见 clipboardLastSeenTextTruncated), 避免共享 defaults 被撑爆。
+  var clipboardLastSeenText: String? {
+    get { string(forKey: Self.clipboardLastSeenTextKey) }
+    set {
+      if let newValue {
+        set(newValue, forKey: Self.clipboardLastSeenTextKey)
+      } else {
+        removeObject(forKey: Self.clipboardLastSeenTextKey)
+      }
+    }
+  }
+
+  /// 上次 changeCount 对应的剪贴板文本是否因超长而未缓存。
+  /// 为真时缓存为空不代表"剪贴板为空", 调用方 (cachedPasteboardText)
+  /// 应直接读一次剪贴板 (横幅一次, 极少见), 而不是当成空剪贴板。
+  var clipboardLastSeenTextTruncated: Bool {
+    get { bool(forKey: Self.clipboardLastSeenTextTruncatedKey) }
+    set { set(newValue, forKey: Self.clipboardLastSeenTextTruncatedKey) }
+  }
+
+  /// 剪贴板文本缓存的字符数上限 (超长不存, 只记 truncated 标记)。
+  static let clipboardLastSeenTextMaxLength = 262_144
+
+  /// 更新"上次读到的剪贴板"记录 (count + 文本缓存): 读到文本时调;
+  /// 剪贴板里是图片 / 空内容时传 nil (缓存清空, 计数值照常更新)。
+  /// 文本超长时只记 count 与 truncated 标记, 不存文本。
+  func recordLastSeenPasteboard(changeCount: Int, text: String?) {
+    clipboardLastSeenChangeCount = changeCount
+    if let text, text.count <= Self.clipboardLastSeenTextMaxLength {
+      clipboardLastSeenText = text
+      clipboardLastSeenTextTruncated = false
+    } else {
+      clipboardLastSeenText = nil
+      clipboardLastSeenTextTruncated = text != nil
+    }
+  }
+
   // MARK: - 置顶候选 (第 14 轮第 5 项 c)
 
   /// 一条置顶记录: code 是原始输入键 (九宫格数字串 / 全键盘字母串, 与
@@ -716,27 +774,27 @@ public extension UserDefaults {
     case left, right
   }
 
-  /// 各工具所在侧 (toolID -> left/right)。未设置过时全部默认左,
-  /// 老用户现有布局原样保留 (原来都是一串从左往右排)。
+  /// 各工具所在侧 (toolID -> left/right)。未设置过时全部默认右
+  /// (2026-11-26 用户要求: 所有工具默认排在工具栏右侧)。
   var toolbarToolSides: [String: ToolbarToolSide] {
     get {
       if let dict = dictionary(forKey: Self.toolbarToolSidesKey) as? [String: String] {
         var sides: [String: ToolbarToolSide] = [:]
         for id in Self.toolbarToolAllIDs {
-          sides[id] = dict[id].flatMap(ToolbarToolSide.init(rawValue:)) ?? .left
+          sides[id] = dict[id].flatMap(ToolbarToolSide.init(rawValue:)) ?? .right
         }
         return sides
       }
-      return Dictionary(uniqueKeysWithValues: Self.toolbarToolAllIDs.map { ($0, ToolbarToolSide.left) })
+      return Dictionary(uniqueKeysWithValues: Self.toolbarToolAllIDs.map { ($0, ToolbarToolSide.right) })
     }
     set {
       set(newValue.mapValues { $0.rawValue }, forKey: Self.toolbarToolSidesKey)
     }
   }
 
-  /// 某个工具所在侧 (未设置过默认左)。
+  /// 某个工具所在侧 (未设置过默认右)。
   func toolbarToolSide(for toolID: String) -> ToolbarToolSide {
-    toolbarToolSides[toolID] ?? .left
+    toolbarToolSides[toolID] ?? .right
   }
 
   /// 设置某个工具所在侧 (写盘)。
@@ -776,7 +834,7 @@ public extension UserDefaults {
     toolbarToolsOrder = Self.toolbarToolDefaultOrder
     toolbarVisibleTools = Set(Self.toolbarToolDefaultOrder)
     toolbarUserAddedToolIDs = []
-    // 左右摆放也恢复默认 (全部回左侧)。
+    // 左右摆放也恢复默认 (全部回右侧)。
     removeObject(forKey: Self.toolbarToolSidesKey)
     // 分区也恢复默认 (剪贴板左、常用语左)。
     removeObject(forKey: Self.toolbarToolZonesKey)
@@ -836,16 +894,15 @@ public extension UserDefaults {
     }
   }
 
-  /// 工具默认分区: 剪贴板左、常用语左
-  /// (与第 4 轮用户已习惯的布局一致)。
+  /// 工具默认分区: 全部右
+  /// (2026-11-26 用户要求: 所有工具默认排在工具栏右侧)。
   static let toolbarToolDefaultZone: [String: ToolbarToolZone] = [
-    "clipboard": .left, "phrases": .left,
+    "clipboard": .right, "phrases": .right, "switchLayout": .right,
+    "syncNow": .right, "settings": .right, "managePhrases": .right,
   ]
 
-  /// 各工具的分区 (toolID -> 分区)。未设置过时按当前生效布局推导,
-  /// 不写盘: 顺序里最后一个工具 (当前钉在最右的那个) 归右区, 其余归左区,
-  /// 这样老用户现有的布局原样保留, 不会被重置; 全新安装默认顺序
-  /// [clipboard, phrases, dismiss] 推导结果正好是左、左、右。
+  /// 各工具的分区 (toolID -> 分区)。未设置过时全部归右区
+  /// (2026-11-26 用户要求: 所有工具默认排在工具栏右侧)。
   /// 一旦用户在定制面板里改过任一工具的分区, 即写盘, 此后以保存值为准。
   var toolbarToolZones: [String: ToolbarToolZone] {
     get {
@@ -853,14 +910,14 @@ public extension UserDefaults {
         var zones: [String: ToolbarToolZone] = [:]
         for id in Self.toolbarToolAllIDs {
           zones[id] = dict[id].flatMap(ToolbarToolZone.init(rawValue:))
-            ?? Self.toolbarToolDefaultZone[id] ?? .left
+            ?? Self.toolbarToolDefaultZone[id] ?? .right
         }
         return zones
       }
       var zones: [String: ToolbarToolZone] = [:]
       let order = toolbarToolsOrder
-      for (index, id) in order.enumerated() {
-        zones[id] = (index == order.count - 1) ? .right : .left
+      for id in order {
+        zones[id] = .right
       }
       for id in Self.toolbarToolAllIDs where zones[id] == nil {
         zones[id] = Self.toolbarToolDefaultZone[id] ?? .left
@@ -1033,6 +1090,9 @@ extension UserDefaults {
   private static let clipboardSyncLastStatusTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastStatusText"
   private static let clipboardChipDismissedHashesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedHashes"
   private static let clipboardChipDismissedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedChangeCount"
+  private static let clipboardLastSeenChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenChangeCount"
+  private static let clipboardLastSeenTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenText"
+  private static let clipboardLastSeenTextTruncatedKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenTextTruncated"
   private static let pinnedCandidatesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.pinnedCandidates"
   private static let pinnedCandidatesMaxCount = 50
   private static let learnedAssociationsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.learnedAssociations"

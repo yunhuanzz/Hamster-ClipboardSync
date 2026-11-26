@@ -113,12 +113,46 @@ public final class ClipboardSyncService {
   /// 若上一次同步 (弱网时最多等 4 秒) 还没结束, 新的直接跳过, 不堆积。
   private var isSyncing = false
 
-  /// 服务最后一次读写剪贴板时的 changeCount (只在串行队列上读写)。
-  /// 读剪贴板会弹"粘贴自xxx"横幅, 所以上传前先比 changeCount:
-  /// 没变说明本机剪贴板还是上次同步过的内容, 直接跳过读取 (不弹横幅);
-  /// 写回服务器内容后也更新它, 避免下次误以为本机剪贴板变了而重读。
-  /// nil 表示从未读写过 (首次同步一定读)。
-  private var lastSeenPasteboardChangeCount: Int?
+  /// 服务最后一次读写剪贴板时的 changeCount。
+  /// (第 17 轮第 7 项) 之前只记在内存里 (nil 表示从未读写过), 键盘扩展进程
+  /// 每次弹出都可能重建, 内存记录一丢, 每次打开都以为"剪贴板变了"而重读,
+  /// iOS 便每次都在顶部弹"粘贴自 xxx"横幅。现持久化在共享 UserDefaults
+  /// (UserDefaults.hamster.clipboardLastSeenChangeCount) 里, 跨进程也有效;
+  /// -1 表示从未读写过 (首次同步一定读)。
+  /// 读剪贴板会弹横幅, 所以上传前先比 changeCount: 没变说明本机剪贴板还是
+  /// 上次同步过的内容, 直接跳过读取 (不弹横幅); 写回服务器内容后也更新它,
+  /// 避免下次误以为本机剪贴板变了而重读。
+  private var lastSeenPasteboardChangeCount: Int {
+    get { UserDefaults.hamster.clipboardLastSeenChangeCount }
+    set { UserDefaults.hamster.clipboardLastSeenChangeCount = newValue }
+  }
+
+  #if canImport(UIKit)
+    /// 读当前剪贴板文本的统一入口 (第 17 轮第 7 项, 供键盘内各处自动读取用)。
+    /// changeCount 与持久化记录相同 → 返回上次读到的缓存文本, 不读
+    /// UIPasteboard、不弹"粘贴自 xxx"横幅; 不同 → 读一次并更新记录与缓存
+    /// (本次弹一次横幅, 内容确实是新的)。
+    /// 返回当前剪贴板文本原文 (未 trim, 调用方按需处理); 空剪贴板 / 非文本
+    /// 内容时返回 nil。超长文本未缓存时直接读一次 (横幅一次, 极少见),
+    /// 绝不把"没缓存"当成"空剪贴板"而吞掉粘贴。
+    /// 注意: 调用方若随后还要读图片, 需自己先比 changeCount——缓存只存文本。
+    public static func cachedPasteboardText() -> String? {
+      let defaults = UserDefaults.hamster
+      let currentChangeCount = UIPasteboard.general.changeCount
+      if currentChangeCount == defaults.clipboardLastSeenChangeCount {
+        if let cached = defaults.clipboardLastSeenText, !cached.isEmpty {
+          return cached
+        }
+        if !defaults.clipboardLastSeenTextTruncated {
+          return nil // 空剪贴板或图片内容: 缓存为空就是对的, 不读
+        }
+        // 超长文本未缓存: 直接读一次 (横幅一次), 并刷新记录
+      }
+      let text = UIPasteboard.general.string
+      defaults.recordLastSeenPasteboard(changeCount: currentChangeCount, text: text)
+      return (text?.isEmpty == false) ? text : nil
+    }
+  #endif
 
   private init() {}
 
@@ -223,8 +257,10 @@ public final class ClipboardSyncService {
       // changeCount 是个整数, 读它不弹横幅。
       let currentChangeCount = UIPasteboard.general.changeCount
       if currentChangeCount != lastSeenPasteboardChangeCount {
-        lastSeenPasteboardChangeCount = currentChangeCount
         let localText = UIPasteboard.general.string
+        // 同步读到的文本一并存进持久化缓存 (第 17 轮第 7 项): 粘贴提示 /
+        // 粘贴键等处 changeCount 未变时直接用缓存, 不再重读、不弹横幅。
+        defaults.recordLastSeenPasteboard(changeCount: currentChangeCount, text: localText)
         if let localText = localText, !localText.isEmpty {
           if Self.sha256(localText) != lastHash {
             let result = upload(text: localText, to: endpointURL, username: username, password: password)
@@ -312,8 +348,9 @@ public final class ClipboardSyncService {
     guard remoteHash != defaults.clipboardSyncLastHash else { return false }
     #if canImport(UIKit)
       UIPasteboard.general.string = text
-      // 写完后 changeCount 会变, 记下新值, 避免下次误以为本机剪贴板变了而重读
-      lastSeenPasteboardChangeCount = UIPasteboard.general.changeCount
+      // 写完后 changeCount 会变, 记下新值, 避免下次误以为本机剪贴板变了而重读;
+      // 文本一并存进持久化缓存 (第 17 轮第 7 项), 粘贴提示直接用缓存展示。
+      defaults.recordLastSeenPasteboard(changeCount: UIPasteboard.general.changeCount, text: text)
     #endif
     defaults.clipboardSyncLastHash = remoteHash
     return true
@@ -347,7 +384,8 @@ public final class ClipboardSyncService {
     }
     #if canImport(UIKit)
       if Self.writeImageToPasteboard(fileData, fileName: fileName) {
-        lastSeenPasteboardChangeCount = UIPasteboard.general.changeCount
+        // 图片写回: 计数值更新, 文本缓存清空 (剪贴板里是图片, 不是文本)。
+        defaults.recordLastSeenPasteboard(changeCount: UIPasteboard.general.changeCount, text: nil)
         defaults.clipboardSyncLastHash = remote.marker ?? contentHash
         return "图片已同步"
       }
@@ -355,7 +393,7 @@ public final class ClipboardSyncService {
     if let fileText = String(data: fileData, encoding: .utf8), !fileText.isEmpty {
       #if canImport(UIKit)
         UIPasteboard.general.string = fileText
-        lastSeenPasteboardChangeCount = UIPasteboard.general.changeCount
+        defaults.recordLastSeenPasteboard(changeCount: UIPasteboard.general.changeCount, text: fileText)
       #endif
       // 文件字节本身就是这段文本的 UTF-8 编码, 所以记字节哈希与记文本哈希是同一值,
       // 上传侧比 sha256(文本) 也能对上, 不会回声重传。

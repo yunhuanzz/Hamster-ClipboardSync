@@ -648,7 +648,11 @@ extension KeyboardAction {
       return HamsterUIColor.shared.standardButtonBackground(for: context)
     }
     if isUppercasedShiftAction { return buttonBackgroundColorForPressedState(for: context) }
-    if isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
+    // 26 键底行中/英键 (第 17 轮第 4 项, .shortCommand(#中英切换)):
+    // 与旧的 .keyboardType(.alphabetic) 中/英键一样是系统灰底
+    // (微信 26 键底行同款); .shortCommand 本身不是 isSystemAction,
+    // 不加这支会变成白底输入键。
+    if self == .shortCommand(.switchChineseOrEnglish) || isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
       return HamsterUIColor.shared.standardDarkButtonBackground(for: context)
     }
     if isPrimaryAction { return UIColor(red: 0x07 / 255.0, green: 0xC1 / 255.0, blue: 0x60 / 255.0, alpha: 1) } // 微信绿 #07C160 (回车/前往键, 原 systemBlue)
@@ -665,7 +669,9 @@ extension KeyboardAction {
        self == .keyboardType(.numericNineGrid) || self == .keyboardType(.alphabetic(.lowercased)) {
       return HamsterUIColor.shared.standardDarkButtonBackground(for: context)
     }
-    if isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
+    // 同 idle: 26 键底行中/英键 (.shortCommand(#中英切换), 第 17 轮
+    // 第 4 项) 按下时走系统键的按下色 (浅色变白), 与旧中/英键一致。
+    if self == .shortCommand(.switchChineseOrEnglish) || isSystemAction || isSymbolOfDarkAction || isCharacterOfDarkAction || isCleanSpellingArea {
       return context.hasDarkColorScheme ? HamsterUIColor.shared.standardButtonBackground(for: context) : .white
     }
     if isPrimaryAction { return context.hasDarkColorScheme ? HamsterUIColor.shared.standardDarkButtonBackground(for: context) : .white }

@@ -18,11 +18,16 @@ class KeyboardPasteSegmentsPanelView: NibLessView {
   var onSelectSegment: ((String) -> Void)?
   /// 点"粘贴全部"时的回调, 由调用方粘贴全部内容并关闭面板。
   var onSelectAll: (() -> Void)?
+  /// 点提取条目 (链接 / 验证码) 时的回调 (只粘贴该部分), 由调用方输入文本并关闭面板。
+  /// (第 17 轮第 6 项)
+  var onSelectExtractedItem: ((String) -> Void)?
   /// 关闭按钮回调
   var onClose: (() -> Void)?
 
   /// 分段结果 (上限 20 段)。
   private var segments: [String] = []
+  /// 提取出的链接 / 验证码 (上限各 5 条, 见 ClipboardContentExtractor)。
+  private var extractedItems: [ClipboardContentExtractor.ExtractedItem] = []
 
   /// 覆盖式面板底色: 调用方 (KeyboardToolbarView) 传入与键盘本体一致的不透明颜色;
   /// 默认用系统键盘标准底色 (浅色 #D5D6DD / 深色 #2C2C2C, 不透明)。
@@ -87,6 +92,54 @@ class KeyboardPasteSegmentsPanelView: NibLessView {
     return label
   }()
 
+  /// 提取条目行 (第 17 轮第 6 项): 链接 / 验证码各一颗药丸, 点按只粘贴该部分;
+  /// 无提取项时整行隐藏 (高度 0, 不占位置)。
+  private lazy var extractedStackView: UIStackView = {
+    let stack = UIStackView()
+    stack.axis = .horizontal
+    stack.spacing = 8
+    stack.alignment = .center
+    stack.distribution = .fill
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }()
+
+  private var extractedStackHeightConstraint: NSLayoutConstraint?
+
+  /// 提取条目小气泡: 白底 + 细边框, 与正文用间距隔开, 不用背景色区分;
+  /// 网址/验证码用图标区分 (link / key.fill) + 截断文字; 点按只粘贴该部分。
+  private func makeExtractedChip(for item: ClipboardContentExtractor.ExtractedItem) -> UIButton {
+    let button = UIButton(type: .system)
+    let iconName = item.kind == .url ? "link" : "key.fill"
+    let displayText: String
+    if item.kind == .url {
+      // 链接太长只留首尾 (前 24 字 + … + 后 8 字), 药丸不把行撑爆。
+      displayText = item.text.count > 32
+        ? String(item.text.prefix(24)) + "…" + String(item.text.suffix(8)) : item.text
+    } else {
+      displayText = item.text
+    }
+    button.setTitle(displayText, for: .normal)
+    button.setImage(UIImage(systemName: iconName), for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 12, weight: .medium), scale: .default), forImageIn: .normal)
+    button.tintColor = .label
+    button.backgroundColor = UIColor.systemBackground
+    button.layer.cornerRadius = 13
+    button.layer.borderColor = UIColor.systemGray4.cgColor
+    button.layer.borderWidth = 1
+    button.contentEdgeInsets = UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.addTarget(self, action: #selector(extractedChipTapped(_:)), for: .touchUpInside)
+    return button
+  }
+
+  @objc private func extractedChipTapped(_ sender: UIButton) {
+    // 药丸按 extractedItems 的下标编号 (tag), 点按时取对应项的原文。
+    guard extractedItems.indices.contains(sender.tag) else { return }
+    onSelectExtractedItem?(extractedItems[sender.tag].text)
+  }
+
   init() {
     super.init(frame: .zero)
     constructViewHierarchy()
@@ -98,11 +151,13 @@ class KeyboardPasteSegmentsPanelView: NibLessView {
     addSubview(titleLabel)
     addSubview(closeButton)
     addSubview(pasteAllButton)
+    addSubview(extractedStackView)
     addSubview(tableView)
     addSubview(emptyLabel)
   }
 
   override func activateViewConstraints() {
+    extractedStackHeightConstraint = extractedStackView.heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
       titleLabel.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
       titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -115,7 +170,12 @@ class KeyboardPasteSegmentsPanelView: NibLessView {
       pasteAllButton.trailingAnchor.constraint(equalTo: trailingAnchor),
       pasteAllButton.heightAnchor.constraint(equalToConstant: 44),
 
-      tableView.topAnchor.constraint(equalTo: pasteAllButton.bottomAnchor, constant: 4),
+      extractedStackView.topAnchor.constraint(equalTo: pasteAllButton.bottomAnchor, constant: 4),
+      extractedStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      extractedStackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+      extractedStackHeightConstraint!,
+
+      tableView.topAnchor.constraint(equalTo: extractedStackView.bottomAnchor, constant: 4),
       tableView.leadingAnchor.constraint(equalTo: leadingAnchor),
       tableView.trailingAnchor.constraint(equalTo: trailingAnchor),
       tableView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -136,6 +196,25 @@ class KeyboardPasteSegmentsPanelView: NibLessView {
     segments = Self.segments(from: text)
     emptyLabel.isHidden = !segments.isEmpty
     tableView.reloadData()
+    // 提取链接 / 验证码 (第 17 轮第 6 项): 有则在分段列表上方出一行药丸。
+    extractedItems = ClipboardContentExtractor.extract(from: text)
+    rebuildExtractedChips()
+  }
+
+  /// 按提取结果重建药丸行: 无提取项时高度 0 不占位置; 有则一行药丸
+  /// (超宽时 trailing 截断, 最多 5+5 项, 行内横滑不做——药丸本身已截断)。
+  private func rebuildExtractedChips() {
+    extractedStackView.arrangedSubviews.forEach {
+      extractedStackView.removeArrangedSubview($0)
+      $0.removeFromSuperview()
+    }
+    for (index, item) in extractedItems.enumerated() {
+      let chip = makeExtractedChip(for: item)
+      chip.tag = index
+      extractedStackView.addArrangedSubview(chip)
+    }
+    extractedStackView.isHidden = extractedItems.isEmpty
+    extractedStackHeightConstraint?.constant = extractedItems.isEmpty ? 0 : 26
   }
 
   /// 按行、再按句读标点把文本切成片段, 去空、上限 20 段。

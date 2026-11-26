@@ -169,9 +169,10 @@ public extension KeyboardInputViewController {
     }
   }
 
-  /// 粘贴命令
+  /// 粘贴命令 (第 17 轮第 7 项: 经统一门读剪贴板——内容没变时用持久化缓存,
+  /// 不读 UIPasteboard、不弹"粘贴自xxx"横幅; 只有内容真的变了才读一次)。
   func pasteCommand() {
-    if let text = UIPasteboard.general.string {
+    if let text = ClipboardSyncService.cachedPasteboardText() {
       textDocumentProxy.insertText(text)
     }
   }

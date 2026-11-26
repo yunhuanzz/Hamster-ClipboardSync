@@ -37,6 +37,12 @@ public extension KeyboardAction {
     case .settings: return HamsterUIImage.shared.keyboardSettings
     case .shift(let currentCasing):
       return currentCasing.standardButtonImage
+    case .shortCommand(let command):
+      // 26 键底行中/英键 (第 17 轮第 4 项, .shortCommand(#中英切换)):
+      // 与旧的 .keyboardType(.alphabetic) 中/英键用同一张 chineseState
+      // 图标 (大“中”+小“英”); 其他快捷指令键没有图标, 保持 nil。
+      if command == .switchChineseOrEnglish { return HamsterUIImage.shared.keyboardStateChinese }
+      return nil
     case .systemImage(_, let imageName, _): return UIImage(systemName: imageName)
     case .systemSettings: return HamsterUIImage.shared.keyboardSettings
     case .tab: return HamsterUIImage.shared.keyboardTab

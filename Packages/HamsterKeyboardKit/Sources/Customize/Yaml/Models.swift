@@ -362,7 +362,8 @@ public struct KeySwipe: Codable, Hashable {
   /// 英文 26 键默认上滑: 顶行字母上滑输入数字 1~0, 其余行上滑输入常用符号
   /// (与九宫格每键右上角小数字同一模式, display: true 会在键右上角显示小字)。
   /// 仅当用户配置中没有该键的上滑时生效 (与 withDefaultBackspaceUpSwipe 同模式),
-  /// 且只对英文字母键生效; 中文 26 键走 YAML 里的 swipe 配置, 不受影响。
+  /// 且只对英文字母键生效; 中文 26 键用 withDefaultChineseAlphabeticUpSwipe
+  /// (同一套顶行数字, 其余行是中文标点)。
   /// 上滑字符直接上屏 (processByRIME: false), 不经过 RIME 拼音引擎。
   /// 注意 (build #23 断点): 英文键盘的字母键不是 .character 而是 .symbol
   /// (iPhoneKeyboardLayoutProvider.actions() 用 KeyboardActionRows(symbols:) 构造),
@@ -392,6 +393,51 @@ public struct KeySwipe: Codable, Hashable {
     "z": "*", "x": "\"", "c": "'", "v": ":", "b": ";",
     "n": ",", "m": ".",
   ]
+
+  /// 中文 26 键默认上滑 (第 17 轮第 4 项): 顶行字母上滑输入数字 1~0
+  /// (与英文一致), 其余行上滑输入中文标点 (，。、；：？！“”''（）《》……),
+  /// 不再是英文符号。仅当用户配置中没有该键的上滑时生效, 与
+  /// withDefaultAlphabeticUpSwipe 同模式; 上滑动作保持与按键相同的
+  /// 形式 (.character/.symbol), 直接上屏 (processByRIME: false)。
+  public static func withDefaultChineseAlphabeticUpSwipe(_ swipes: [KeySwipe], for action: KeyboardAction) -> [KeySwipe] {
+    guard !swipes.contains(where: { $0.direction == .up }) else { return swipes }
+    let swipeAction: KeyboardAction?
+    switch action {
+    case .character(let char):
+      swipeAction = Self.chineseAlphabeticUpSwipeMap[char.lowercased()].map { .character($0) }
+    case .symbol(let symbol):
+      swipeAction = Self.chineseAlphabeticUpSwipeMap[symbol.char.lowercased()].map { .symbol(Symbol(char: $0)) }
+    default:
+      swipeAction = nil
+    }
+    guard let swipeAction = swipeAction else { return swipes }
+    return swipes + [KeySwipe(direction: .up, action: swipeAction, processByRIME: false, display: true, label: .empty)]
+  }
+
+  /// 中文 26 键上滑映射表: 字母 -> 上滑输出字符 (顶行数字, 其余行中文标点)。
+  private static let chineseAlphabeticUpSwipeMap: [String: String] = [
+    "q": "1", "w": "2", "e": "3", "r": "4", "t": "5",
+    "y": "6", "u": "7", "i": "8", "o": "9", "p": "0",
+    "a": "、", "s": "；", "d": "：", "f": "？", "g": "！",
+    "h": "“", "j": "”", "k": "（", "l": "）",
+    "z": "《", "x": "》", "c": "‘", "v": "’", "b": "…",
+    "n": "，", "m": "。",
+  ]
+
+  /// 逗号键默认上滑 (第 17 轮第 4 项, 仿微信): 底行 ， 键上滑输入句号 。。
+  /// 仅当该键没有配置上滑时生效; 两种形式 (.symbol/.character) 都接受,
+  /// 上滑动作保持与按键相同的形式, 直接上屏 (processByRIME: false)。
+  public static func withDefaultCommaUpSwipe(_ swipes: [KeySwipe], for action: KeyboardAction) -> [KeySwipe] {
+    guard !swipes.contains(where: { $0.direction == .up }) else { return swipes }
+    switch action {
+    case .symbol(let symbol) where symbol.char == "，":
+      return swipes + [KeySwipe(direction: .up, action: .symbol(Symbol(char: "。")), processByRIME: false, display: true, label: .empty)]
+    case .character(let char) where char == "，":
+      return swipes + [KeySwipe(direction: .up, action: .character("。"), processByRIME: false, display: true, label: .empty)]
+    default:
+      return swipes
+    }
+  }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
