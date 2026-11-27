@@ -46,7 +46,7 @@
 		C0A602B32A185D88000DC924 /* HamsterKeyboardInputViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C000CA9D296EA72600EC5323 /* HamsterKeyboardInputViewController.swift */; };
 		C0C7EAEC29E5A236008D4EE1 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = C0C7EAEF29E5A236008D4EE1 /* InfoPlist.strings */; };
 		C0D672B429F1E0E7002D0439 /* SharedSupport.zip in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = C0D672B329F1E066002D0439 /* SharedSupport.zip */; };
-		1BFEF7EB3587428ABE1CC929 /* zh-hans-t-essay-bgw.gram in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = ABE73908B07046AB99087579 /* zh-hans-t-essay-bgw.gram */; };
+		1BFEF7EB3587428ABE1CC929 /* qwen14b-zh-hans.gram in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = ABE73908B07046AB99087579 /* qwen14b-zh-hans.gram */; };
 		C0D856CC2B026FF6003DB275 /* rime-ice.zip in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = C0D856CA2B026FDA003DB275 /* rime-ice.zip */; };
 		4321BA86393C4D7C9EADA3B7 /* hamster_supplemental.dict.yaml in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = EF928075720F4626B9D9052D /* hamster_supplemental.dict.yaml */; };
 		50253AA1C45B4A23851C0420 /* hamster_supplemental.schema.yaml in Copy Rime SharedSupport */ = {isa = PBXBuildFile; fileRef = 9F9ED26A4DAC4D1DB06CC908 /* hamster_supplemental.schema.yaml */; };
@@ -82,7 +82,7 @@
 			files = (
 				C0D856CC2B026FF6003DB275 /* rime-ice.zip in Copy Rime SharedSupport */,
 				C0D672B429F1E0E7002D0439 /* SharedSupport.zip in Copy Rime SharedSupport */,
-				1BFEF7EB3587428ABE1CC929 /* zh-hans-t-essay-bgw.gram in Copy Rime SharedSupport */,
+				1BFEF7EB3587428ABE1CC929 /* qwen14b-zh-hans.gram in Copy Rime SharedSupport */,
 				4321BA86393C4D7C9EADA3B7 /* hamster_supplemental.dict.yaml in Copy Rime SharedSupport */,
 				50253AA1C45B4A23851C0420 /* hamster_supplemental.schema.yaml in Copy Rime SharedSupport */,
 			);
@@ -143,7 +143,7 @@
 		C0C8B57E2A823BBF009972C1 /* HamsterKeyboardKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = HamsterKeyboardKit; path = Packages/HamsterKeyboardKit; sourceTree = "<group>"; };
 		C0C9041C2A56412200AF3F15 /* hamster.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = hamster.yaml; sourceTree = "<group>"; };
 		C0D672B329F1E066002D0439 /* SharedSupport.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = SharedSupport.zip; sourceTree = "<group>"; };
-		ABE73908B07046AB99087579 /* zh-hans-t-essay-bgw.gram */ = {isa = PBXFileReference; lastKnownFileType = file; path = zh-hans-t-essay-bgw.gram; sourceTree = "<group>"; };
+		ABE73908B07046AB99087579 /* qwen14b-zh-hans.gram */ = {isa = PBXFileReference; lastKnownFileType = file; path = qwen14b-zh-hans.gram; sourceTree = "<group>"; };
 		C0D856C92B0213E5003DB275 /* HamsterDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HamsterDebug.entitlements; sourceTree = "<group>"; };
 		C0D856CA2B026FDA003DB275 /* rime-ice.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = "rime-ice.zip"; sourceTree = "<group>"; };
 		EF928075720F4626B9D9052D /* hamster_supplemental.dict.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = hamster_supplemental.dict.yaml; sourceTree = "<group>"; };
@@ -337,7 +337,7 @@
 				C0D856CA2B026FDA003DB275 /* rime-ice.zip */,
 				C0C9041C2A56412200AF3F15 /* hamster.yaml */,
 				C0D672B329F1E066002D0439 /* SharedSupport.zip */,
-				ABE73908B07046AB99087579 /* zh-hans-t-essay-bgw.gram */,
+				ABE73908B07046AB99087579 /* qwen14b-zh-hans.gram */,
 				EF928075720F4626B9D9052D /* hamster_supplemental.dict.yaml */,
 				9F9ED26A4DAC4D1DB06CC908 /* hamster_supplemental.schema.yaml */,
 			);

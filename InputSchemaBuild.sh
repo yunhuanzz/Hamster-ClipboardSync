@@ -110,22 +110,31 @@ rm -rf $OUTPUT/.$input_scheme_name && \
   cp -R $OUTPUT/.$input_scheme_name/*.zip $CI_PRIMARY_REPOSITORY_PATH/Resources/SharedSupport/
 
 
-# 本地语言模型 (第 15 轮第 1 项): lotem/rime-octagram-data hans 分支的简体词模型。
-# 注意: 实测 40,925,228 字节 (约 39MB), 不是方案里写的约 10MB (10MB 的是字模型 bgc,
-# 实测会把造句质量拉垮, 见 Docs/r15-lm-fork-patch/README.md); IPA 约 28MB -> 约 69MB。
+# 本地语言模型 (变体 B, 蒸馏版): mizorewww/rime-qwen-freq v0.4.0 的
+# qwen14b-zh-hans.gram (Qwen3-14B 离线蒸馏, 实测 11,935,788 字节约 11.4MB)。
+# Release 只提供 .gz, 先下载校验再解压 (见下); IPA 约 69MB -> 约 41MB。
 # 文件不进 git (见 .gitignore), 以散文件放进 Resources/SharedSupport/ (不在
 # SharedSupport.zip 里, 原因同上: zip 只在首次运行/重置时才解压)。
 # 运行时 deployment()/syncRime() 会把它拷进沙盒 SharedSupport, 再同步到 App Group。
-gram_file="zh-hans-t-essay-bgw.gram"
-gram_sha256="d3cb2438c1fdcd6a855dd6ca8f5c1060a29273c6b64c2c2c69af67cd71b6aa7e"
-gram_url="https://raw.githubusercontent.com/lotem/rime-octagram-data/hans/${gram_file}"
+gram_file="qwen14b-zh-hans.gram"
+gram_sha256="b655cc8d4bf0097cc06c46c37238f3880db6e19b7cd996637ed1cb253336e8ce"
+gram_gz_url="https://github.com/mizorewww/rime-qwen-freq/releases/download/v0.4.0/qwen14b-zh-hans.gram.gz"
+gram_gz_sha256="e1be79d20ea469efef8336d4952d27e7b9a0c676df973fea3f8f65428fdf5b75"
 gram_dst="$CI_PRIMARY_REPOSITORY_PATH/Resources/SharedSupport/${gram_file}"
 gram_actual_sha256=""
 if [[ -f "$gram_dst" ]]; then
   gram_actual_sha256="$(shasum -a 256 "$gram_dst" | awk '{print $1}')"
 fi
 if [[ "$gram_actual_sha256" != "$gram_sha256" ]]; then
-  [ -z "${no_download}" ] && curl -L -o "$gram_dst" "$gram_url"
+  gram_gz_dst="${gram_dst}.gz"
+  [ -z "${no_download}" ] && curl -L -o "$gram_gz_dst" "$gram_gz_url"
+  gram_gz_actual_sha256="$(shasum -a 256 "$gram_gz_dst" 2>/dev/null | awk '{print $1}')" || gram_gz_actual_sha256=""
+  if [[ "$gram_gz_actual_sha256" != "$gram_gz_sha256" ]]; then
+    echo "ERROR: ${gram_file}.gz SHA256 mismatch (got $gram_gz_actual_sha256, want $gram_gz_sha256)" >&2
+    exit 1
+  fi
+  gunzip -c "$gram_gz_dst" > "$gram_dst"
+  rm -f "$gram_gz_dst"
   gram_actual_sha256="$(shasum -a 256 "$gram_dst" 2>/dev/null | awk '{print $1}')" || gram_actual_sha256=""
 fi
 if [[ "$gram_actual_sha256" != "$gram_sha256" ]]; then

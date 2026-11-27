@@ -5,10 +5,11 @@
 //  本地语言模型 (第 15 轮第 1 项, RIME octagram)。
 //
 //  做法 (不改上游仓库本身): 往 rime_ice.custom.yaml / t9.custom.yaml 里打补丁,
-//  配上随安装包下发的 zh-hans-t-essay-bgw.gram。补丁内容照
-//  lotem/rime-octagram-data 的 grammar.yaml 的 hans: 段原样抄:
+//  配上随安装包下发的 qwen14b-zh-hans.gram (变体 B, 蒸馏版)。补丁内容除
+//  grammar/language 一行外, 照 lotem/rime-octagram-data 的 grammar.yaml 的
+//  hans: 段原样抄:
 //
-//    grammar/language: zh-hans-t-essay-bgw
+//    grammar/language: qwen14b-zh-hans
 //    translator/contextual_suggestions: true
 //    translator/max_homophones: 7
 //    translator/max_homographs: 7
@@ -23,9 +24,9 @@
 //  缓解; 代价是句子候选每 span 的同音选择变少, 需真机验证 4263 好的 #1、
 //  64426 你好 #1 等不变, 若句子 #1 变差则回退到 4。
 //
-//  .gram 文件本身不在这里: 它是 40,925,228 字节 (约 39MB), 构建时由
-//  InputSchemaBuild.sh 从 lotem/rime-octagram-data 的 hans 分支下载并校验
-//  SHA256, 以散文件放进安装包的 SharedSupport/ (不进 git, 不在
+//  .gram 文件本身不在这里: 它是 11,935,788 字节 (约 11.4MB), 构建时由
+//  InputSchemaBuild.sh 从 mizorewww/rime-qwen-freq 的 v0.4.0 Release 下载
+//  .gz 并校验 SHA256 后解压, 以散文件放进安装包的 SharedSupport/ (不进 git, 不在
 //  SharedSupport.zip 里——zip 只在首次运行/重置时才解压, 老用户升级收不到)。
 //  运行时 ensureGramFile() 把它拷进沙盒 SharedSupport, 部署末尾现成的
 //  syncSandboxSharedSupportDirectoryToAppGroup() 再同步到 App Group, 键盘
@@ -54,18 +55,19 @@ import Foundation
 /// 本地语言模型 (octagram) 补丁 + .gram 文件投递 (常开, 两方案都写)。
 public enum LanguageModel {
   /// 模型文件名 (安装包 SharedSupport/ 里的散文件, 也是共享数据目录里的文件名)。
-  public static let gramFileName = "zh-hans-t-essay-bgw.gram"
+  public static let gramFileName = "qwen14b-zh-hans.gram"
 
-  /// 模型文件实测大小 (字节, 2026-11-24 下载实测; 不是方案里写的约 10MB)。
-  public static let gramByteSize = 40925228
+  /// 模型文件实测大小 (字节, 2026-11-26 下载实测)。
+  public static let gramByteSize = 11935788
 
-  /// 模型文件 SHA256 (2026-11-24 下载实测; InputSchemaBuild.sh 下载时校验,
+  /// 模型文件 SHA256 (2026-11-26 下载实测; InputSchemaBuild.sh 下载时校验,
   /// 这里只留作核对, 拷文件时以大小为准)。
-  public static let gramSHA256 = "d3cb2438c1fdcd6a855dd6ca8f5c1060a29273c6b64c2c2c69af67cd71b6aa7e"
+  public static let gramSHA256 = "b655cc8d4bf0097cc06c46c37238f3880db6e19b7cd996637ed1cb253336e8ce"
 
-  /// 补丁行 (照 lotem/rime-octagram-data grammar.yaml 的 hans: 段原样抄)。
+  /// 补丁行 (除 grammar/language 一行外照 lotem/rime-octagram-data
+  /// grammar.yaml 的 hans: 段原样抄; 语言名改为蒸馏版 qwen14b-zh-hans)。
   public static let patchLines: [String] = [
-    "grammar/language: zh-hans-t-essay-bgw",
+    "grammar/language: qwen14b-zh-hans",
     "translator/contextual_suggestions: true",
     "translator/max_homophones: 3",
     "translator/max_homographs: 7",
