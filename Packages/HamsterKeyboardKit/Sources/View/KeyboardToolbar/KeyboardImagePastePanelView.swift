@@ -409,7 +409,9 @@ class KeyboardImageZoomView: UIView, UIScrollViewDelegate, UIGestureRecognizerDe
   // MARK: UIGestureRecognizerDelegate
 
   /// 拖动退出只在未放大时开始 (放大后拖动交给 scrollView 滚动)。
-  func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+  /// 注意: UIView 本身就有 gestureRecognizerShouldBegin, 这里是
+  /// override 它 (同时满足 UIGestureRecognizerDelegate 的要求)。
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     if gestureRecognizer === dismissPan {
       return scrollView.zoomScale == 1.0
     }
