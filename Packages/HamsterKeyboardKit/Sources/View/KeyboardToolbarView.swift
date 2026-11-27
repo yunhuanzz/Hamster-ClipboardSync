@@ -264,6 +264,11 @@ class KeyboardToolbarView: NibLessView {
   private var lastReadPasteboardText: String?
   /// 粘贴提示行是否正在展示 (展示时工具栏其他按钮暂时隐藏)。
   private var isPasteRowVisible = false
+  /// 粘贴提示行当前展示的是图片 (true) 还是文字 (false)。
+  /// 图片行: 左侧 photo 图标 + "拷贝的图片"文字, 右侧 ⌄ 藏起来 (图片没有分段),
+  /// 点文字打开图片面板, 点 X / 打字时折成右侧临时图片图标
+  /// (用户 2026-11-27: 新图片先在左边图标+文字提醒, 没马上查看才放右侧临时图标)。
+  private var isPasteRowShowingImage = false
 
   /// 工具栏长按拖动/删除 (第 8 轮): 长按任一工具图标可横向拖动换位,
   /// 松手即保存顺序; 长按不动松手则在该图标右上角出一个红 ⊖,
@@ -1831,8 +1836,17 @@ class KeyboardToolbarView: NibLessView {
   func refreshClipboardChip() {
     #if canImport(UIKit)
       guard !commonFunctionBar.isHidden else {
-        hideClipboardChip()
-        hideTempImageIcon()
+        // 工具栏隐藏 (打字中): 文字提示行直接收掉; 图片提示行折成
+        // 右侧临时图标 (图片图标打字时不藏, 仍是临时粘贴入口)。
+        // 剪贴板里没图片了才收掉临时图标。
+        if isPasteRowShowingImage {
+          hideImagePasteRow(fold: true)
+        } else {
+          hideClipboardChip()
+        }
+        if !UIPasteboard.general.hasImages {
+          hideTempImageIcon()
+        }
         return
       }
       let currentChangeCount = UIPasteboard.general.changeCount
@@ -1846,39 +1860,63 @@ class KeyboardToolbarView: NibLessView {
         lastReadPasteboardText = nil
       }
       showClipboardChipFromCache()
-      refreshTempImageIcon()
+      refreshImagePasteRow()
     #endif
   }
 
-  /// 剪贴板里有图片时在工具栏亮起图片图标 (仿微信输入法), 没有时收掉。
+  /// 剪贴板里有图片时决定提示形态 (用户 2026-11-27: 新图片先在左边
+  /// 出图标+文字的粘贴提示行, 没马上查看才折成右侧临时图标):
+  /// - 没图片 / 已忽略过 (点开面板) → 提示行与临时图标都收掉;
+  /// - 已折叠过 (打字 / 点 X 收起) → 提示行不再重推, 只亮右侧临时图标;
+  /// - 新图片 → 左侧出图标+文字的粘贴提示行, 右侧临时图标先不亮。
   /// 只读 hasImages (元数据, 不读图片字节, 不弹"粘贴自 xxx"横幅)。
   /// 与文字提示行互不干扰: 图片剪贴板里 cachedPasteboardText 为空,
-  /// 文字行本来就不会出来; 文字剪贴板里 hasImages 为假, 图标也不会出来。
-  /// 已忽略过 (点开面板/X 关闭) 的同一张图片不再重亮, 直到剪贴板换新内容。
-  private func refreshTempImageIcon() {
+  /// 文字行本来就不会出来; 文字剪贴板里 hasImages 为假, 图片行也不会出来。
+  /// 已忽略过 (点开面板) 的同一张图片不再重亮, 直到剪贴板换新内容。
+  private func refreshImagePasteRow() {
     #if canImport(UIKit)
       guard !commonFunctionBar.isHidden else {
-        hideTempImageIcon()
+        // 工具栏隐藏 (打字中): 与 refreshClipboardChip 的早退同款——
+        // 图片行折成右侧临时图标 (打字时不藏), 没图片才收掉临时图标。
+        if isPasteRowShowingImage {
+          hideImagePasteRow(fold: true)
+        } else if !UIPasteboard.general.hasImages {
+          hideTempImageIcon()
+        }
         return
       }
       let currentChangeCount = UIPasteboard.general.changeCount
       guard UIPasteboard.general.hasImages else {
+        hideImagePasteRow(fold: false)
         hideTempImageIcon()
         return
       }
-      // 同一张图片只亮一次: 点开面板或 X 关闭后记下 changeCount,
-      // 剪贴板没换内容就不重亮 (与文字提示行的已忽略记录同款思路,
+      // 同一张图片只提示一次: 点开面板后记下 changeCount,
+      // 剪贴板没换内容就不重推 (与文字提示行的已忽略记录同款思路,
       // 但图片没有文本哈希可记, 只认 changeCount)。
       if UserDefaults.hamster.tempImageDismissedChangeCount == currentChangeCount {
+        hideImagePasteRow(fold: false)
         hideTempImageIcon()
+        return
+      }
+      // 文字提示行正在展示时不抢行 (剪贴板里文字和图片互斥, 正常不会同时出现)。
+      if isPasteRowVisible, clipboardChipText != nil {
+        hideTempImageIcon()
+        return
+      }
+      // 已折叠过 (打字 / 点 X 收起): 提示行不再重推, 只亮右侧临时图标。
+      if UserDefaults.hamster.tempImageFoldedChangeCount == currentChangeCount {
+        hideImagePasteRow(fold: false)
+        tempImageChangeCount = currentChangeCount
+        showTempImageIcon()
         return
       }
       // 已在提示同一张图片时不重复布局。
-      if tempImageChangeCount == currentChangeCount, !tempImageButton.isHidden {
+      if tempImageChangeCount == currentChangeCount, isPasteRowVisible, isPasteRowShowingImage {
         return
       }
       tempImageChangeCount = currentChangeCount
-      showTempImageIcon()
+      displayImagePasteRow()
     #endif
   }
 
@@ -1943,19 +1981,84 @@ class KeyboardToolbarView: NibLessView {
   }
 
   /// 显示微信式粘贴提示行 (文字 + ⌄ 展开 + X), 并暂时隐藏工具栏其他按钮。
+  /// 文字行: 左侧恢复剪贴板图标, 右侧 ⌄ 显示 (图片行会把图标换成 photo
+  /// 并藏起 ⌄, 这里要恢复, 否则下一条文字行会沿用图片行的样子)。
   private func displayPasteRow(text: String) {
     // 单行显示, 换行符转空格, 超长由 label 截断
     let singleLine = text.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+    pasteRowIconView.image = UIImage(
+      systemName: "list.bullet.clipboard",
+      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 15, weight: .medium)))
+    pasteRowExpandButton.isHidden = false
+    isPasteRowShowingImage = false
     pasteRowTextButton.setTitle(singleLine, for: .normal)
     pasteRowView.isHidden = false
     isPasteRowVisible = true
     [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = true }
   }
 
+  /// 显示图片粘贴提示行 (仿微信, 用户 2026-11-27):
+  /// 左侧 photo 图标 + "拷贝的图片"文字, 右侧 ⌄ 藏起来 (图片没有分段),
+  /// X 保留。点文字打开图片面板; 点 X / 打字时折成右侧临时图片图标。
+  /// 与文字行共用 pasteRowView (剪贴板里文字和图片互斥, 不会同时出现)。
+  private func displayImagePasteRow() {
+    pasteRowIconView.image = UIImage(
+      systemName: "photo",
+      withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 15, weight: .medium)))
+    pasteRowTextButton.setTitle("拷贝的图片", for: .normal)
+    pasteRowExpandButton.isHidden = true
+    isPasteRowShowingImage = true
+    pasteRowView.isHidden = false
+    isPasteRowVisible = true
+    [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = true }
+    hideTempImageIcon()
+  }
+
+  /// 收掉图片粘贴提示行。fold=true 表示"这次先不看": 记下折叠态并亮起
+  /// 右侧临时图片图标 (点临时图标还能打开); fold=false 表示彻底收掉
+  /// (已忽略 / 剪贴板换了内容), 不亮临时图标。
+  /// 只在提示行确实在展示图片时才动作 (文字行不走这里)。
+  private func hideImagePasteRow(fold: Bool) {
+    guard isPasteRowShowingImage else { return }
+    hideClipboardChip()
+    if fold {
+      UserDefaults.hamster.tempImageFoldedChangeCount = currentPasteboardChangeCount
+      tempImageChangeCount = currentPasteboardChangeCount
+      showTempImageIcon()
+    }
+  }
+
+  /// 图片提示行正在展示时用户开始打字: 把提示行折成右侧临时图片图标
+  /// (与文字行的 collapsePasteRowToTempIconIfNeeded 同款)。
+  /// 图片图标打字时不藏 (showTempImageIcon 直接亮出来)。
+  private func collapseImagePasteRowToTempIconIfNeeded() {
+    guard isPasteRowVisible, isPasteRowShowingImage else { return }
+    hideImagePasteRow(fold: true)
+  }
+
+  /// 从图片提示行点文字打开图片面板: 记为已忽略 (关面板后不再提示),
+  /// 折叠态随之作废, 提示行与临时图标都收掉。
+  private func openImagePanelFromPasteRow() {
+    guard let image = currentPasteboardImage() else {
+      hideImagePasteRow(fold: false)
+      hideTempImageIcon()
+      return
+    }
+    hideImagePasteRow(fold: false)
+    hideTempImageIcon()
+    UserDefaults.hamster.tempImageDismissedChangeCount = currentPasteboardChangeCount
+    UserDefaults.hamster.tempImageFoldedChangeCount = -1
+    showImagePastePanel(image: image)
+  }
+
   private func hideClipboardChip() {
     pasteRowView.isHidden = true
     isPasteRowVisible = false
     clipboardChipText = nil
+    // 提示行收掉时图片标记与 ⌄ 一并复位 (图片行会把图标换成 photo
+    // 并藏起 ⌄, 下一条文字行要恢复原样)。
+    isPasteRowShowingImage = false
+    pasteRowExpandButton.isHidden = false
     // 恢复工具栏按钮 (不在布局里的按钮改 isHidden 也没影响)
     [iconButton, clipboardButton, phrasesButton, dismissKeyboardButton].forEach { $0.isHidden = false }
   }
@@ -1990,6 +2093,8 @@ class KeyboardToolbarView: NibLessView {
   /// 图标不亮出来, 等输入清空后再由 updateCandidateBar / 外部建议
   /// sink 里的折叠恢复分支把它请回来。)
   private func collapsePasteRowToTempIconIfNeeded() {
+    // 图片提示行: 打字时折成右侧临时图标 (用户 2026-11-27)。
+    collapseImagePasteRowToTempIconIfNeeded()
     guard tempCopyText == nil, isPasteRowVisible, let text = clipboardChipText, !text.isEmpty else { return }
     tempCopyText = text
     // 折叠态持久化 (第 17 轮反馈修): 输入清空、键盘重建后图标都还在,
@@ -2066,6 +2171,7 @@ class KeyboardToolbarView: NibLessView {
     }
     hideTempImageIcon()
     UserDefaults.hamster.tempImageDismissedChangeCount = currentPasteboardChangeCount
+    UserDefaults.hamster.tempImageFoldedChangeCount = -1
     showImagePastePanel(image: image)
   }
 
@@ -2268,8 +2374,13 @@ class KeyboardToolbarView: NibLessView {
     }
   }
 
-  /// 点粘贴提示行文字: 把剪贴板内容输入到当前输入框, 之后不再重复提示同一内容。
+  /// 点粘贴提示行文字: 图片行 → 打开图片面板; 文字行 → 把剪贴板内容
+  /// 输入到当前输入框, 之后不再重复提示同一内容。
   @objc private func pasteRowTextTapped() {
+    if isPasteRowShowingImage {
+      openImagePanelFromPasteRow()
+      return
+    }
     guard let text = clipboardChipText, !text.isEmpty else { return }
     UserDefaults.hamster.markClipboardChipDismissed(
       hash: ClipboardSyncService.sha256(text),
@@ -2280,8 +2391,14 @@ class KeyboardToolbarView: NibLessView {
     UserDefaults.hamster.recordClipboardHistory(text)
   }
 
-  /// 点粘贴提示行右侧 X: 关闭提示, 相同内容不再重复提示 (直到剪贴板换成新内容)。
+  /// 点粘贴提示行右侧 X: 图片行 → 折成右侧临时图标 (这次先不看,
+  /// 点临时图标还能打开, 不是彻底忽略); 文字行 → 关闭提示,
+  /// 相同内容不再重复提示 (直到剪贴板换成新内容)。
   @objc private func pasteRowCloseTapped() {
+    if isPasteRowShowingImage {
+      hideImagePasteRow(fold: true)
+      return
+    }
     if let text = clipboardChipText, !text.isEmpty {
       UserDefaults.hamster.markClipboardChipDismissed(
         hash: ClipboardSyncService.sha256(text),

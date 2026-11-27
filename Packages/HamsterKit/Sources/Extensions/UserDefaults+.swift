@@ -577,6 +577,18 @@ public extension UserDefaults {
     set { set(newValue, forKey: Self.tempImageDismissedChangeCountKey) }
   }
 
+  /// 已折叠过的图片对应的 UIPasteboard.changeCount (持久化):
+  /// 图片提示行 (左侧图标+文字) 因打字 / 点 X 收起后记下, 折叠态
+  /// 下提示行不再重推, 只在右侧亮临时图片图标, 直到剪贴板换新内容
+  /// 或点开面板 (点开面板记为已忽略, 折叠态随之作废)。-1 表示没有折叠态。
+  var tempImageFoldedChangeCount: Int {
+    get {
+      guard object(forKey: Self.tempImageFoldedChangeCountKey) != nil else { return -1 }
+      return integer(forKey: Self.tempImageFoldedChangeCountKey)
+    }
+    set { set(newValue, forKey: Self.tempImageFoldedChangeCountKey) }
+  }
+
   /// 剪贴板文本缓存的字符数上限 (超长不存, 只记 truncated 标记)。
   static let clipboardLastSeenTextMaxLength = 262_144
 
@@ -1228,6 +1240,7 @@ extension UserDefaults {
   private static let tempCopyFoldedTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempCopyFoldedText"
   private static let tempCopyFoldedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempCopyFoldedChangeCount"
   private static let tempImageDismissedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempImageDismissedChangeCount"
+  private static let tempImageFoldedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempImageFoldedChangeCount"
   private static let pinnedCandidatesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.pinnedCandidates"
   private static let pinnedCandidatesMaxCount = 50
   private static let learnedAssociationsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.learnedAssociations"
