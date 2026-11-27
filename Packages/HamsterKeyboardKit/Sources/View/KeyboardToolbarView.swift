@@ -2080,19 +2080,21 @@ class KeyboardToolbarView: NibLessView {
     #endif
   }
 
-  /// 打开"拷贝的图片"面板 (仿微信): 顶部 [图片图标 拷贝的图片 | X],
-  /// 中间是图片缩略图, 点图片粘贴 (图片已在剪贴板, 长按输入框粘贴),
-  /// X 关闭面板。
+  /// 打开"拷贝的图片"面板 (仿微信): 左上角返回箭头 (裸图标), 中间白色卡片里的
+  /// 图片小图 (点小图看大图), 下面提示文字, 底部"复制到剪贴板"文字按钮。
   private func showImagePastePanel(image: UIImage) {
     dismissAllPanels()
     guard let container = superview else { return }
     let panel = KeyboardImagePastePanelView()
     panel.panelBackgroundColor = opaquePanelBackgroundColor
-    panel.onTapImage = { [weak self] in
+    panel.onCopy = { [weak self] in
       guard let self else { return }
+      // 复制到剪贴板: 键盘扩展无法直接往输入框插图片, 所以把图片放进
+      // 系统剪贴板 (写剪贴板不弹横幅), 用户长按输入框粘贴即可。
+      #if canImport(UIKit)
+        UIPasteboard.general.image = image
+      #endif
       self.dismissImagePastePanel()
-      // 图片已在系统剪贴板里, 键盘扩展无法直接往输入框插图片:
-      // 点图片后收起面板, 用户长按输入框粘贴即可 (与用户实测一致)。
     }
     panel.onClose = { [weak self] in self?.dismissImagePastePanel() }
     panel.translatesAutoresizingMaskIntoConstraints = false
