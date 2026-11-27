@@ -566,6 +566,17 @@ public extension UserDefaults {
     set { set(newValue, forKey: Self.tempCopyFoldedChangeCountKey) }
   }
 
+  /// 已忽略过的图片对应的 UIPasteboard.changeCount (持久化):
+  /// 点开图片面板、或 X 关闭后记下, 同一张图片不再重亮图标,
+  /// 直到剪贴板换了新内容。-1 表示没有已忽略的图片。
+  var tempImageDismissedChangeCount: Int {
+    get {
+      guard object(forKey: Self.tempImageDismissedChangeCountKey) != nil else { return -1 }
+      return integer(forKey: Self.tempImageDismissedChangeCountKey)
+    }
+    set { set(newValue, forKey: Self.tempImageDismissedChangeCountKey) }
+  }
+
   /// 剪贴板文本缓存的字符数上限 (超长不存, 只记 truncated 标记)。
   static let clipboardLastSeenTextMaxLength = 262_144
 
@@ -1216,6 +1227,7 @@ extension UserDefaults {
   private static let clipboardLastSeenTextTruncatedKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenTextTruncated"
   private static let tempCopyFoldedTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempCopyFoldedText"
   private static let tempCopyFoldedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempCopyFoldedChangeCount"
+  private static let tempImageDismissedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.tempImageDismissedChangeCount"
   private static let pinnedCandidatesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.pinnedCandidates"
   private static let pinnedCandidatesMaxCount = 50
   private static let learnedAssociationsKey = "com.ihsiao.apps.Hamster.UserDefault.keys.learnedAssociations"

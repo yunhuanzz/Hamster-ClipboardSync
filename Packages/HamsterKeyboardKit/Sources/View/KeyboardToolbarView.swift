@@ -321,6 +321,9 @@ class KeyboardToolbarView: NibLessView {
   /// 当前展示的粘贴内容分段展开面板, 覆盖在键盘根视图上
   private var segmentsPanel: KeyboardPasteSegmentsPanelView?
 
+  /// 当前展示的"拷贝的图片"面板, 覆盖在键盘根视图上 (仿微信输入法)
+  private var imagePastePanel: KeyboardImagePastePanelView?
+
   /// 当前展示的剪贴板全文展开视图, 覆盖在键盘根视图上 (长按剪贴板条目打开;
   /// 关闭后回到底下的剪贴板面板, 第 17 轮第 6 项)
   private var expandedClipboardView: KeyboardClipboardExpandedView?
@@ -386,6 +389,36 @@ class KeyboardToolbarView: NibLessView {
 
   /// 折叠进临时图标的那条复制内容 (nil 表示没有折叠态)。
   private var tempCopyText: String?
+
+  /// 临时图片图标: 剪贴板里有图片时在工具栏提示 (仿微信输入法)。
+  /// SF `photo` (山水照片), 与临时复制图标同一套瞬态模式——不在
+  /// toolbarToolDefinitions、不进菜单、不进定制池; .label、裸图标。
+  /// 位置在临时复制图标左侧 (见 updateTransientButtonsLayout)。
+  /// 点按打开"拷贝的图片"面板; 打开后图标收掉 (一次性, 与临时复制同款)。
+  private lazy var tempImageButton: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "photo"), for: .normal)
+    button.setPreferredSymbolConfiguration(.init(font: .systemFont(ofSize: 18), scale: .default), forImageIn: .normal)
+    button.tintColor = .label
+    button.backgroundColor = .clear
+    button.isHidden = true
+    button.addTarget(self, action: #selector(tempImageButtonTapped), for: .touchUpInside)
+    return button
+  }()
+
+  /// 临时图片图标的横向锚点 (两条互斥, 见 updateTransientButtonsLayout):
+  /// 临时复制图标在时贴它左边, 不在时直接贴右侧工具组左边。
+  private var imageTrailingToTempCopyConstraint: NSLayoutConstraint?
+  private var imageTrailingToRightStackConstraint: NSLayoutConstraint?
+
+  /// 临时撤回图标的第三条横向锚点: 临时图片图标在时贴它左边
+  /// (见 updateTransientButtonsLayout)。
+  private var undoTrailingToImageConstraint: NSLayoutConstraint?
+
+  /// 当前在提示的那张图片对应的剪贴板 changeCount (nil 表示没有图片提示)。
+  /// 与临时复制的折叠态同款: 只认这一次 changeCount, 剪贴板一换内容就失效。
+  private var tempImageChangeCount: Int?
 
   // TODO: 常用功能栏
   lazy var commonFunctionBar: UIView = {
@@ -520,6 +553,7 @@ class KeyboardToolbarView: NibLessView {
     addSubview(commonFunctionBar)
     setupPasteRow()
     setupTempCopyButton()
+    setupTempImageButton()
     setupUndoDeleteButton()
     rebuildToolbarButtons()
   }
@@ -542,6 +576,19 @@ class KeyboardToolbarView: NibLessView {
       tempCopyButton.widthAnchor.constraint(equalToConstant: 24),
     ].compactMap { $0 })
     updateTempCopyVerticalAnchor()
+  }
+
+  /// 临时图片图标: 纵向与临时复制图标对齐
+  /// (centerY == tempCopyButton.centerY, 所以跟它一样随状态切换锚点)。
+  /// 横向锚点挂在 setupToolsStackLayoutIfNeeded 里
+  /// (见 updateTransientButtonsLayout)。
+  private func setupTempImageButton() {
+    addSubview(tempImageButton)
+    NSLayoutConstraint.activate([
+      tempImageButton.centerYAnchor.constraint(equalTo: tempCopyButton.centerYAnchor),
+      tempImageButton.heightAnchor.constraint(equalToConstant: 24),
+      tempImageButton.widthAnchor.constraint(equalToConstant: 24),
+    ])
   }
 
   /// 临时撤回图标: 钉在右侧固定工具组的左侧 (或临时复制图标左侧,
@@ -996,6 +1043,7 @@ class KeyboardToolbarView: NibLessView {
     dismissMenuPanel()
     dismissPhrasesEditorPanel()
     dismissSegmentsPanel()
+    dismissImagePastePanel()
     dismissExpandedClipboardView()
   }
 
@@ -1102,11 +1150,17 @@ class KeyboardToolbarView: NibLessView {
     commonFunctionBar.addSubview(leftToolsStackView)
     commonFunctionBar.addSubview(rightToolsStackView)
     commonFunctionBar.addSubview(dismissKeyboardButton)
-    // 临时撤回图标的横向锚点 (两条互斥): 临时复制图标在时贴它左边,
-    // 不在时直接贴右侧工具组左边。这里只创建不激活——激活由
+    // 临时撤回图标的横向锚点 (三条互斥): 临时图片图标在时贴它左边,
+    // 图片不在、临时复制图标在时贴临时复制左边, 两个都不在时直接贴
+    // 右侧工具组左边。这里只创建不激活——激活由
     // updateTransientButtonsLayout 按当前状态切换 (同时只激活一条)。
+    undoTrailingToImageConstraint = undoDeleteButton.trailingAnchor.constraint(equalTo: tempImageButton.leadingAnchor, constant: -12)
     undoTrailingToTempCopyConstraint = undoDeleteButton.trailingAnchor.constraint(equalTo: tempCopyButton.leadingAnchor, constant: -12)
     undoTrailingToRightStackConstraint = undoDeleteButton.trailingAnchor.constraint(equalTo: rightToolsStackView.leadingAnchor, constant: -12)
+    // 临时图片图标的横向锚点 (两条互斥): 临时复制图标在时贴它左边,
+    // 不在时直接贴右侧工具组左边。同样只创建不激活。
+    imageTrailingToTempCopyConstraint = tempImageButton.trailingAnchor.constraint(equalTo: tempCopyButton.leadingAnchor, constant: -12)
+    imageTrailingToRightStackConstraint = tempImageButton.trailingAnchor.constraint(equalTo: rightToolsStackView.leadingAnchor, constant: -12)
     NSLayoutConstraint.activate([
       iconButton.leadingAnchor.constraint(equalTo: commonFunctionBar.leadingAnchor),
       iconButton.centerYAnchor.constraint(equalTo: commonFunctionBar.centerYAnchor),
@@ -1778,6 +1832,7 @@ class KeyboardToolbarView: NibLessView {
     #if canImport(UIKit)
       guard !commonFunctionBar.isHidden else {
         hideClipboardChip()
+        hideTempImageIcon()
         return
       }
       let currentChangeCount = UIPasteboard.general.changeCount
@@ -1791,6 +1846,39 @@ class KeyboardToolbarView: NibLessView {
         lastReadPasteboardText = nil
       }
       showClipboardChipFromCache()
+      refreshTempImageIcon()
+    #endif
+  }
+
+  /// 剪贴板里有图片时在工具栏亮起图片图标 (仿微信输入法), 没有时收掉。
+  /// 只读 hasImages (元数据, 不读图片字节, 不弹"粘贴自 xxx"横幅)。
+  /// 与文字提示行互不干扰: 图片剪贴板里 cachedPasteboardText 为空,
+  /// 文字行本来就不会出来; 文字剪贴板里 hasImages 为假, 图标也不会出来。
+  /// 已忽略过 (点开面板/X 关闭) 的同一张图片不再重亮, 直到剪贴板换新内容。
+  private func refreshTempImageIcon() {
+    #if canImport(UIKit)
+      guard !commonFunctionBar.isHidden else {
+        hideTempImageIcon()
+        return
+      }
+      let currentChangeCount = UIPasteboard.general.changeCount
+      guard UIPasteboard.general.hasImages else {
+        hideTempImageIcon()
+        return
+      }
+      // 同一张图片只亮一次: 点开面板或 X 关闭后记下 changeCount,
+      // 剪贴板没换内容就不重亮 (与文字提示行的已忽略记录同款思路,
+      // 但图片没有文本哈希可记, 只认 changeCount)。
+      if UserDefaults.hamster.tempImageDismissedChangeCount == currentChangeCount {
+        hideTempImageIcon()
+        return
+      }
+      // 已在提示同一张图片时不重复布局。
+      if tempImageChangeCount == currentChangeCount, !tempImageButton.isHidden {
+        return
+      }
+      tempImageChangeCount = currentChangeCount
+      showTempImageIcon()
     #endif
   }
 
@@ -1945,6 +2033,80 @@ class KeyboardToolbarView: NibLessView {
     updateTransientButtonsLayout()
   }
 
+  // MARK: - 临时图片提示 (仿微信输入法)
+
+  /// 显示临时图片图标 (剪贴板里有图片时调用)。
+  /// 与临时复制图标的区别: 图片图标打字时也不藏起来——用户打字没粘贴,
+  /// 图标就是那个"临时的图片粘贴框"入口, 随时能点开 (用户 2026-11-27 要求)。
+  /// 纵向与临时复制图标对齐, 横向按当前状态落一次
+  /// (见 updateTransientButtonsLayout)。
+  private func showTempImageIcon() {
+    tempImageButton.isHidden = false
+    bringSubviewToFront(tempImageButton)
+    updateTransientButtonsLayout()
+  }
+
+  /// 收掉临时图片图标并清掉当前提示的图片 (内存记录)。
+  /// 不碰已忽略记录——已忽略记录只在点开面板 / X 关闭时才写,
+  /// 剪贴板换内容 (hasImages 为假) 时这里只收图标, 不写忽略,
+  /// 下次再有图片还能正常亮起来。
+  private func hideTempImageIcon() {
+    tempImageButton.isHidden = true
+    tempImageChangeCount = nil
+    updateTransientButtonsLayout()
+  }
+
+  /// 点临时图片图标: 打开"拷贝的图片"面板; 打开后图标收掉 (一次性,
+  /// 与临时复制同款), 并把这张图片记为已忽略, 关面板不粘贴也不会
+  /// 让图标把它重新亮出来 (直到剪贴板换新内容)。
+  @objc private func tempImageButtonTapped() {
+    guard let image = currentPasteboardImage() else {
+      hideTempImageIcon()
+      return
+    }
+    hideTempImageIcon()
+    UserDefaults.hamster.tempImageDismissedChangeCount = currentPasteboardChangeCount
+    showImagePastePanel(image: image)
+  }
+
+  /// 读剪贴板里的图片 (点按图标/面板时才读一次, 会弹一次横幅, 与用户
+  /// 点按粘贴提示行读文本同款——点按是用户主动操作, 横幅可接受)。
+  /// 读不到图片时返回 nil。
+  private func currentPasteboardImage() -> UIImage? {
+    #if canImport(UIKit)
+      return UIPasteboard.general.image
+    #else
+      return nil
+    #endif
+  }
+
+  /// 打开"拷贝的图片"面板 (仿微信): 顶部 [图片图标 拷贝的图片 | X],
+  /// 中间是图片缩略图, 点图片粘贴 (图片已在剪贴板, 长按输入框粘贴),
+  /// X 关闭面板。
+  private func showImagePastePanel(image: UIImage) {
+    dismissAllPanels()
+    guard let container = superview else { return }
+    let panel = KeyboardImagePastePanelView()
+    panel.panelBackgroundColor = opaquePanelBackgroundColor
+    panel.onTapImage = { [weak self] in
+      guard let self else { return }
+      self.dismissImagePastePanel()
+      // 图片已在系统剪贴板里, 键盘扩展无法直接往输入框插图片:
+      // 点图片后收起面板, 用户长按输入框粘贴即可 (与用户实测一致)。
+    }
+    panel.onClose = { [weak self] in self?.dismissImagePastePanel() }
+    panel.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(panel)
+    panel.fillSuperview()
+    panel.reload(with: image)
+    imagePastePanel = panel
+  }
+
+  private func dismissImagePastePanel() {
+    imagePastePanel?.removeFromSuperview()
+    imagePastePanel = nil
+  }
+
   /// 临时复制图标的纵向锚点 (两条互斥, build #50 反馈修):
   /// 候选栏在展示 (commonFunctionBar 隐藏) 时钉拼音行内 (top+12);
   /// 工具栏在展示时与工具行垂直居中 (commonFunctionBar.centerY)。
@@ -1969,11 +2131,20 @@ class KeyboardToolbarView: NibLessView {
   /// 直接返回, 建好后那头会补调一次。
   private func updateTransientButtonsLayout() {
     guard undoTrailingToTempCopyConstraint != nil,
-          undoTrailingToRightStackConstraint != nil else { return }
+          undoTrailingToRightStackConstraint != nil,
+          imageTrailingToTempCopyConstraint != nil,
+          imageTrailingToRightStackConstraint != nil else { return }
     let undoVisible = undoDeleteText != nil
     let tempCopyVisible = !tempCopyButton.isHidden
-    undoTrailingToTempCopyConstraint?.isActive = undoVisible && tempCopyVisible
-    undoTrailingToRightStackConstraint?.isActive = !(undoVisible && tempCopyVisible)
+    let imageVisible = !tempImageButton.isHidden
+    // 图片图标: 临时复制在时贴它左边, 不在时直接贴右侧工具组。
+    imageTrailingToTempCopyConstraint?.isActive = imageVisible && tempCopyVisible
+    imageTrailingToRightStackConstraint?.isActive = imageVisible && !tempCopyVisible
+    // 撤回图标: 图片在时贴图片左边, 图片不在、临时复制在时贴临时复制
+    // 左边, 两个都不在时直接贴右侧工具组。
+    undoTrailingToImageConstraint?.isActive = undoVisible && imageVisible
+    undoTrailingToTempCopyConstraint?.isActive = undoVisible && !imageVisible && tempCopyVisible
+    undoTrailingToRightStackConstraint?.isActive = undoVisible && !imageVisible && !tempCopyVisible
   }
 
   /// 撤回快照变化 (控制器发来的通知): 有快照 → 展示撤回图标;
