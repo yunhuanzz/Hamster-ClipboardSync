@@ -140,7 +140,8 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
       .store(in: &subscriptions)
   }
 
-  /// 按当前输入重算边栏列表并应用 (列表为空时回落到默认符号)。
+  /// 按当前输入重算边栏列表并应用 (组字中途列表为空时保留当前边栏,
+  /// 不回落到标点; 组字结束时回落到默认符号)。
   /// 点选被拒绝时也直接调它自愈: 列表可能是旧的 (快照过期), 同步重算
   /// 一次, 免得用户对着一个点不动的旧音节反复点 (Bug A: 点 天气 后
   /// 边栏仍显示 tian)。逻辑与原来 sink 里的一致, 只是抽出来复用。
@@ -150,6 +151,12 @@ public class ChineseNineGridKeyboard: KeyboardTouchView, UICollectionViewDelegat
       let candidatePinyinList = rimeContext.getPinyinCandidates()
       if !candidatePinyinList.isEmpty {
         pinyinList = candidatePinyinList
+      } else {
+        // (2026-11-27 拼音栏变空) 组字中途列表为空时不要悄悄回落到标
+        // 点: 保留当前边栏 (上一次好的拼音列表), 让用户还能点选; 空
+        // 列表本身是数据问题, 不该用标点把它藏起来。组字结束
+        // (userInputKey 为空) 时仍走默认符号。
+        return
       }
     }
     var snapshot = NSDiffableDataSourceSnapshot<Int, String>()

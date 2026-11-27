@@ -18,6 +18,10 @@
 //  让下一段输入参考已上屏的文字; max_homophones/max_homographs 7 是上游
 //  grammar.yaml 里配套的值。注意 max_homophones 会改变进入词图的同音字数量,
 //  短输入也可能受影响——第 15 轮活验证过 4263 好的 #1、64426 你好 #1 不变。
+//  2026-11-27 改为 3 (上游仍是 7): 9 键长句卡顿实验——每 span 进词图的同音字
+//  从 7 减到 3, Poet 的 Grammar::Evaluate 调用同比例下降, 打字与点选卡顿都应
+//  缓解; 代价是句子候选每 span 的同音选择变少, 需真机验证 4263 好的 #1、
+//  64426 你好 #1 等不变, 若句子 #1 变差则回退到 4。
 //
 //  .gram 文件本身不在这里: 它是 40,925,228 字节 (约 39MB), 构建时由
 //  InputSchemaBuild.sh 从 lotem/rime-octagram-data 的 hans 分支下载并校验
@@ -63,7 +67,7 @@ public enum LanguageModel {
   public static let patchLines: [String] = [
     "grammar/language: zh-hans-t-essay-bgw",
     "translator/contextual_suggestions: true",
-    "translator/max_homophones: 7",
+    "translator/max_homophones: 3",
     "translator/max_homographs: 7",
   ]
 

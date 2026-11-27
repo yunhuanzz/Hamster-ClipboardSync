@@ -1219,6 +1219,14 @@ public extension RimeContext {
         break
       }
     }
+    // (2026-11-27 拼音栏变空) preedit 里没有已提交的中文时, 整个输入码
+    // 都是剩余输入, 偏移就是 0 —— 不要用 preedit 长度去推: preedit 显
+    // 示的可能是读音 (如 pg/co/w), 长度与输入码 (数字/已点字母) 不一
+    // 致, 长度推断会算出一个错误的偏移, 把剩余输入的前几位切掉
+    // (设备上 26 码输入对 18 字读音 preedit, 偏移被算成 8)。
+    if !preedit.isEmpty, start == preedit.startIndex {
+      return 0
+    }
     let remainingLen = preedit[start...].replacingOccurrences(of: " ", with: "").count
     return max(0, fullKeys.count - remainingLen)
   }
@@ -2126,6 +2134,14 @@ public extension RimeContext {
     var pinyinList = [String]()
     guard let preedit = rimeContext?.composition.preedit, !preedit.isEmpty else { return pinyinList }
 
+    // 剩余输入码 (一次算出, 列表推导与快照共用, 保持一致 #43)。
+    // 注意: 不用 sidebarRemainder() 的旧快照推导列表 —— 快照是上
+    // 一次列表生成时的, 点选改过输入后可能已失效; 这里用当前 preedit
+    // 与输入码现算, 快照块也捕获同一份。
+    let fullKeys = Rime.shared.getInputKeys()
+    let remainderOffset = remainingInputOffset()
+    let remainderKeys = remainderOffset <= fullKeys.count ? String(fullKeys.dropFirst(remainderOffset)) : ""
+
     // 删除音节
     var prePinypin = preedit.replacingOccurrences(of: " ", with: "")
     guard !prePinypin.isEmpty else { return pinyinList }
@@ -2136,6 +2152,21 @@ public extension RimeContext {
         break
       }
       prePinypin.removeFirst()
+    }
+
+    // (2026-11-27 拼音栏变空) preedit 可能已变成全字母 (设备上点选后
+    // preedit 显示读音而非数字码, 如 pg/co/w/.../zh), 这时上面剥出来
+    // 的数字串是空的。用剩余输入码 (原始输入, 未固定音节仍是数字)
+    // 推导数字串, 不要只认 preedit。
+    if prePinypin.isEmpty {
+      var digitKeys = remainderKeys
+      while !digitKeys.isEmpty {
+        if let first = digitKeys.first, first.isNumber {
+          break
+        }
+        digitKeys.removeFirst()
+      }
+      prePinypin = digitKeys
     }
 
     // 拼写区非数字情况，取最后一个音节的拼音列表
@@ -2158,6 +2189,27 @@ public extension RimeContext {
               pinyinList.append(contentsOf: list)
             }
             _ = firstT9Pinyin.popLast()
+          }
+        } else if !lastPinyin.isEmpty {
+          // 缩写 (如 zh) 不是整音节, 查不到码: 找所有以它开头的整音
+          // 节, 取它们 T9 码的最长公共前缀 (zh -> zha/zhe/zhi/zhu/…
+          // 的码都是 94 开头), 用这个前缀走 trie, 列出该前缀的拼音。
+          // 只在 preedit 与剩余输入码都已是全字母时才走到这里。
+          let abbrev = String(lastPinyin)
+          let codes = pinyinToT9Mapping.keys.filter { $0.hasPrefix(abbrev) }.compactMap { pinyinToT9Mapping[$0] }
+          if !codes.isEmpty {
+            var commonPrefix = codes[0]
+            for code in codes.dropFirst() {
+              commonPrefix = commonPrefix.commonPrefix(with: code)
+              if commonPrefix.isEmpty { break }
+            }
+            var prefixCode = commonPrefix
+            while !prefixCode.isEmpty {
+              if let list = t9ToPinyinMapping[prefixCode] {
+                pinyinList.append(contentsOf: list)
+              }
+              prefixCode = String(prefixCode.dropLast())
+            }
           }
         }
       }
@@ -2182,14 +2234,13 @@ public extension RimeContext {
 
     // 捕获边栏点选用快照 (#43): 列表是从当前 preedit 推导出来的, 这一刻
     // preedit 是已知好的; 点选时用这个快照, 不要在点选时刻重读可能已
-    // 失效的 preedit。只在列表非空时更新 (空列表时边栏显示默认符号,
-    // 不会有音节点选)。
-    if !pinyinList.isEmpty {
-      let offset = remainingInputOffset()
-      let fullKeys = Rime.shared.getInputKeys()
-      if offset <= fullKeys.count {
-        lastSidebarRemainder = (offset, String(fullKeys.dropFirst(offset)))
-      }
+    // 失效的 preedit。只在列表非空时更新: 空列表时不更新, 边栏组字中
+    // 途会保留上一次的列表 (不会悄悄回落到标点), 点选走快照校验,
+    // 失效会拒绝, 不会用过期快照乱换。
+    // (2026-11-27) 捕获上面推导列表用的同一份剩余输入, 列表与快照保
+    // 持一致: 列表必须能从这份剩余输入码推导出来。
+    if !pinyinList.isEmpty, remainderOffset <= fullKeys.count {
+      lastSidebarRemainder = (remainderOffset, remainderKeys)
     }
 
     return pinyinList.sorted(by: {
