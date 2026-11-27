@@ -247,6 +247,8 @@ public final class ClipboardSyncService {
       // 永远传不到电脑 (键盘里能看到内容, 但电脑收不到)。
       // cachedPasteboardText() 自带缓存: changeCount 未变时不读
       // UIPasteboard、不弹横幅, 所以定时器每秒调一次也不会弹横幅。
+      // 注: 2026-11-27 build #56 下载引擎时正撞上 fork 新引擎上传 (clobber),
+      // 404 失败, 重推一次 (与代码无关)。
       if let localText = Self.cachedPasteboardText(), !localText.isEmpty {
         if Self.sha256(localText) != lastHash {
           let result = upload(text: localText, to: endpointURL, username: username, password: password)
