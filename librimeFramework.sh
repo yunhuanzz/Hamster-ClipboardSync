@@ -12,6 +12,7 @@ OUTPUT="${PWD}/Frameworks"
 
 # 下载依赖的 librime framework
 # 注意：原上游 imfuxiao/LibrimeKit 已不可用（404），改用自己的 fork（v0.2.0-octagram，含 octagram 语言模型组件）
+# 引擎版本：v0.2.0-octagram 标签当前指向 LibrimeKit dc03015（Round 18 d1：缩写跳过移进图装载，9 键卡顿实验）
 LibrimeKitVersion="v0.2.0-octagram"
 mkdir -p $OUTPUT
 rm -rf $OUTPUT/*.xcframwork && (
