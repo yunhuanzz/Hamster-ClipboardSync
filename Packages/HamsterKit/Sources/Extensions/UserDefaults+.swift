@@ -444,6 +444,19 @@ public extension UserDefaults {
     set { set(newValue, forKey: Self.clipboardSyncLastHashKey) }
   }
 
+  /// 同步服务上次检查图片时的 UIPasteboard.changeCount (2026-11-27 修)。
+  /// 图片上传只在 changeCount 移动时才读图片 (读会弹横幅), 但不能用显示侧
+  /// 共享的 clipboardLastSeenChangeCount 判断——粘贴提示读剪贴板会先更新它,
+  /// 同步看到"没变"就跳过图片上传 (与文本上传同一根因)。
+  /// -1 表示从未检查过。
+  var clipboardSyncLastCheckedChangeCount: Int {
+    get {
+      guard object(forKey: Self.clipboardSyncLastCheckedChangeCountKey) != nil else { return -1 }
+      return integer(forKey: Self.clipboardSyncLastCheckedChangeCountKey)
+    }
+    set { set(newValue, forKey: Self.clipboardSyncLastCheckedChangeCountKey) }
+  }
+
   /// 最近一次同步结果, 如 "13:20 同步成功" / "13:20 上传失败(HTTP 405)"。
   /// 由 ClipboardSyncService 在每次同步结束时写入, 供剪贴板面板与设置页展示,
   /// 同步不再是"静默"的; 未同步过时为空字符串。
@@ -1195,6 +1208,7 @@ extension UserDefaults {
   private static let clipboardSyncPasswordKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncPassword"
   private static let clipboardSyncLastHashKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastHash"
   private static let clipboardSyncLastStatusTextKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastStatusText"
+  private static let clipboardSyncLastCheckedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardSyncLastCheckedChangeCount"
   private static let clipboardChipDismissedHashesKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedHashes"
   private static let clipboardChipDismissedChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardChipDismissedChangeCount"
   private static let clipboardLastSeenChangeCountKey = "com.ihsiao.apps.Hamster.UserDefault.keys.clipboardLastSeenChangeCount"

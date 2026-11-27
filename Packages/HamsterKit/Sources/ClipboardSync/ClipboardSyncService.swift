@@ -113,20 +113,6 @@ public final class ClipboardSyncService {
   /// 若上一次同步 (弱网时最多等 4 秒) 还没结束, 新的直接跳过, 不堆积。
   private var isSyncing = false
 
-  /// 服务最后一次读写剪贴板时的 changeCount。
-  /// (第 17 轮第 7 项) 之前只记在内存里 (nil 表示从未读写过), 键盘扩展进程
-  /// 每次弹出都可能重建, 内存记录一丢, 每次打开都以为"剪贴板变了"而重读,
-  /// iOS 便每次都在顶部弹"粘贴自 xxx"横幅。现持久化在共享 UserDefaults
-  /// (UserDefaults.hamster.clipboardLastSeenChangeCount) 里, 跨进程也有效;
-  /// -1 表示从未读写过 (首次同步一定读)。
-  /// 读剪贴板会弹横幅, 所以上传前先比 changeCount: 没变说明本机剪贴板还是
-  /// 上次同步过的内容, 直接跳过读取 (不弹横幅); 写回服务器内容后也更新它,
-  /// 避免下次误以为本机剪贴板变了而重读。
-  private var lastSeenPasteboardChangeCount: Int {
-    get { UserDefaults.hamster.clipboardLastSeenChangeCount }
-    set { UserDefaults.hamster.clipboardLastSeenChangeCount = newValue }
-  }
-
   #if canImport(UIKit)
     /// 读当前剪贴板文本的统一入口 (第 17 轮第 7 项, 供键盘内各处自动读取用)。
     /// changeCount 与持久化记录相同 → 返回上次读到的缓存文本, 不读
@@ -252,47 +238,55 @@ public final class ClipboardSyncService {
     var failureReason: String?
     var successNote: String?
     #if canImport(UIKit)
-      // 只有剪贴板真的变了 (changeCount 移动) 才读内容; 没变直接跳过读取,
-      // 否则定时器每 1 秒调一次就会每 1 秒弹一次横幅。
-      // changeCount 是个整数, 读它不弹横幅。
-      let currentChangeCount = UIPasteboard.general.changeCount
-      if currentChangeCount != lastSeenPasteboardChangeCount {
-        let localText = UIPasteboard.general.string
-        // 同步读到的文本一并存进持久化缓存 (第 17 轮第 7 项): 粘贴提示 /
-        // 粘贴键等处 changeCount 未变时直接用缓存, 不再重读、不弹横幅。
-        defaults.recordLastSeenPasteboard(changeCount: currentChangeCount, text: localText)
-        if let localText = localText, !localText.isEmpty {
-          if Self.sha256(localText) != lastHash {
-            let result = upload(text: localText, to: endpointURL, username: username, password: password)
-            if result.success {
-              defaults.clipboardSyncLastHash = Self.sha256(localText)
-            } else {
-              failureReason = failureReasonText(operation: "上传", result: result, passwordLength: password.count)
-            }
+      // 文本上传 (2026-11-27 修): 经统一门 cachedPasteboardText() 读剪贴板,
+      // 以内容哈希对上次同步哈希为准, 不再以 changeCount 为门。
+      // 根因: 显示侧 (粘贴提示 refreshClipboardChip, 键盘弹出时
+      // didMoveToWindow 同步调用) 读剪贴板会更新共享的
+      // clipboardLastSeenChangeCount; 上传若还以它为门, 键盘关闭时复制的
+      // 内容会被显示侧先"消费"掉, 同步看到 changeCount 没变就跳过上传,
+      // 永远传不到电脑 (键盘里能看到内容, 但电脑收不到)。
+      // cachedPasteboardText() 自带缓存: changeCount 未变时不读
+      // UIPasteboard、不弹横幅, 所以定时器每秒调一次也不会弹横幅。
+      if let localText = Self.cachedPasteboardText(), !localText.isEmpty {
+        if Self.sha256(localText) != lastHash {
+          let result = upload(text: localText, to: endpointURL, username: username, password: password)
+          if result.success {
+            defaults.clipboardSyncLastHash = Self.sha256(localText)
+          } else {
+            failureReason = failureReasonText(operation: "上传", result: result, passwordLength: password.count)
           }
-          // 剪贴板里有文本时只同步文本, 一次同步只传一项 (即使同时含图片也不再传图片)。
-        } else if let encoded = Self.localImageData() {
-          // 本机剪贴板没有文本, 但有图片: 按服务器图片格式上传 (先传文件, 再传元数据)。
-          if Self.sha256(encoded.data) != lastHash {
-            let fileName = Self.imageFileName(fileExtension: encoded.fileExtension)
-            let fileResult = uploadFile(
-              data: encoded.data, fileName: fileName, to: serverURL, username: username, password: password)
-            if !fileResult.success {
-              failureReason = failureReasonText(operation: "上传", result: fileResult, passwordLength: password.count)
-            } else {
-              let metaResult = uploadImageMetadata(
-                fileName: fileName, to: endpointURL, username: username, password: password)
-              if metaResult.success {
-                defaults.clipboardSyncLastHash = Self.sha256(encoded.data)
-                successNote = "图片已上传"
+        }
+        // 剪贴板里有文本时只同步文本, 一次同步只传一项 (即使同时含图片也不再传图片)。
+      } else {
+        // 无文本: 可能是图片。只在 changeCount 移动时才读图片 (读会弹横幅),
+        // 用同步自己的"上次检查 changeCount"判断, 不用显示侧共享的那一个
+        // (同样会被显示侧先"消费"掉, 图片也传不上去)。
+        let currentChangeCount = UIPasteboard.general.changeCount
+        if currentChangeCount != defaults.clipboardSyncLastCheckedChangeCount {
+          defaults.clipboardSyncLastCheckedChangeCount = currentChangeCount
+          if let encoded = Self.localImageData() {
+            // 本机剪贴板没有文本, 但有图片: 按服务器图片格式上传 (先传文件, 再传元数据)。
+            if Self.sha256(encoded.data) != lastHash {
+              let fileName = Self.imageFileName(fileExtension: encoded.fileExtension)
+              let fileResult = uploadFile(
+                data: encoded.data, fileName: fileName, to: serverURL, username: username, password: password)
+              if !fileResult.success {
+                failureReason = failureReasonText(operation: "上传", result: fileResult, passwordLength: password.count)
               } else {
-                failureReason = failureReasonText(operation: "上传", result: metaResult, passwordLength: password.count)
+                let metaResult = uploadImageMetadata(
+                  fileName: fileName, to: endpointURL, username: username, password: password)
+                if metaResult.success {
+                  defaults.clipboardSyncLastHash = Self.sha256(encoded.data)
+                  successNote = "图片已上传"
+                } else {
+                  failureReason = failureReasonText(operation: "上传", result: metaResult, passwordLength: password.count)
+                }
               }
             }
+          } else if UIPasteboard.general.image != nil {
+            // 有图片, 但编码后仍超过上限 (或编码失败): 本次不同步, 也不反复重试。
+            failureReason = "图片过大,未上传"
           }
-        } else if UIPasteboard.general.image != nil {
-          // 有图片, 但编码后仍超过上限 (或编码失败): 本次不同步, 也不反复重试。
-          failureReason = "图片过大,未上传"
         }
       }
     #endif
