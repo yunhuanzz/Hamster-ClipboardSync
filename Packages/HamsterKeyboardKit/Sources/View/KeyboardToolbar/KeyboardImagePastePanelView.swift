@@ -6,7 +6,8 @@
 //  图标+文字的粘贴提示行; 没马上查看时提示行折成右侧临时图片图标;
 //  点图标/提示行打开本面板: 左上角返回箭头 (裸图标, 无白圆),
 //  中间是白色圆角卡片里的小图预览 (尺寸封顶, 不会撑满整个键盘),
-//  下面是提示文字, 底部是"复制到剪贴板"文字按钮。
+//  下面是"复制到剪贴板"文字按钮 (2026-11-28 用户: 删掉"长按输入框
+//  粘贴图片"提示, 复制按钮提上来)。
 //  点小图不做任何事 (2026-11-28 用户决定不要放大功能:
 //  键盘扩展画不出键盘外, 放大图只能框在键盘里, 不如不要)。
 //  由 KeyboardToolbarView 以覆盖层方式展示在键盘根视图上。
@@ -16,7 +17,7 @@ import HamsterKit
 import HamsterUIKit
 import UIKit
 
-/// "拷贝的图片"面板: 返回箭头 + 图片卡片 (小图预览) + 提示 + 复制按钮。
+/// "拷贝的图片"面板: 返回箭头 + 图片卡片 (小图预览) + 复制按钮。
 /// 点小图不做任何事 (放大功能已删除, 见文件头)。
 class KeyboardImagePastePanelView: NibLessView {
   /// 点"复制到剪贴板"时的回调, 由调用方把图片放进系统剪贴板并关闭面板。
@@ -79,17 +80,6 @@ class KeyboardImagePastePanelView: NibLessView {
   private var imageWidthConstraint: NSLayoutConstraint?
   private var imageHeightConstraint: NSLayoutConstraint?
 
-  /// 提示文字 (仿微信"可在关联设备粘贴"的灰字)。
-  private lazy var hintLabel: UILabel = {
-    let label = UILabel()
-    label.text = "长按输入框粘贴图片"
-    label.font = .systemFont(ofSize: 15)
-    label.textColor = .secondaryLabel
-    label.textAlignment = .center
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
-  }()
-
   /// 底部复制按钮: 文字按钮 (用户 2026-11-27: 不能直接发送就改成
   /// 复制到剪贴板, 直接改成文字)。点一下把图片放进系统剪贴板。
   private lazy var copyButton: UIButton = {
@@ -114,7 +104,6 @@ class KeyboardImagePastePanelView: NibLessView {
     addSubview(backButton)
     addSubview(cardView)
     cardView.addSubview(imageView)
-    addSubview(hintLabel)
     addSubview(copyButton)
   }
 
@@ -137,10 +126,7 @@ class KeyboardImagePastePanelView: NibLessView {
       imageWidthConstraint!,
       imageHeightConstraint!,
 
-      hintLabel.topAnchor.constraint(equalTo: cardView.bottomAnchor, constant: 10),
-      hintLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-
-      copyButton.topAnchor.constraint(equalTo: hintLabel.bottomAnchor, constant: 8),
+      copyButton.topAnchor.constraint(equalTo: cardView.bottomAnchor, constant: 10),
       copyButton.centerXAnchor.constraint(equalTo: centerXAnchor),
       copyButton.bottomAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.bottomAnchor, constant: -8),
     ])
