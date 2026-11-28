@@ -62,27 +62,15 @@
 //    复用不上, 会自动重建; 另外部署时还会删一次对应方案的 prism
 //    (见 RimeContext.deployment, 与 part-1 新补方案删 prism 同款
 //    双保险)。所以不要手动去删 table/prism, 也不用改 .schema.yaml。
-//  - 补丁写法复用第 5 轮 FuzzyPinyin 的 marker-block 做法:
+//  - 补丁写法用 marker-block 做法:
 //    只动 "# BEGIN/END hamster-layout-dictionary" 标记块,
 //    文件里已有 patch: 顶级键时挂在它下面 (不再另起一个 patch:,
 //    否则 YAML 重复键会丢内容); 绑回默认 (rime_ice) 时只删标记块,
 //    文件删到只剩空白就删文件。改完按开关重打的部署逻辑也在
 //    RimeContext.deployment()/syncRime()/restRime() 里,
 //    绑定存在共享 UserDefaults, 是事实来源, 文件丢了也能恢复。
-//  - 与模糊音块共存 (同一文件、同一个顶级 patch: 键下两个块):
-//    本块插入时插到 patch: 映射的末尾、模糊音块的 END 行之后,
-//    不插在 patch: 行正下方, 所以不会插进模糊音块里; 模糊音块
-//    是 full block 形态 (BEGIN 行在 patch: 行正上方、patch:
-//    被包在它标记里) 时, 插入前先把它改成 nested 形态 (BEGIN 行
-//    缩进 2 格挪到 patch: 下面), 否则本块仍落在它标记范围内。
-//    反方向只在"本块是 full block 且模糊音后打进来"时才会把
-//    模糊音块嵌进本块里, 那种情况只发生在用户先绑了词库、再去
-//    RIME 页开模糊音开关的瞬间, 且下次部署会自愈 (见
-//    removingDictionaryBlock 的注释)。
-//    删除本块时, 若块里嵌着模糊音块, 把它原样保留并还挂在
-//    patch: 下面, 绝不连模糊音块一起删。
-//    (模拟验证过: 两块以任意顺序打补丁/开关/绑回默认,
-//    YAML 始终合法, 且删一块不会带走另一块。)
+//  - 残留的模糊音块 (已删除的功能, 2026-11-28): 打补丁时会顺手
+//    删掉 (见 removingDictionaryBlock), 不再保留、不再共存。
 //
 
 import Foundation
@@ -145,7 +133,7 @@ public enum LayoutDictionary {
     "radical_pinyin": ("部首拼音", "部件反查, 码带声调 (如 heng2), 约 132k 条, 2026.06.18", false),
   ]
 
-  /// 补丁块的标记 (文件里只改这一段, 与模糊音块各管各的)。
+  /// 补丁块的标记 (文件里只改这一段)。
   static let beginMarker = "# BEGIN hamster-layout-dictionary (布局词库管理, 请勿手动改这段)"
   static let endMarker = "# END hamster-layout-dictionary"
 
@@ -194,7 +182,7 @@ public enum LayoutDictionary {
   }
 
   /// 改绑定: 存 UserDefaults + 立刻把补丁写进两个用户数据目录
-  /// (沙盒 + App Group, 与 FuzzyPinyin.apply 同款);
+  /// (沙盒 + App Group);
   /// 仍要点「重新部署」才生效, 部署时还会按绑定重打一次。
   public static func setBinding(_ dictionaryId: String, for layout: Layout) {
     switch layout {
@@ -456,7 +444,7 @@ public enum LayoutDictionary {
     return sawProbeSyllable && Double(pinyinLike) / Double(checked) >= 0.8
   }
 
-  // MARK: - 打补丁 (与 FuzzyPinyin 同款 marker-block 写法)
+  // MARK: - 打补丁 (marker-block 写法)
 
   /// 按当前绑定把补丁打进两个用户数据目录 (沙盒 + App Group)。
   /// 绑默认时只删本块 (不写 translator/dictionary, 走方案自带的);
@@ -500,14 +488,10 @@ public enum LayoutDictionary {
   }
 
   /// 删掉本块 (BEGIN 行到 END 行, 含两行本身); 没有本块时原样返回。
-  /// 例外: 块里嵌着模糊音块时 (见文件头注释, 只发生在用户先绑词库、
-  /// 再去 RIME 页开模糊音开关的瞬间), 把模糊音块原样保留并还挂在
-  /// patch: 下面——本块是 full block 时 patch: 行在本块里, 要留一行
-  /// patch: 给它; 本块是 nested 时 patch: 行本来就在块外, 不用留。
-  /// 这样删词库绑定永远不会把模糊音补丁一起删掉; 下次部署时
-  /// FuzzyPinyin.apply 会先把模糊音块摘出来重打, 本块再按绑定重打,
-  /// 两块回到并排的正常形态 (自愈)。
+  /// 先删掉残留的模糊音块 (已删除的功能, 不再保留——没有新块会再
+  /// 产生, 残留块只会是旧版本留下的); 再删本块。
   static func removingDictionaryBlock(from content: String) -> String {
+    let content = FuzzyPinyinCleanup.removingStaleBlock(from: content)
     var lines = content.components(separatedBy: .newlines)
     guard let begin = lines.firstIndex(where: { $0.contains(beginMarker) }),
           let end = lines.firstIndex(where: { $0.contains(endMarker) }),
@@ -517,29 +501,15 @@ public enum LayoutDictionary {
       lines.remove(at: begin)
       return lines.joined(separator: "\n")
     }
-    let inner = Array(lines[(begin + 1)..<end])
-    var foreign: [String] = []
-    if let fuzzyBegin = inner.firstIndex(where: { $0.contains(FuzzyPinyin.beginMarker) }),
-       let fuzzyEnd = inner.firstIndex(where: { $0.contains(FuzzyPinyin.endMarker) }),
-       fuzzyBegin <= fuzzyEnd {
-      foreign = Array(inner[fuzzyBegin...fuzzyEnd])
-    }
-    if foreign.isEmpty {
-      lines.removeSubrange(begin...end)
-    } else {
-      let patchLineInside = inner.contains { $0 == "patch:" || $0.hasPrefix("patch: ") || $0.hasPrefix("patch:\t") }
-      let replacement = (patchLineInside ? ["patch:"] : []) + foreign
-      lines.replaceSubrange(begin...end, with: replacement)
-    }
+    lines.removeSubrange(begin...end)
     return lines.joined(separator: "\n")
   }
 
   /// 插入本块: 绑默认时不插 (调用方先调 removingDictionaryBlock 删过,
   /// 这里直接返回删完的内容); 否则文件里已有 patch: 顶级键时挂在
-  /// patch: 映射的末尾、模糊音块的 END 行之后, 两块是 patch: 下面的
-  /// 兄弟关系, 互不嵌套; 模糊音块是 full block 形态 (BEGIN 行在
-  /// patch: 行正上方) 时先把它改成 nested 形态再插 (见函数内注释)。
+  /// patch: 映射的末尾 (最后一个缩进行之后)。
   /// 没有 patch: 键时在文件末尾追加完整的 patch: 块。
+  /// (残留的模糊音块已在 removingDictionaryBlock 里删掉, 这里不再处理。)
   static func insertingDictionaryBlock(into content: String, dictionaryId: String) -> String {
     guard dictionaryId != defaultDictionaryId else { return content }
     if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -547,35 +517,11 @@ public enum LayoutDictionary {
     }
     var lines = content.components(separatedBy: .newlines)
     // 顶级 patch: 键 (行首无缩进; 带行内注释的也算, flow 写法除外, 这里不会出现)。
-    if var patchIndex = lines.firstIndex(where: { $0 == "patch:" || $0.hasPrefix("patch: ") || $0.hasPrefix("patch:\t") }) {
-      // 模糊音块是 full block 形态时 (它的 BEGIN 行在 patch: 行正上方,
-      // patch: 被包在它的标记里), 先把它改成 nested 形态
-      // (BEGIN 行缩进 2 格挪到 patch: 下面, END 行若在行首也缩进
-      // 2 格): 否则本块插到它 END 行之后仍在它标记范围内,
-      // 下次关模糊音会连本块一起删掉。
-      // 只挪注释行, 模糊音内容与标记本身不动; FuzzyPinyin
-      // 按 contains() 找标记, 缩进不影响它, 下次它重打时也会
-      // 按自己的写法恢复成 nested 块。
-      if patchIndex > 0, lines[patchIndex - 1].contains(FuzzyPinyin.beginMarker) {
-        lines.remove(at: patchIndex - 1)
-        patchIndex -= 1
-        lines.insert("  " + FuzzyPinyin.beginMarker, at: patchIndex + 1)
-        if let fuzzyEnd = lines.firstIndex(where: { $0.contains(FuzzyPinyin.endMarker) }),
-           !lines[fuzzyEnd].hasPrefix(" "), !lines[fuzzyEnd].hasPrefix("\t") {
-          lines[fuzzyEnd] = "  " + lines[fuzzyEnd]
-        }
-      }
-      // 插到 patch: 映射的末尾: 最后一个缩进行之后, 但不能越过
-      // 模糊音块的 END 行——END 行本身也是缩进的, 越过它就插进了
-      // 模糊音块的标记范围里 (关模糊音会连本块一起删); 停在
-      // END 行之后一位, 两块就是 patch: 下面的兄弟关系。
-      // END 行即使因手写文件在行首, 也要越过它再停 (它只是注释行)。
+    if let patchIndex = lines.firstIndex(where: { $0 == "patch:" || $0.hasPrefix("patch: ") || $0.hasPrefix("patch:\t") }) {
+      // 插到 patch: 映射的末尾: 最后一个缩进行之后; 碰到行首的
+      // 非空行 (下一个顶级键) 就停。
       var insertAt = patchIndex + 1
       while insertAt < lines.count {
-        if lines[insertAt].contains(FuzzyPinyin.endMarker) {
-          insertAt += 1
-          break
-        }
         if lines[insertAt].isEmpty || lines[insertAt].hasPrefix(" ") || lines[insertAt].hasPrefix("\t") {
           insertAt += 1
         } else {

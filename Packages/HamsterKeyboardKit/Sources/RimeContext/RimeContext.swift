@@ -415,8 +415,8 @@ public extension RimeContext {
       throw error
     }
 
-    // 模糊音补丁文件 (rime_ice.custom.yaml / t9.custom.yaml) 永远保留,
-    // 不受 overrideDictFiles 影响 (不然开关一开、下次部署就把补丁丢了)。
+    // 补丁文件 (rime_ice.custom.yaml / t9.custom.yaml) 永远保留,
+    // 不受 overrideDictFiles 影响 (不然下次部署就把补丁丢了)。
     do {
       try FileManager.copyAppGroupUserDict(["rime_ice[.]custom[.]yaml$", "t9[.]custom[.]yaml$"])
     } catch {
@@ -441,16 +441,18 @@ public extension RimeContext {
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxSharedSupportDirectory)
     try FileManager.createDirectory(override: false, dst: FileManager.sandboxUserDataDirectory)
 
-    // 模糊音: 按开关把补丁打进用户数据目录 (文件丢了也能在这里恢复;
-    // 开关关着时这里会把补丁去掉)。失败不阻断部署, 只记日志, 下次部署再试。
+    // 模糊音已删除 (2026-11-28): 只做一次性清理, 删掉设备上残留的
+    // 模糊音标记块 (rime_ice.custom.yaml / t9.custom.yaml, 沙盒 +
+    // App Group)。失败不阻断部署, 只记日志, 下次部署再试。
     do {
-      try FuzzyPinyin.apply(enabled: UserDefaults.hamster.fuzzyPinyinEnabled)
+      try FuzzyPinyinCleanup.removeFromUserData()
     } catch {
-      Logger.statistics.error("RIME deploy fuzzy pinyin patch error \(error.localizedDescription)")
+      Logger.statistics.error("RIME deploy fuzzy pinyin cleanup error \(error.localizedDescription)")
     }
 
     // 每布局词库 (第 10 轮第 7 条): 按绑定把 translator/dictionary
-    // 补丁打进 rime_ice.custom.yaml / t9.custom.yaml (理由同模糊音)。
+    // 补丁打进 rime_ice.custom.yaml / t9.custom.yaml (部署时重打,
+    // 文件丢了也能恢复)。
     // 绑定变了就删对应方案的 prism, 强制重建——librime 的
     // dict_file_checksum 本来也会因词库文件集变化而触发重建,
     // 这里是双保险, 与下面新补方案删 prism 的做法一致;
@@ -516,7 +518,7 @@ public extension RimeContext {
     }
 
     // 本地语言模型 (第 15 轮第 1 项): 把 grammar 补丁打进 rime_ice.custom.yaml /
-    // t9.custom.yaml (常开, 两边都写; 理由同模糊音)。
+    // t9.custom.yaml (常开, 两边都写; 部署时重打, 文件丢了也能恢复)。
     // 失败不阻断部署, 只记日志, 下次部署再试。
     do {
       try LanguageModel.apply()
@@ -705,7 +707,7 @@ public extension RimeContext {
       throw error
     }
 
-    // 模糊音补丁文件 (rime_ice.custom.yaml / t9.custom.yaml) 永远保留,
+    // 补丁文件 (rime_ice.custom.yaml / t9.custom.yaml) 永远保留,
     // 不受 overrideDictFiles 影响。
     do {
       try FileManager.copyAppGroupUserDict(["rime_ice[.]custom[.]yaml$", "t9[.]custom[.]yaml$"])
@@ -727,15 +729,15 @@ public extension RimeContext {
       }
     }
 
-    // 模糊音: 按开关把补丁打进用户数据目录 (理由同 deployment)。
-    // 失败不阻断同步, 只记日志, 下次部署再试。
+    // 模糊音已删除 (2026-11-28): 只做一次性清理, 删掉残留的模糊音
+    // 标记块 (理由同 deployment)。失败不阻断同步, 只记日志, 下次部署再试。
     do {
-      try FuzzyPinyin.apply(enabled: UserDefaults.hamster.fuzzyPinyinEnabled)
+      try FuzzyPinyinCleanup.removeFromUserData()
     } catch {
-      Logger.statistics.error("RIME sync fuzzy pinyin patch error \(error.localizedDescription)")
+      Logger.statistics.error("RIME sync fuzzy pinyin cleanup error \(error.localizedDescription)")
     }
 
-    // 每布局词库 (第 10 轮第 7 条): 按绑定重打补丁 (理由同模糊音)。
+    // 每布局词库 (第 10 轮第 7 条): 按绑定重打补丁 (部署时重打)。
     // 同步本身不编译词库, 换词库仍要点「重新部署」才生效。
     do {
       try LayoutDictionary.apply()
@@ -863,13 +865,13 @@ public extension RimeContext {
     // 键盘重新同步文件标志
     UserDefaults.hamster.overrideRimeDirectory = true
 
-    // 模糊音: 重置清空了沙盒用户数据目录, 按开关把补丁打回来,
-    // 否则下面沙盒 -> App Group 的同步会把 App Group 里的补丁也删掉。
+    // 模糊音已删除 (2026-11-28): 重置清空了沙盒用户数据目录,
+    // 这里顺手删掉 App Group 里残留的模糊音标记块, 免得它残留下来。
     // (重置本身是有意的: 用户词典学习成果这次会被清空, 从下次部署起重新学习。)
     do {
-      try FuzzyPinyin.apply(enabled: UserDefaults.hamster.fuzzyPinyinEnabled)
+      try FuzzyPinyinCleanup.removeFromUserData()
     } catch {
-      Logger.statistics.error("RIME reset fuzzy pinyin patch error \(error.localizedDescription)")
+      Logger.statistics.error("RIME reset fuzzy pinyin cleanup error \(error.localizedDescription)")
     }
 
     // 每布局词库 (第 10 轮第 7 条): 重置清空了沙盒用户数据目录,

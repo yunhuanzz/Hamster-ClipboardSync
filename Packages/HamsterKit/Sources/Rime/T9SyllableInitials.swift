@@ -50,19 +50,18 @@
 //    shen->sh (什: 什么), qing->q (情: 事情), qin->q (亲: 亲亲),
 //    zhi->zh (知: 知道),
 //    kan->k (看: 看看), la->l (啦: 啦啦), ku->k (哭: 哭哭)。
-//  其中 shi->sh、chi->ch 在模糊音开着时是冗余的 (“shi”能经模糊规则
-//  derive 成“si”, “chi”能成“ci”, 都是普通类型, 74 是 #1、24 吃 #7
-//  本来就成立); 留着它们是让缩写不依赖模糊音开关——实测模糊音全关
-//  时 74 是、24 吃仍成立, 4263 好的、9434 这个、64426 你好也都成立。
+//  其中 shi->sh、chi->ch 是让缩写不依赖模糊音规则 (模糊音功能
+//  已删除, 2026-11-28; 之前模糊音开着时这两条是冗余的——“shi”能
+//  经模糊规则 derive 成“si”, “chi”能成“ci”); 实测 74 是、24 吃
+//  成立, 4263 好的、9434 这个、64426 你好也都成立。
 //
-//  序号: 沿用模糊音块的 @before 标量写法 (第 11 轮实测结论, 列表写法
-//  会清空整个 algebra), 从 12 开始排 (模糊音占 00..11), 保证两边都
-//  插在方案自带规则之前、数字映射规则之前: 模糊音先在字母拼写上派生,
-//  再由本块给出首字母形式, 最后数字映射规则把字母拼写转成数字码。
-//  模糊音关掉时本块序号仍有效: @before 12..87 落在自带规则
-//  [iu]a 之后、数字映射之前, 顺序不变。
+//  序号: 沿用 @before 标量写法 (第 11 轮实测结论, 列表写法
+//  会清空整个 algebra), 从 12 开始排 (历史编号, 保持不变),
+//  保证本块插在数字映射规则之前: 本块先给出首字母形式,
+//  最后数字映射规则把字母拼写转成数字码。
+//  @before 12..87 落在自带规则 [iu]a 之后、数字映射之前, 顺序不变。
 //  只写 t9.custom.yaml (26 键 "haod" 本来就能出“好的”, 不需要)。
-//  常开, 不跟模糊音开关走。
+//  常开。
 //
 //  活验证 (librime 1.8.5 真实 deployer + 驱动, 干净无学习词库):
 //  改前 4263 的“好的”在 200 候选里 NOT FOUND, 单 3 的“的”在 43 候选里
@@ -140,7 +139,7 @@
 //  5/7/8 号键造了首条正常路径后, 所有 2 位输入都有了正常路径,
 //  中间音节只剩缩写读法的词全被剪掉; 闭包要补 181 个首音节。
 //  逐音节补不下去: @before 序号是 2 位零填充、按字典序应用,
-//  总条目 (模糊音 12 + 本块) 必须 ≤100, 否则 3 位序号打乱顺序
+//  总条目 (本块 76) 必须 ≤100, 否则 3 位序号打乱顺序
 //  (ConfigList::Insert 在序号超长时还会补 null 项)。
 //  试过 1 条全通用规则 derive/^([a-z]).+$/$1/ (全部音节取首字母):
 //  600 个词全回来 (北京 25 #1、不能 #3、很快 #20、事情 77 #13),
@@ -175,12 +174,11 @@
 //  (深度问题, 不是机制问题); 名字不值得逐个补位, 接受残留。
 //
 //  补丁写法复用第 5/10 轮的 marker-block 做法: 只动
-//  "# BEGIN/END hamster-t9-syllable-initials" 标记块, 与模糊音块、
-//  词库块共存于同一个顶级 patch: 键下 (三块是兄弟关系, 互不嵌套)。
-//  插入点取 patch: 映射的末尾 (模糊音块、词库块的 END 行之后),
-//  模糊音块是 full block 形态时先把它改成 nested 形态
-//  (与 LayoutDictionary.insertingDictionaryBlock 同款处理)。
-//  删除本块时若块里嵌着别人的块, 原样保留 (防御性, 正常流程不会发生)。
+//  "# BEGIN/END hamster-t9-syllable-initials" 标记块, 与词库块
+//  共存于同一个顶级 patch: 键下 (两块是兄弟关系, 互不嵌套)。
+//  插入点取 patch: 映射的末尾 (词库块的 END 行之后)。
+//  删除本块时若块里嵌着词库块, 原样保留 (防御性, 正常流程不会发生)。
+//  残留的模糊音块 (已删除的功能) 在 removingBlock 里顺手删掉。
 //  改完需要点「重新部署」才生效 (librime 要重新编译方案)。
 //  部署/同步/重置时 RimeContext 会重打一次, 文件丢了也能恢复。
 //
@@ -194,7 +192,7 @@ public enum T9SyllableInitials {
   /// syllabifier 的缩写清理剪掉)。顺序即 @before 序号顺序。
   /// 第 13/17 轮的 14 条已并入下面的结构 (见 (a)(b)); 本块共 76 条,
   /// @before 12..87。
-  /// 顺序即 @before 序号顺序 (12..87; 模糊音块占 00..11, 见文件头)。
+  /// 顺序即 @before 序号顺序 (12..87, 见文件头)。
   /// 结构 (第 3 项终版, 见文件头“2026-11-26 扩展”后的
   /// “同日精炼”一段): 1 条通用规则 (≥3 字母音节取首字母) + 75 条定向规则。
   /// 通用规则覆盖全部 ≥3 字母音节 (含 zh/ch/sh 的 1 字母读法
@@ -209,7 +207,7 @@ public enum T9SyllableInitials {
   /// (方法 502196 > 好的 500784, 全通用规则实测已验证);
   /// 罚款 (fa kuan, 35) 因此仍不出, 代价 1 个词, 换 4263 #1。
   /// 另注意: @before 序号是 2 位零填充、按字典序应用, 总条目
-  /// (模糊音 12 + 本块 67 = 79) 必须 ≤100, 否则 3 位序号会打乱顺序
+  /// (本块 76) 必须 ≤100, 否则 3 位序号会打乱顺序
   /// (ConfigList::Insert 在序号超长时会补 null 项, 见
   /// librime config_data.cc); 所以覆盖面不能再靠逐音节加规则——
   /// 通用规则就是为此存在的。
@@ -323,10 +321,14 @@ public enum T9SyllableInitials {
     "derive/^lu$/n/", // 路: 路口/路径 (经 nu)
   ]
 
-  /// @before 序号从 12 起 (模糊音块占 00..11), 零填充到两位,
+  /// @before 序号从 12 起, 零填充到两位,
   /// 保证 ConfigMap 按字母序应用时顺序是 12..87 (共 76 条)。
+  /// 序号保持 12 起 (历史编号, 不要改): 12 条基础拼写规则之后、
+  /// 8 条数字映射规则之前, 首字母派生仍在数字映射之前生效;
+  /// derive 规则是加法 (原拼写保留), 所以排在基础拼写规则
+  /// 之后也不影响锚定的首字母规则。
   /// 每行值是单个规则字符串 (标量), 绝不能写成列表
-  /// (见 FuzzyPinyin.swift 文件头: 列表会被 SetAt 原样塞进
+  /// (若写成 @before 0: + 列表, 列表会被 SetAt 原样塞进
   /// algebra[0], 导致整个 projection 被清空)。
   static var algebraPatchLines: [String] {
     rules.enumerated().map { index, rule in
@@ -353,8 +355,8 @@ public enum T9SyllableInitials {
       .joined(separator: "\n")
   }
 
-  /// 把补丁打进两个用户数据目录 (沙盒 + App Group, 与
-  /// FuzzyPinyin.apply 同款); 失败由调用方记日志、不阻断部署。
+  /// 把补丁打进两个用户数据目录 (沙盒 + App Group);
+  /// 失败由调用方记日志、不阻断部署。
   public static func apply() throws {
     for dir in [FileManager.sandboxUserDataDirectory, FileManager.appGroupUserDataDirectoryURL] {
       try FileManager.createDirectory(override: false, dst: dir)
@@ -378,11 +380,13 @@ public enum T9SyllableInitials {
   }
 
   /// 删掉本块 (BEGIN 行到 END 行, 含两行本身); 没有本块时原样返回。
-  /// 例外: 块里嵌着别人的块 (模糊音/词库) 时原样保留并还挂在
-  /// patch: 下面——本块是 full block 时 patch: 行在本块里, 要留一行
-  /// patch: 给它; 本块是 nested 时 patch: 行本来就在块外, 不用留。
+  /// 先删掉残留的模糊音块 (已删除的功能, 不再保留)。
+  /// 例外: 块里嵌着词库块时原样保留并还挂在 patch: 下面——本块是
+  /// full block 时 patch: 行在本块里, 要留一行 patch: 给它;
+  /// 本块是 nested 时 patch: 行本来就在块外, 不用留。
   /// (防御性: 正常流程里别的块不会嵌进本块, 见 insertingBlock。)
   static func removingBlock(from content: String) -> String {
+    let content = FuzzyPinyinCleanup.removingStaleBlock(from: content)
     var lines = content.components(separatedBy: .newlines)
     guard let begin = lines.firstIndex(where: { $0.contains(beginMarker) }),
           let end = lines.firstIndex(where: { $0.contains(endMarker) }),
@@ -394,15 +398,10 @@ public enum T9SyllableInitials {
     }
     let inner = Array(lines[(begin + 1)..<end])
     var foreign: [String] = []
-    for (foreignBeginMarker, foreignEndMarker) in [
-      (FuzzyPinyin.beginMarker, FuzzyPinyin.endMarker),
-      (LayoutDictionary.beginMarker, LayoutDictionary.endMarker),
-    ] {
-      if let foreignBegin = inner.firstIndex(where: { $0.contains(foreignBeginMarker) }),
-         let foreignEnd = inner.firstIndex(where: { $0.contains(foreignEndMarker) }),
-         foreignBegin <= foreignEnd {
-        foreign += Array(inner[foreignBegin...foreignEnd])
-      }
+    if let foreignBegin = inner.firstIndex(where: { $0.contains(LayoutDictionary.beginMarker) }),
+       let foreignEnd = inner.firstIndex(where: { $0.contains(LayoutDictionary.endMarker) }),
+       foreignBegin <= foreignEnd {
+      foreign = Array(inner[foreignBegin...foreignEnd])
     }
     if foreign.isEmpty {
       lines.removeSubrange(begin...end)
@@ -415,40 +414,23 @@ public enum T9SyllableInitials {
   }
 
   /// 插入本块: 文件里已有 patch: 顶级键时挂在 patch: 映射的末尾
-  /// (模糊音块、词库块的 END 行之后), 三块是 patch: 下面的兄弟关系,
-  /// 互不嵌套; 模糊音块是 full block 形态 (BEGIN 行在 patch: 行正上方)
-  /// 时先把它改成 nested 形态再插 (与 LayoutDictionary 同款处理,
-  /// 否则本块插到它 END 行之后仍在它标记范围内,
-  /// 下次关模糊音会连本块一起删掉)。
+  /// (词库块的 END 行之后), 两块是 patch: 下面的兄弟关系,
+  /// 互不嵌套。
   /// 没有 patch: 键时在文件末尾追加完整的 patch: 块。
+  /// (残留的模糊音块已在 removingBlock 里删掉, 这里不再处理。)
   static func insertingBlock(into content: String) -> String {
     if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return fullBlock + "\n"
     }
     var lines = content.components(separatedBy: .newlines)
     // 顶级 patch: 键 (行首无缩进; 带行内注释的也算, flow 写法除外, 这里不会出现)。
-    if var patchIndex = lines.firstIndex(where: { $0 == "patch:" || $0.hasPrefix("patch: ") || $0.hasPrefix("patch:\t") }) {
-      // 模糊音块是 full block 形态时先改成 nested 形态
-      // (BEGIN 行缩进 2 格挪到 patch: 下面, END 行若在行首也缩进
-      // 2 格): 只挪注释行, 模糊音内容与标记本身不动; FuzzyPinyin
-      // 按 contains() 找标记, 缩进不影响它, 下次它重打时也会
-      // 按自己的写法恢复成 nested 块。
-      if patchIndex > 0, lines[patchIndex - 1].contains(FuzzyPinyin.beginMarker) {
-        lines.remove(at: patchIndex - 1)
-        patchIndex -= 1
-        lines.insert("  " + FuzzyPinyin.beginMarker, at: patchIndex + 1)
-        if let fuzzyEnd = lines.firstIndex(where: { $0.contains(FuzzyPinyin.endMarker) }),
-           !lines[fuzzyEnd].hasPrefix(" "), !lines[fuzzyEnd].hasPrefix("\t") {
-          lines[fuzzyEnd] = "  " + lines[fuzzyEnd]
-        }
-      }
+    if let patchIndex = lines.firstIndex(where: { $0 == "patch:" || $0.hasPrefix("patch: ") || $0.hasPrefix("patch:\t") }) {
       // 插到 patch: 映射的末尾: 最后一个缩进行之后; 已知的块 END 行
       // 即使因手写文件在行首, 也要越过它再停 (它只是注释行),
       // 否则会插进那个块的标记范围里。
       var insertAt = patchIndex + 1
       while insertAt < lines.count {
-        if lines[insertAt].contains(FuzzyPinyin.endMarker)
-            || lines[insertAt].contains(LayoutDictionary.endMarker) {
+        if lines[insertAt].contains(LayoutDictionary.endMarker) {
           insertAt += 1
           continue
         }

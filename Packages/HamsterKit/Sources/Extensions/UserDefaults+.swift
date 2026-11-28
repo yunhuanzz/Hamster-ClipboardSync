@@ -218,22 +218,6 @@ public extension UserDefaults {
     }
   }
 
-  /// 模糊音开关 (默认开): 开启后, 拼音输入时 zh/z、ch/c、sh/s、n/l、
-  /// h/f、an/ang、en/eng、in/ing 可互相混输 (福建用户常见混淆)。
-  /// 未设置过 (老用户首次升级) 视为开, 与默认值一致。
-  var fuzzyPinyinEnabled: Bool {
-    get {
-      if object(forKey: Self.fuzzyPinyinEnabledKey) != nil {
-        return bool(forKey: Self.fuzzyPinyinEnabledKey)
-      }
-      return true
-    }
-    set {
-      set(newValue, forKey: Self.fuzzyPinyinEnabledKey)
-      Logger.statistics.debug("save fuzzyPinyinEnabled: \(newValue)")
-    }
-  }
-
   /// 每布局词库绑定 (第 10 轮第 7 条): App 设置 -> 键盘布局里给
   /// 26 键 (rime_ice) / 9 键 (t9) 各选一个词库, 存的是 patch 值
   /// (用户数据目录下的相对路径去 ".dict.yaml", 如 "rime_ice"、
@@ -1212,7 +1196,6 @@ extension UserDefaults {
 
   public static let isFirstRunningOfKey = "com.ihsiao.apps.Hamster.UserDefaults.isFirstRunning"
   private static let overrideRimeDirectoryOfKey = "com.ihsiao.apps.Hamster.UserDefaults.overrideRimeDirectory"
-  private static let fuzzyPinyinEnabledKey = "com.ihsiao.apps.Hamster.UserDefault.keys.fuzzyPinyinEnabled"
   private static let layoutDictionaryRimeIceKey = "com.ihsiao.apps.Hamster.UserDefault.keys.layoutDictionaryRimeIce"
   private static let layoutDictionaryT9Key = "com.ihsiao.apps.Hamster.UserDefault.keys.layoutDictionaryT9"
   private static let deployedLayoutDictionaryRimeIceKey = "com.ihsiao.apps.Hamster.UserDefault.keys.deployedLayoutDictionaryRimeIce"
