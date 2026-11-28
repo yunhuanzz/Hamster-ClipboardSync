@@ -1309,8 +1309,13 @@ public extension RimeContext {
       onFlushCommittedTextBeforeSidebarReplace?(committedPrefix)
     }
     reset()  // 清掉组字与 selectCandidatePinyin; 已选的词上面已落盘
-    for key in newRemaining {
-      _ = Rime.shared.inputKey(String(key))
+    // (Round 18c) 一次性替换: 新 API 一次设进整串输入、只跑一次翻译,
+    // 不再逐键重敲 (9 键 10 音节 rig 4030ms -> 360ms)。
+    // 不可用时 (旧框架) 回退到逐键重敲, 行为与原来一致。
+    if !Rime.shared.replaceInput(newRemaining) {
+      for key in newRemaining {
+        _ = Rime.shared.inputKey(String(key))
+      }
     }
     self.selectCandidatePinyin = (text, startPos, count)  // 剩余输入内的相对坐标, reset 之后再记
     self.syncContext()

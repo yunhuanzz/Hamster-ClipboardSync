@@ -157,6 +157,12 @@ public class Rime {
     return rimeAPI.replaceInputKeys(inputKeys, withStartPos: Int32(startPos), andCount: Int32(count), andSession: session)
   }
 
+  /// 一次性替换整段输入并只跑一次翻译 (fork round 18c, RimeReplaceInput)。
+  /// 旧框架没有这个 API 时返回 false，调用方回退到逐键重敲。
+  public func replaceInput(_ input: String) -> Bool {
+    return rimeAPI.replaceInput(input, andSession: session)
+  }
+
   public func candidateList() -> [CandidateWord] {
     let candidates = rimeAPI.getCandidateList(session)
     if candidates != nil {

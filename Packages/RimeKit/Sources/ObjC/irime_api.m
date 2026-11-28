@@ -417,9 +417,11 @@ static RimeLeversApi *get_levers() {
 }
 
 - (BOOL)replaceInputKeys:(NSString *)keys withStartPos:(int)pos AndCount:(int)length AndSession:(RimeSessionId)session {
-  // NOTE: RimeReplaceInput does not exist in the bundled librime
-  // (amorphobia/LibrimeKit v0.1.0, librime from 2023). Reimplement it with
-  // get_input + clear composition + retype the modified input.
+  // NOTE: this is span replacement (pos/count), not the fork's
+  // RimeReplaceInput(session, input) (round 18c), which replaces the
+  // WHOLE input in one shot — it cannot do a span. So this method
+  // still reimplements span replacement with get_input + clear
+  // composition + retype the modified input.
   const char *current = rime_get_api()->get_input(session);
   if (!current) return NO;
   NSString *currentInput = @(current);
@@ -434,6 +436,22 @@ static RimeLeversApi *get_levers() {
                         [currentInput substringFromIndex:(NSUInteger)(pos + length)]];
   RimeClearComposition(session);
   return RimeSimulateKeySequence(session, [newInput UTF8String]);
+}
+
+- (BOOL)replaceInput:(NSString *)input andSession:(RimeSessionId)session {
+  // (Round 18c) fork one-shot span replacement: RimeReplaceInput
+  // discards the composition, sets the whole input and translates
+  // once, instead of re-typing key by key (9-key tap lag fix).
+  // The vendored rime_api.h struct now matches the fork (librime
+  // 1.8.5 + octagram patches): replace_input is the last member.
+  // Guard like delete_candidate: on an older framework without
+  // the member, return NO and let the Swift caller fall back to
+  // re-typing (behavior unchanged).
+  RimeApi *api = rime_get_api();
+  if (!RIME_API_AVAILABLE(api, replace_input)) {
+    return NO;
+  }
+  return api->replace_input(session, [input UTF8String]);
 }
 
 - (NSArray<IRimeCandidate *> *)getCandidateList:(RimeSessionId)session {

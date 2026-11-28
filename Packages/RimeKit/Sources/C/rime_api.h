@@ -387,7 +387,11 @@ RIME_API Bool RimeConfigUpdateSignature(RimeConfig* config, const char* signer);
 RIME_API Bool RimeSimulateKeySequence(RimeSessionId session_id,
                                       const char* key_sequence);
 
-RIME_API Bool RimeReplaceInput(RimeSessionId session_id, size_t pos, size_t count, const char* replace_char);
+// NOTE (fork, round 18c): this is NOT upstream's span-replace
+// RimeReplaceInput(session, pos, count, chars). The fork's
+// RimeReplaceInput(session, input) replaces the whole composition
+// input in one shot and translates once (9-key tap lag fix).
+RIME_API Bool RimeReplaceInput(RimeSessionId session_id, const char* input);
 // Module
 
 /*!
@@ -641,12 +645,19 @@ typedef struct rime_api_t {
   Bool (*delete_candidate_on_current_page)(RimeSessionId session_id,
                                            size_t index);
 
-  RimeStringSlice (*get_state_label_abbreviated)(RimeSessionId session_id,
-                                                 const char* option_name,
-                                                 Bool state,
-                                                 Bool abbreviated);
-  //! modify the current input
-  Bool (*replace_input)(RimeSessionId session_id, size_t pos, size_t count, const char* replace_char);
+  //! Replace the composition input in one shot and translate once.
+  /*!
+   *  See RimeReplaceInput(): discards the current composition, sets
+   *  the raw input, and runs a single translation pass, bypassing
+   *  the per-key processor pipeline. Added in fork (round 18c);
+   *  appended at the end of the struct to preserve ABI layout.
+   *  NOTE: the newer upstream header this file came from also had
+   *  get_state_label_abbreviated here, which the bundled librime
+   *  (1.8.5 + fork patches) does NOT have — it was removed so this
+   *  struct matches the framework exactly (irime_api.m already
+   *  documents get_state_label_abbreviated as absent: do not call).
+   */
+  Bool (*replace_input)(RimeSessionId session_id, const char* input);
 } RimeApi;
 
 //! API entry

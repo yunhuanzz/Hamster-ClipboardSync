@@ -56,6 +56,7 @@ typedef uintptr_t RimeSessionId;
 - (BOOL)processKey:(NSString *)keyCode andSession:(RimeSessionId)session;
 - (BOOL)processKeyCode:(int)code modifier:(int)modifier andSession:(RimeSessionId)session;
 - (BOOL)replaceInputKeys:(NSString *)keys withStartPos:(int)pos AndCount:(int)length AndSession:(RimeSessionId)session;
+- (BOOL)replaceInput:(NSString *)input andSession:(RimeSessionId)session;
 - (NSArray<IRimeCandidate *> *)getCandidateList:(RimeSessionId)session;
 - (NSArray<IRimeCandidate *> *)getCandidateWithIndex:(int)index
                                             andCount:(int)limit
